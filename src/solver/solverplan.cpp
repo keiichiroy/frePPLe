@@ -233,11 +233,17 @@ DECLARE_EXPORT void SolverMRP::writeElement(XMLOutput *o, const Keyword& tag, mo
   // Write the fields
   if (constrts != 15) o->writeElement(Tags::tag_constraints, constrts);
   if (plantype != 1) o->writeElement(Tags::tag_plantype, plantype);
-  if (iteration_threshold != 1.0)
-    o->writeElement(Tags::tag_iterationthreshold, iteration_threshold);
-  if (iteration_accuracy != 0.01)
-    o->writeElement(Tags::tag_iterationaccuracy, iteration_accuracy);
-  if (!autocommit) o->writeElement(Tags::tag_autocommit, autocommit);
+
+  // Parameters
+  stringstream out;
+  out << "<iterationthreshold>" << iteration_threshold << "</iterationthreshold>" << endl
+    << o->getIndent() << "<iterationaccuracy>" << iteration_accuracy << "</iterationaccuracy>" << endl
+    << o->getIndent() << "<lazydelay>" << lazydelay << "</lazydelay>";
+  o->writeString(out.str());
+  out.clear();
+  o->writeElement(Tags::tag_autocommit, autocommit);
+
+  // User exit
   if (userexit_flow)
     o->writeElement(Tags::tag_userexit_flow, static_cast<string>(userexit_flow));
   if (userexit_demand)
@@ -258,10 +264,6 @@ DECLARE_EXPORT void SolverMRP::endElement(XMLInput& pIn, const Attribute& pAttr,
 {
   if (pAttr.isA(Tags::tag_constraints))
     setConstraints(pElement.getInt());
-  else if (pAttr.isA(Tags::tag_iterationthreshold))
-    setIterationThreshold(pElement.getDouble());
-  else if (pAttr.isA(Tags::tag_iterationaccuracy))
-    setIterationAccuracy(pElement.getDouble());
   else if (pAttr.isA(Tags::tag_autocommit))
     setAutocommit(pElement.getBool());
   else if (pAttr.isA(Tags::tag_userexit_flow))
@@ -276,6 +278,14 @@ DECLARE_EXPORT void SolverMRP::endElement(XMLInput& pIn, const Attribute& pAttr,
     setUserExitOperation(pElement.getString());
   else if (pAttr.isA(Tags::tag_plantype))
     setPlanType(pElement.getInt());
+  // Less common parameters
+  else if (!strcmp(pAttr.getName(),"iterationthreshold"))
+    setIterationThreshold(pElement.getDouble());
+  else if (!strcmp(pAttr.getName(),"iterationaccuracy"))
+    setIterationAccuracy(pElement.getDouble());
+  else if (!strcmp(pAttr.getName(),"lazydelay"))
+    setLazyDelay(pElement.getTimeperiod());
+  // Default parameters
   else
     Solver::endElement(pIn, pAttr, pElement);
 }
@@ -285,10 +295,6 @@ DECLARE_EXPORT PyObject* SolverMRP::getattro(const Attribute& attr)
 {
   if (attr.isA(Tags::tag_constraints))
     return PythonObject(getConstraints());
-  if (attr.isA(Tags::tag_iterationthreshold))
-    return PythonObject(getIterationThreshold());
-  if (attr.isA(Tags::tag_iterationaccuracy))
-    return PythonObject(getIterationAccuracy());
   if (attr.isA(Tags::tag_autocommit))
     return PythonObject(getAutocommit());
   if (attr.isA(Tags::tag_userexit_flow))
@@ -303,6 +309,14 @@ DECLARE_EXPORT PyObject* SolverMRP::getattro(const Attribute& attr)
     return getUserExitOperation();
   if (attr.isA(Tags::tag_plantype))
     return PythonObject(getPlanType());
+  // Less common parameters
+  if (!strcmp(attr.getName(),"iterationthreshold"))
+    return PythonObject(getIterationThreshold());
+  if (!strcmp(attr.getName(),"iterationaccuracy"))
+    return PythonObject(getIterationAccuracy());
+  if (!strcmp(attr.getName(),"lazydelay"))
+    return PythonObject(getLazyDelay());
+  // Default parameters
   return Solver::getattro(attr);
 }
 
@@ -311,10 +325,6 @@ DECLARE_EXPORT int SolverMRP::setattro(const Attribute& attr, const PythonObject
 {
   if (attr.isA(Tags::tag_constraints))
     setConstraints(field.getInt());
-  else if (attr.isA(Tags::tag_iterationthreshold))
-    setIterationThreshold(field.getDouble());
-  else if (attr.isA(Tags::tag_iterationaccuracy))
-    setIterationAccuracy(field.getDouble());
   else if (attr.isA(Tags::tag_autocommit))
     setAutocommit(field.getBool());
   else if (attr.isA(Tags::tag_userexit_flow))
@@ -329,6 +339,14 @@ DECLARE_EXPORT int SolverMRP::setattro(const Attribute& attr, const PythonObject
     setUserExitOperation(field);
   else if (attr.isA(Tags::tag_plantype))
     setPlanType(field.getInt());
+  // Less common parameters
+  else if (!strcmp(attr.getName(),"iterationthreshold"))
+    setIterationThreshold(field.getDouble());
+  else if (!strcmp(attr.getName(),"iterationaccuracy"))
+    setIterationAccuracy(field.getDouble());
+  else if (!strcmp(attr.getName(),"lazydelay"))
+    setLazyDelay(field.getTimeperiod());
+  // Default parameters
   else
     return Solver::setattro(attr, field);
   return 0;
