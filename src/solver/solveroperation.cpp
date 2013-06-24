@@ -245,7 +245,8 @@ DECLARE_EXPORT bool SolverMRP::checkOperation
     isPlannedEarly = opplan->getDates().getEnd() < orig_dates.getEnd();
     
     if (matnext.getEnd() != Date::infiniteFuture && a_qty <= ROUNDING_ERROR
-      && matnext.getEnd() <= orig_q_date_max && matnext.getEnd() > orig_q_date)
+      && matnext.getEnd() <= orig_q_date_max && matnext.getEnd() > orig_q_date
+      && opplan->getOperation()->getType() != *OperationRouting::metadata)
     {
       // The reply is 0, but the next-date is still less than the maximum
       // ask date. In this case we will violate the post-operation -soft-
