@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2007-2012 by Johan De Taeye                               *
+ * Copyright (C) 2007-2015 by frePPLe bvba                                 *
  *                                                                         *
  * This library is free software; you can redistribute it and/or modify it *
  * under the terms of the GNU Affero General Public License as published   *
@@ -24,8 +24,8 @@
 LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 2,1,0,0
- PRODUCTVERSION 2,1,0,0
+ FILEVERSION 3,1,0,0
+ PRODUCTVERSION 3,1,0,0
  FILEFLAGSMASK 0x17L
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -42,14 +42,14 @@ BEGIN
     BEGIN
       VALUE "CompanyName", "frePPLe"
       VALUE "FileDescription",
-            "frePPLe Dynamic Link Library - Free Production Planning Library"
-      VALUE "FileVersion", "2, 1, 0, 0"
+            "frePPLe - open source Production PLanning"
+      VALUE "FileVersion", "3, 1, 0, 0"
       VALUE "InternalName", "frepple.dll"
       VALUE "LegalCopyright",
             "Licensed under AGPL - Affero General Public License"
       VALUE "OriginalFilename", "frepple.dll"
-      VALUE "ProductName", " frePPLe Dynamic Link Library"
-      VALUE "ProductVersion", "2, 1, 0, 0"
+      VALUE "ProductName", " frePPLe"
+      VALUE "ProductVersion", "3, 1, 0, 0"
     END
   END
   BLOCK "VarFileInfo"

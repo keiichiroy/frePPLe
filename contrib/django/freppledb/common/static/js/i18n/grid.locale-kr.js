@@ -1,26 +1,34 @@
-;(function($){
 /**
- * jqGrid English Translation
- * Tony Tomov tony@trirand.com
- * http://trirand.com/blog/ 
- * Dual licensed under the MIT and GPL licenses:
- * http://www.opensource.org/licenses/mit-license.php
- * http://www.gnu.org/licenses/gpl.html
+ * jqGrid Korean Translation
 **/
-$.jgrid = $.jgrid || {};
-$.extend($.jgrid,{
+
+/*jslint white: true */
+/*global jQuery */
+(function($){
+"use strict";
+var locInfo = {
+	isRTL: false,
 	defaults : {
 		recordtext: "보기 {0} - {1} / {2}",
 		emptyrecords: "표시할 행이 없습니다",
 		loadtext: "조회중...",
-		pgtext : "페이지 {0} / {1}"
+		pgtext : "페이지 {0} / {1}",
+		pgfirst : "First Page",
+		pglast : "Last Page",
+		pgnext : "Next Page",
+		pgprev : "Previous Page",
+		pgrecs : "Records per Page",
+		showhide: "Toggle Expand Collapse Grid",
+		savetext: "저장 중..."
 	},
 	search : {
 		caption: "검색...",
 		Find: "찾기",
 		Reset: "초기화",
-		odata: [{ oper:'eq', text:"같다"},{ oper:'ne', text:"같지 않다"},{ oper:'lt', text:"작다"},{ oper:'le', text:"작거나 같다"},{ oper:'gt', text:"크다"},{ oper:'ge', text:"크거나 같다"},{ oper:'bw', text:"로 시작한다"},{ oper:'bn', text:"로 시작하지 않는다"},{ oper:'in', text:"내에 있다"},{ oper:'ni', text:"내에 있지 않다"},{ oper:'ew', text:"로 끝난다"},{ oper:'en', text:"로 끝나지 않는다"},{ oper:'cn', text:"내에 존재한다"},{ oper:'nc', text:"내에 존재하지 않는다"}],
-		groupOps: [	{ op: "AND", text: "전부" },	{ op: "OR",  text: "임의" }	]
+		odata: [{ oper:'eq', text:"같다"},{ oper:'ne', text:"같지 않다"},{ oper:'lt', text:"작다"},{ oper:'le', text:"작거나 같다"},{ oper:'gt', text:"크다"},{ oper:'ge', text:"크거나 같다"},{ oper:'bw', text:"로 시작한다"},{ oper:'bn', text:"로 시작하지 않는다"},{ oper:'in', text:"내에 있다"},{ oper:'ni', text:"내에 있지 않다"},{ oper:'ew', text:"로 끝난다"},{ oper:'en', text:"로 끝나지 않는다"},{ oper:'cn', text:"내에 존재한다"},{ oper:'nc', text:"내에 존재하지 않는다"},{ oper:'nu', text:'is null'},{ oper:'nn', text:'is not null'}],
+		groupOps: [	{ op: "AND", text: "전부" },	{ op: "OR",  text: "임의" }	],
+		operandTitle : "Click to select search operation.",
+		resetTitle : "Reset Search Value"
 	},
 	edit : {
 		addCaption: "행 추가",
@@ -99,30 +107,35 @@ $.extend($.jgrid,{
 				"1월", "2월", "3월", "4월", "5월", "6월", "7월", "8월", "9월", "10월", "11월", "12월"
 			],
 			AmPm : ["am","pm","AM","PM"],
-			S: function (j) {return j < 11 || j > 13 ? ['st', 'nd', 'rd', 'th'][Math.min((j - 1) % 10, 3)] : 'th'},
+			S: function (j) {return j < 11 || j > 13 ? ['st', 'nd', 'rd', 'th'][Math.min((j - 1) % 10, 3)] : 'th';},
 			srcformat: 'Y-m-d',
 			newformat: 'm-d-Y',
-			parseRe : /[Tt\\\/:_;.,\t\s-]/,
 			masks : {
-				ISO8601Long:"Y-m-d H:i:s",
-				ISO8601Short:"Y-m-d",
 				ShortDate: "Y/j/n",
 				LongDate: "l, F d, Y",
 				FullDateTime: "l, F d, Y g:i:s A",
 				MonthDay: "F d",
 				ShortTime: "g:i A",
 				LongTime: "g:i:s A",
-				SortableDateTime: "Y-m-d\\TH:i:s",
-				UniversalSortableDateTime: "Y-m-d H:i:sO",
 				YearMonth: "F, Y"
-			},
-			reformatAfterEdit : false
-		},
-		baseLinkUrl: '',
-		showAction: '',
-		target: '',
-		checkbox : {disabled:true},
-		idName : 'id'
+			}
+		}
+	}
+};
+$.jgrid = $.jgrid || {};
+$.extend(true, $.jgrid, {
+	defaults: {
+		locale: "kr"
+	},
+	locales: {
+		// In general the property name is free, but it's recommended to use the names based on
+		// http://www.iana.org/assignments/language-subtag-registry/language-subtag-registry
+		// http://rishida.net/utils/subtags/ and RFC 5646. See Appendix A of RFC 5646 for examples.
+		// One can use the lang attribute to specify language tags in HTML, and the xml:lang attribute for XML
+		// if it exists. See http://www.w3.org/International/articles/language-tags/#extlang
+		kr: $.extend({}, locInfo, { name: "한국어", nameEnglish: "Korean" }),
+		ko: $.extend({}, locInfo, { name: "한국어", nameEnglish: "Korean" }),
+		"ko-KR": $.extend({}, locInfo, { name: "한국어 (대한민국)", nameEnglish: "Korean (Korea)" })
 	}
 });
-})(jQuery);
+}(jQuery));

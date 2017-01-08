@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba
+# Copyright (C) 2007-2013 by frePPLe bvba
 #
 # This library is free software; you can redistribute it and/or modify it
 # under the terms of the GNU Affero General Public License as published
@@ -18,12 +18,13 @@
 from django.db import connections
 from django.utils.translation import ugettext_lazy as _
 from django.utils.text import capfirst
-from django.utils.encoding import force_unicode
+from django.utils.encoding import force_text
 
 from freppledb.input.models import Buffer
 from freppledb.output.models import FlowPlan
-from freppledb.common.db import sql_max, sql_min, python_date
-from freppledb.common.report import GridReport, GridPivot, GridFieldText, GridFieldNumber, GridFieldDateTime, GridFieldBool, GridFieldInteger, GridFieldGraph
+from freppledb.common.db import sql_max, sql_min, python_date, string_agg
+from freppledb.common.report import GridReport, GridPivot, GridFieldText, GridFieldNumber
+from freppledb.common.report import GridFieldDateTime, GridFieldBool, GridFieldInteger
 
 
 class OverviewReport(GridPivot):
@@ -32,28 +33,28 @@ class OverviewReport(GridPivot):
   '''
   template = 'output/buffer.html'
   title = _('Inventory report')
-  basequeryset = Buffer.objects.only('name','item__name','location__name','lft','rght','onhand')
+  basequeryset = Buffer.objects.only('name', 'item__name', 'location__name', 'lft', 'rght', 'onhand')
   model = Buffer
-  permissions = (('view_inventory_report','Can view inventory report'),)
+  permissions = (('view_inventory_report', 'Can view inventory report'),)
   rows = (
-    GridFieldText('buffer', title=_('buffer'), key=True, field_name='name', formatter='buffer', editable=False),
-    GridFieldText('item', title=_('item'), field_name='item__name', formatter='item', editable=False),
-    GridFieldText('location', title=_('location'), field_name='location__name', formatter='location', editable=False),
-    GridFieldGraph('graph', title=_('graph'), width="(5*numbuckets<200 ? 5*numbuckets : 200)"),
+    GridFieldText('buffer', title=_('buffer'), key=True, editable=False, field_name='name', formatter='detail', extra="role:'input/buffer'"),
+    GridFieldText('item', title=_('item'), editable=False, field_name='item__name', formatter='detail', extra="role:'input/item'"),
+    GridFieldText('location', title=_('location'), editable=False, field_name='location__name', formatter='detail', extra="role:'input/location'"),
     )
   crosses = (
-    ('startoh', {'title': _('start inventory'),}),
-    ('produced', {'title': _('produced'),}),
-    ('consumed', {'title': _('consumed'),}),
-    ('endoh', {'title': _('end inventory'),}),
+    ('startoh', {'title': _('start inventory')}),
+    ('produced', {'title': _('produced')}),
+    ('consumed', {'title': _('consumed')}),
+    ('endoh', {'title': _('end inventory')}),
     )
 
   @classmethod
   def extra_context(reportclass, request, *args, **kwargs):
     if args and args[0]:
+      request.session['lasttab'] = 'plan'
       return {
-        'title': capfirst(force_unicode(Buffer._meta.verbose_name) + " " + args[0]),
-        'post_title': ': ' + capfirst(force_unicode(_('plan'))),
+        'title': capfirst(force_text(Buffer._meta.verbose_name) + " " + args[0]),
+        'post_title': ': ' + capfirst(force_text(_('plan'))),
         }
     else:
       return {}
@@ -61,7 +62,7 @@ class OverviewReport(GridPivot):
   @staticmethod
   def query(request, basequery, sortsql='1 asc'):
     cursor = connections[request.database].cursor()
-    basesql, baseparams = basequery.query.get_compiler(basequery.db).as_sql(with_col_aliases=True)
+    basesql, baseparams = basequery.query.get_compiler(basequery.db).as_sql(with_col_aliases=False)
 
     # Assure the item hierarchy is up to date
     Buffer.rebuildHierarchy(database=basequery.db)
@@ -88,7 +89,8 @@ class OverviewReport(GridPivot):
       group by buffers.name
       ''' % (basesql, request.report_startdate)
     cursor.execute(query, baseparams)
-    for row in cursor.fetchall(): startohdict[row[0]] = float(row[1])
+    for row in cursor.fetchall():
+      startohdict[row[0]] = float(row[1])
 
     # Execute the actual query
     query = '''
@@ -116,9 +118,11 @@ class OverviewReport(GridPivot):
         -- Grouping and sorting
         group by buf.name, buf.item_id, buf.location_id, buf.onhand, d.bucket, d.startdate, d.enddate
         order by %s, d.startdate
-      ''' % (sql_max('out_flowplan.quantity','0.0'), sql_min('out_flowplan.quantity','0.0'),
+      ''' % (
+        sql_max('out_flowplan.quantity', '0.0'), sql_min('out_flowplan.quantity', '0.0'),
         basesql, request.report_bucket, request.report_startdate, request.report_enddate,
-        request.report_startdate, request.report_enddate, sortsql)
+        request.report_startdate, request.report_enddate, sortsql
+      )
     cursor.execute(query, baseparams)
 
     # Build the python result
@@ -126,8 +130,7 @@ class OverviewReport(GridPivot):
     for row in cursor.fetchall():
       if row[0] != prevbuf:
         prevbuf = row[0]
-        try: startoh = startohdict[prevbuf]
-        except: startoh = 0
+        startoh = startohdict.get(prevbuf, 0)
         endoh = startoh + float(row[6] - row[7])
       else:
         startoh = endoh
@@ -139,10 +142,10 @@ class OverviewReport(GridPivot):
         'bucket': row[3],
         'startdate': python_date(row[4]),
         'enddate': python_date(row[5]),
-        'startoh': round(startoh,1),
-        'produced': round(row[6],1),
-        'consumed': round(row[7],1),
-        'endoh': round(endoh,1),
+        'startoh': round(startoh, 1),
+        'produced': round(row[6], 1),
+        'consumed': round(row[7], 1),
+        'endoh': round(endoh, 1),
         }
 
 
@@ -153,7 +156,7 @@ class DetailReport(GridReport):
   template = 'output/flowplan.html'
   title = _("Inventory detail report")
   model = FlowPlan
-  permissions = (('view_inventory_report','Can view inventory report'),)
+  permissions = (('view_inventory_report', 'Can view inventory report'),)
   frozenColumns = 0
   editable = False
   multiselect = False
@@ -161,21 +164,35 @@ class DetailReport(GridReport):
   @ classmethod
   def basequeryset(reportclass, request, args, kwargs):
     if args and args[0]:
-      return FlowPlan.objects.filter(thebuffer__exact=args[0]).extra(select={'operation_in': "select name from operation where out_operationplan.operation = operation.name",})
+      base = FlowPlan.objects.filter(thebuffer__exact=args[0])
     else:
-      return FlowPlan.objects.extra(select={'operation_in': "select name from operation where out_operationplan.operation = operation.name",})
+      base = FlowPlan.objects
+    return base.select_related() \
+      .extra(select={
+        'operation_in': "select name from operation where out_operationplan.operation = operation.name",
+        'demand': ("select %s(q || ' : ' || d, ', ') from ("
+                   "select round(sum(quantity)) as q, demand as d "
+                   "from out_demandpegging "
+                   "where out_demandpegging.operationplan = out_flowplan.operationplan_id "
+                   "group by demand order by 1 desc, 2) peg"
+                   % string_agg())
+        })
 
   @classmethod
   def extra_context(reportclass, request, *args, **kwargs):
+    if args and args[0]:
+      request.session['lasttab'] = 'plandetail'
     return {'active_tab': 'plandetail'}
 
   rows = (
-    GridFieldText('thebuffer', title=_('buffer'), key=True, formatter='buffer', editable=False),
-    GridFieldText('operationplan__operation', title=_('operation'), formatter='operation', editable=False),
+    GridFieldText('thebuffer', title=_('buffer'), key=True, editable=False, formatter='detail', extra="role:'input/buffer'"),
+    GridFieldText('operationplan__operation', title=_('operation'), editable=False, formatter='detail', extra="role:'input/operation'"),
     GridFieldNumber('quantity', title=_('quantity'), editable=False),
     GridFieldDateTime('flowdate', title=_('date'), editable=False),
     GridFieldNumber('onhand', title=_('onhand'), editable=False),
+    GridFieldNumber('operationplan__criticality', title=_('criticality'), editable=False),
     GridFieldBool('operationplan__locked', title=_('locked'), editable=False),
+    GridFieldNumber('operationplan__quantity', title=_('operationplan quantity'), editable=False),
+    GridFieldText('demand', title=_('demand quantity'), formatter='demanddetail', width=300, editable=False),
     GridFieldInteger('operationplan', title=_('operationplan'), editable=False),
     )
-

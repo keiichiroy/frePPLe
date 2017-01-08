@@ -3,7 +3,7 @@
 #
 
 #
-# Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba
+# Copyright (C) 2007-2014 by frePPLe bvba
 #
 # This program is free software: you can redistribute it and/or modify it
 # under the terms of the GNU Affero General Public License as published by
@@ -23,7 +23,7 @@
 # Initialization
 #
 AC_PREREQ(2.60)
-AC_INIT([frepple], [2.1.beta])
+AC_INIT([frepple], [3.1.beta])
 AC_CONFIG_SRCDIR([src/main.cpp])
 AC_CONFIG_HEADER([config.h])
 AM_INIT_AUTOMAKE([1.9 tar-ustar])
@@ -56,7 +56,7 @@ AC_SUBST(LIBRARY_VERSION)
 # Define an extra configure argument to enable debugging
 #
 AC_ARG_ENABLE(debug,
-AC_HELP_STRING([--enable-debug],[Turn on debugging]),
+AS_HELP_STRING([--enable-debug],[Turn on debugging]),
 [case "${enableval}" in
   yes) debug=true ;;
   no)  debug=false ;;
@@ -69,7 +69,7 @@ AM_CONDITIONAL(DEBUG, test x$debug = xtrue)
 # This works only with the gcov tool and the gcc compiler
 #
 AC_ARG_ENABLE(coverage,
-AC_HELP_STRING([--enable-coverage],
+AS_HELP_STRING([--enable-coverage],
 [Compile for test coverage measurement (GCC only, using gcov)]),
 [case "${enableval}" in
   yes) coverage=true
@@ -91,7 +91,7 @@ AM_CONDITIONAL(COVERAGE, test x$coverage = xtrue)
 # trick because frePPLe uses shared libraries)
 #
 AC_ARG_ENABLE(profile,
-AC_HELP_STRING([--enable-profile],
+AS_HELP_STRING([--enable-profile],
 [Compile for profiling (GCC only)]),
 [case "${enableval}" in
   yes) profile=true ;;
@@ -101,56 +101,31 @@ esac],[profile=false])
 AM_CONDITIONAL(PROFILE, test x$profile = xtrue)
 
 #
-# Define an extra configure argument to enable multi-threading
-#
-AC_ARG_ENABLE(multithread,
-AC_HELP_STRING([--enable-multithread],
-[Enable support for multi-threading (default: true)]),
-[case "${enableval}" in
-  yes) multithread=true ;;
-  no)  multithread=false ;;
-  *) AC_MSG_ERROR([bad value ${enableval} for --enable-multithread]) ;;
-esac],[multithread=true])
-AM_CONDITIONAL(MT, test x$multithread = xtrue)
-
-#
-# Define an extra configure argument to enable the lp solver
-#
-AC_ARG_ENABLE(lp_solver,
-AC_HELP_STRING([--enable-lp_solver],
-[Build the linear programming solver module (default: true if the GLPK package is installed)]),
-[case "${enableval}" in
-  yes) lp=true ;;
-  no)  lp=false ;;
-  *) AC_MSG_ERROR([bad value ${enableval} for --enable-lp_solver]) ;;
-esac], [AC_CHECK_PROG(lp, [glpsol], true, false)])
-AM_CONDITIONAL(LP, test x$lp = xtrue)
-
-#
 # Define a configure argument to enable/disable building of the documentation
 #
 AC_ARG_ENABLE([doc],
-AC_HELP_STRING([--enable-doc],
+AS_HELP_STRING([--enable-doc],
 [Enable documentation generation(default false)]),
 [case "${enableval}" in
   no)  generatedoc=false;;
   yes) generatedoc=true
        AC_CHECK_PROGS(DOXYGEN, doxygen, notavailable)
-       if test x$DOXYGEN = xnotavailable
+       AC_CHECK_PROGS(SPHINXBUILD, sphinx-build sphinx-build-3, notavailable)
+       if test x$SPHINXBUILD = xnotavailable
        then
-          AC_MSG_ERROR([Could not find doxygen, no documentation can be built])
-          generatedoc=false
-       fi
-       AC_CHECK_PROGS(WGET, wget, notavailable)
-       if test x$WGET = xnotavailable
-       then
-          AC_MSG_ERROR([Could not find wget, no documentation can be built])
+          AC_MSG_ERROR([Could not find sphinx-build, no documentation can be built])
           generatedoc=false
        fi
        ;;
   *) AC_MSG_ERROR([bad value ${enableval} for --enable-doc]) ;;
 esac],[generatedoc=false])
 AM_CONDITIONAL(DOC, test x$generatedoc = xtrue)
+
+#
+# Define a configure argument to pass python installation parameters
+#
+AC_ARG_VAR([PYFLAGS],
+[Argument passed to setup.py when installing frePPLe's Python application.])
 
 # Check the availability of the external programs
 AC_CHECK_PROG(HAVE_DOT, dot, [YES], [NO])
@@ -165,15 +140,7 @@ AC_FUNC_MALLOC
 AC_FUNC_MKTIME
 AC_FUNC_STAT
 AC_FUNC_STRFTIME
-AC_CHECK_FUNCS([dup2 memset strncasecmp strnicmp strptime putenv _putenv setlocale])
-AC_CHECK_FUNCS([localtime_r], [],
-  if test x$multithread = xtrue
-   then
-   AC_MSG_ERROR([
-    Multi-threading requires a re-entrant version of the localtime function.
-    ])
-   fi
-)
+AC_CHECK_FUNCS([dup2 memset strncasecmp strnicmp strptime putenv _putenv localtime_r])
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_CHECK_HEADERS([ext/slist slist vector map set stack])
@@ -208,62 +175,36 @@ AC_CHECK_LIB([xerces-c], [main], [],
   Check out http://xml.apache.org/xerces-c for more information.
 ])])
 
-AC_CHECKING([for xerces-c version >= 2.8 ])
+AC_CHECKING([for xerces-c version >= 3.1.beta ])
 AC_COMPILE_IFELSE([AC_LANG_SOURCE([
   #include "xercesc/util/XercesVersion.hpp"
-  #if (XERCES_VERSION_MAJOR==2 && XERCES_VERSION_MINOR>=8) || XERCES_VERSION_MAJOR==3
+  #if XERCES_VERSION_MAJOR==3
     int main (void) {return 1;}
   #else
     force compile error;
   #endif
   ])], [],
   [AC_MSG_ERROR([
-  This package requires Xerces-C 2.8 or later. Your version is older...
+  This package requires Xerces-C 3.1.beta or later.
   ])])
 
 #
-# Verify installation of GLPK (GNU linear programming kit)
-#
-if test x$lp = xtrue
-then
-AC_CHECK_LIB(glpk, glp_simplex,
-[ true ], # dummy action to avoid that glpk is added to the list list of required libraries
-[AC_MSG_ERROR([
-  Can't link with the glpk library.en
-  This package requires the GLPK linear programming solver.
-  Install its development library, or reconfigure with the option '--disable-lp_solver'
-])])
-AC_CHECK_HEADERS([glpk.h], [],
-[AC_CHECK_HEADERS([glpk/glpk.h], [],
-[AC_MSG_ERROR([
-  The glpk libray has been installed, but its header file could not be found
-  This package requires the GLPK linear programming solver.
-  Install its development library, or reconfigure with the option '--disable-lp_solver'
-])])])
-fi
-
-#
 # Verify installation of PYTHON
-# Edit the minimum required version to 3.0 to switch to using Python 3.
 #
-AM_PATH_PYTHON([2.6], [],
+AM_PATH_PYTHON([3.3], [],
 [AC_MSG_ERROR([
-  This package requires Python 2.6 or higher.
-  Preferred versions are 2.6 and 2.7.
-  Support for Python 3.0 and higher is experimental. 
+  This package requires Python 3.3 or higher.
 ])])
-LIBS="-L/usr/lib/python$PYTHON_VERSION/config $LIBS"
-CPPFLAGS="-I/usr/include/python$PYTHON_VERSION $CPPFLAGS"
-AC_CHECK_LIB(python$PYTHON_VERSION, PyModule_GetDict, [],
-[AC_MSG_ERROR([
-  Can't link with the Python library.
-  This package requires the Python development libraries.
-])])
+AC_PATH_TOOL(PYTHON_CONFIG, "python3-config", notavailable)
+if test x$PYTHON_CONFIG = xnotavailable
+then
+  AC_MSG_ERROR([This package requires the Python 3 development libraries.])
+fi
+LIBS="$($PYTHON_CONFIG --ldflags) $LIBS"
+CPPFLAGS="$($PYTHON_CONFIG --includes) $CPPFLAGS"
 AC_CHECK_HEADER([Python.h], [],
 [AC_MSG_ERROR([
-  This package requires Python.
-  Please install this package and its development libraries.
-  Check out http://www.python.org for more information.
+  This package requires Python 3 and its development libraries.
 ])])
 
 #
@@ -294,7 +235,7 @@ AC_CHECK_HEADER(windows.h,
 CPPFLAGS="-I\$(top_builddir)/include $CPPFLAGS"
 if test x$debug = xtrue ; then
   # The settings on the next line are the normal debugging parameters
-  CXXFLAGS="-ggdb -Wall $CXXFLAGS"
+  CXXFLAGS="-ggdb -Wall $CXXFLAGS -O0"
   AC_DEFINE([DEBUG], [], [Used for debugging builds])
 else if test x$coverage = xtrue ; then
   # The settings on the next line are suitable for creating an executable to
@@ -311,36 +252,28 @@ else
   CXXFLAGS="-O3 -s $CXXFLAGS"
   AC_DEFINE([NDEBUG], [], [Disables assertions])
 fi ; fi ; fi
-if test x$multithread = xtrue
-then
-  AC_DEFINE([MT], [], [My flag to mark multi-threaded builds])
-fi
 case $host_os in
   cygwin*)
-    if test x$multithread = xtrue
-    then
-      LIBS="-lpthread $LIBS"
-    fi
+    LIBS="-lpthread $LIBS"
     # Linker option to avoid some ugly warnings...
     LDFLAGS="$LDFLAGS -Wl,--enable-auto-import"
     ;;
   *)
     LIBS="-ldl $LIBS"
-    if test x$multithread = xtrue
-    then
-      CXXFLAGS="-pthread $CXXFLAGS"
-    fi
+    CXXFLAGS="-pthread $CXXFLAGS"
     ;;
 esac
 AM_CONDITIONAL(CYGWIN, test x$host_os = xcygwin)
 
-# Generating the output makefiles
+# Define the output make files
 AC_CONFIG_FILES([ Makefile bin/Makefile doc/Makefile ])
 AC_CONFIG_FILES([ include/Makefile include/frepple/Makefile ])
 AC_CONFIG_FILES([ src/Makefile src/model/Makefile src/solver/Makefile src/utils/Makefile ])
-AC_CONFIG_FILES([ modules/Makefile modules/lp_solver/Makefile ])
-AC_CONFIG_FILES([ contrib/Makefile contrib/vc/Makefile contrib/django/Makefile contrib/installer/Makefile contrib/openerp/Makefile contrib/rpm/Makefile contrib/debian/Makefile ])
-AC_CONFIG_FILES([ test/Makefile test/cluster/Makefile test/calendar/Makefile test/constraints_combined_1/Makefile test/constraints_combined_2/Makefile test/constraints_leadtime_1/Makefile test/constraints_leadtime_2/Makefile test/constraints_material_1/Makefile test/constraints_material_2/Makefile test/constraints_material_3/Makefile test/constraints_material_4/Makefile test/datetime/Makefile test/flow_alternate_1/Makefile test/flow_alternate_2/Makefile test/flow_fixed/Makefile test/lpsolver_1/Makefile test/scalability_1/Makefile test/scalability_2/Makefile test/scalability_3/Makefile test/jobshop/Makefile test/xml/Makefile test/xml_remote/Makefile  test/constraints_resource_1/Makefile test/constraints_resource_2/Makefile test/constraints_resource_3/Makefile test/constraints_resource_4/Makefile  test/constraints_resource_5/Makefile test/problems/Makefile test/deletion/Makefile test/demand_policy/Makefile test/operation_alternate/Makefile test/operation_available/Makefile test/operation_effective/Makefile test/operation_pre_post/Makefile test/operation_routing/Makefile test/multithreading/Makefile test/name/Makefile test/python_1/Makefile test/python_2/Makefile test/python_3/Makefile test/sample_module/Makefile test/callback/Makefile test/pegging/Makefile test/safety_stock/Makefile test/buffer_procure_1/Makefile test/flow_effective/Makefile test/load_alternate/Makefile test/load_effective/Makefile test/setup_1/Makefile test/setup_2/Makefile test/setup_3/Makefile test/skills/Makefile ])
+AC_CONFIG_FILES([ modules/Makefile ])
+AC_CONFIG_FILES([ contrib/Makefile contrib/vc/Makefile contrib/django/Makefile contrib/installer/Makefile contrib/rpm/Makefile contrib/debian/Makefile contrib/odoo/Makefile ])
+AC_CONFIG_FILES([ test/Makefile test/buffer_batch/Makefile test/cluster/Makefile test/custom_fields/Makefile test/calendar/Makefile test/constraints_combined_1/Makefile test/constraints_combined_2/Makefile test/constraints_leadtime_1/Makefile test/constraints_leadtime_2/Makefile test/constraints_material_1/Makefile test/constraints_material_2/Makefile test/constraints_material_3/Makefile test/constraints_material_4/Makefile test/datetime/Makefile test/distribution_1/Makefile test/flow_alternate_1/Makefile test/flow_alternate_2/Makefile test/flow_fixed/Makefile test/scalability_1/Makefile test/scalability_2/Makefile test/scalability_3/Makefile test/jobshop/Makefile test/xml/Makefile test/xml_remote/Makefile  test/constraints_resource_1/Makefile test/constraints_resource_2/Makefile test/constraints_resource_3/Makefile test/constraints_resource_4/Makefile test/constraints_resource_5/Makefile test/constraints_resource_6/Makefile test/criticality/Makefile test/problems/Makefile test/deletion/Makefile test/demand_policy/Makefile test/operation_alternate/Makefile test/operation_available/Makefile test/operation_effective/Makefile test/operation_pre_post/Makefile test/operation_routing/Makefile test/operation_split/Makefile test/multithreading/Makefile test/name/Makefile test/python_1/Makefile test/python_2/Makefile test/python_3/Makefile test/sample_module/Makefile test/callback/Makefile test/pegging/Makefile test/safety_stock/Makefile test/buffer_procure_1/Makefile test/flow_effective/Makefile test/load_alternate/Makefile test/load_effective/Makefile test/setup_1/Makefile test/setup_2/Makefile test/setup_3/Makefile test/skills/Makefile test/supplier/Makefile test/wip/Makefile ])
+
+# Generate all make files
 AC_OUTPUT
 
 # Byebye message
@@ -351,5 +284,8 @@ echo
 echo "Run the following commands to compile and install:"
 echo "  make "
 echo "  make install"
+echo
+echo "Note that this only compiles and installs the core planning engine."
+echo "It does NOT install or configure the web server for the user interface."
 echo
 echo "--------------------------------------------------------"

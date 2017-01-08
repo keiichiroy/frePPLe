@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba
+# Copyright (C) 2007-2013 by frePPLe bvba
 #
 # This library is free software; you can redistribute it and/or modify it
 # under the terms of the GNU Affero General Public License as published
@@ -15,7 +15,9 @@
 # License along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-import os.path, sys
+import os
+import os.path
+import sys
 from datetime import datetime
 from subprocess import Popen
 
@@ -27,11 +29,13 @@ from django.utils.translation import ugettext_lazy as _
 from django.db import DEFAULT_DB_ALIAS
 from django.contrib.admin.views.decorators import staff_member_required
 from django.views.decorators.csrf import csrf_protect
-from django.http import Http404, HttpResponseRedirect, HttpResponseServerError, HttpResponse
+from django.http import Http404, HttpResponseRedirect, HttpResponseServerError, HttpResponse, StreamingHttpResponse
 from django.contrib import messages
-from django.utils.encoding import force_unicode
+from django.utils.encoding import force_text
 
-from freppledb.execute.models import Task, Scenario
+from freppledb.execute.models import Task
+from freppledb.common.models import Scenario
+from freppledb.common.report import exportWorkbook, importWorkbook
 from freppledb.common.report import GridReport, GridFieldDateTime, GridFieldText, GridFieldInteger
 from freppledb.execute.management.commands.frepple_runworker import checkActive
 
@@ -55,6 +59,7 @@ class TaskReport(GridReport):
 
   rows = (
     GridFieldInteger('id', title=_('identifier'), key=True),
+    #. Translators: Translation included with Django
     GridFieldText('name', title=_('name'), editable=False, align='center'),
     GridFieldDateTime('submitted', title=_('submitted'), editable=False, align='center'),
     GridFieldDateTime('started', title=_('started'), editable=False, align='center'),
@@ -62,13 +67,16 @@ class TaskReport(GridReport):
     GridFieldText('status', title=_('status'), editable=False, align='center', extra="formatter:status"),
     GridFieldText('message', title=_('message'), editable=False, width=500),
     GridFieldText('arguments', title=_('arguments'), editable=False),
+    #. Translators: Translation included with Django
     GridFieldText('user', title=_('user'), field_name='user__username', editable=False, align='center'),
     )
 
   @classmethod
   def extra_context(reportclass, request, *args, **kwargs):
-    try: constraint = int(request.session['constraint'])
-    except: constraint = 15
+    try:
+      constraint = int(request.session['constraint'])
+    except:
+      constraint = 15
 
     # Synchronize the scenario table with the settings
     Scenario.syncWithSettings()
@@ -77,7 +85,8 @@ class TaskReport(GridReport):
     fixtures = set()
     folders = list(settings.FIXTURE_DIRS)
     for app in get_apps():
-      if app.__name__.startswith('django'): continue
+      if app.__name__.startswith('django'):
+        continue
       folders.append(os.path.join(os.path.dirname(app.__file__), 'fixtures'))
     for f in folders:
       try:
@@ -86,16 +95,21 @@ class TaskReport(GridReport):
             if i.endswith('.json'):
               fixtures.add(i.split('.')[0])
       except:
-        pass # Silently ignore failures
+        pass  # Silently ignore failures
     fixtures = sorted(fixtures)
 
     # Send to template
+    odoo = 'freppledb.odoo' in settings.INSTALLED_APPS
     return {'capacityconstrained': constraint & 4,
             'materialconstrained': constraint & 2,
             'leadtimeconstrained': constraint & 1,
             'fenceconstrained': constraint & 8,
             'scenarios': Scenario.objects.all(),
-            'fixtures': fixtures
+            'fixtures': fixtures,
+            'openbravo': 'freppledb.openbravo' in settings.INSTALLED_APPS,
+            'odoo': odoo,
+            'odoo_read': odoo and request.session.get('odoo_read', False),
+            'odoo_write': odoo and request.session.get('odoo_write', False)
             }
 
 
@@ -103,117 +117,177 @@ class TaskReport(GridReport):
 @never_cache
 @csrf_protect
 def LaunchTask(request, action):
+  try:
+    if action == 'exportworkbook':
+      return exportWorkbook(request)
+    elif action == 'importworkbook':
+      return StreamingHttpResponse(
+        content_type='text/plain; charset=%s' % settings.DEFAULT_CHARSET,
+        streaming_content=importWorkbook(request)
+        )
+    else:
+      wrapTask(request, action)
+      return HttpResponseRedirect('%s/execute/' % request.prefix)
+  except Exception as e:
+    messages.add_message(
+      request, messages.ERROR,
+      force_text(_('Failure launching action: %(msg)s') % {'msg': e})
+      )
+    return HttpResponseRedirect('%s/execute/' % request.prefix)
+
+
+def wrapTask(request, action):
   # Allow only post
   if request.method != 'POST':
-    raise Http404('Only post requests allowed')
+    raise Exception('Only post requests allowed')
+
+  # Check user permissions
+  if not request.user.has_perm('execute'):
+    raise Exception('Missing execution privileges')
 
   # Parse the posted parameters as arguments for an asynchronous task to add to the queue.    TODO MAKE MODULAR WITH SEPERATE TASK CLASS
   worker_database = request.database
-  try:
-    now = datetime.now()
-    # A
-    if action == 'generate plan':
-      constraint = 0
-      for value in request.POST.getlist('constraint'):
-        try: constraint += int(value)
-        except: pass
-      task = Task(name='generate plan', submitted=now, status='Waiting', user=request.user)
-      task.arguments = "--constraint=%s --plantype=%s" % (constraint, request.POST.get('plantype'))
-      task.save(using=request.database)
-      # Update the session object   TODO REPLACE WITH PREFERENCE INFO
-      request.session['plantype'] = request.POST.get('plantype')
-      request.session['constraint'] = constraint
-    # B
-    elif action == 'generate model':
-      task = Task(name='generate model', submitted=now, status='Waiting', user=request.user)
-      task.arguments = "--cluster=%s --demand=%s --forecast_per_item=%s --level=%s --resource=%s " \
-        "--resource_size=%s --components=%s --components_per=%s --deliver_lt=%s --procure_lt=%s" % (
+
+  now = datetime.now()
+  task = None
+  # A
+  if action == 'frepple_run':
+    if not request.user.has_perm('execute.generate_plan'):
+      raise Exception('Missing execution privileges')
+    constraint = 0
+    for value in request.POST.getlist('constraint'):
+      try:
+        constraint += int(value)
+      except:
+        pass
+    task = Task(name='generate plan', submitted=now, status='Waiting', user=request.user)
+    task.arguments = "--constraint=%s --plantype=%s" % (constraint, request.POST.get('plantype'))
+    env = []
+    if request.POST.get('odoo_read', None) == '1':
+      env.append("odoo_read")
+      request.session['odoo_read'] = True
+    else:
+      request.session['odoo_read'] = False
+    if request.POST.get('odoo_write', None) == '1':
+      env.append("odoo_write")
+      request.session['odoo_write'] = True
+    else:
+      request.session['odoo_write'] = False
+    if env:
+      task.arguments = "%s --env=%s" % (task.arguments, ','.join(env))
+    task.save(using=request.database)
+    # Update the session object
+    request.session['plantype'] = request.POST.get('plantype')
+    request.session['constraint'] = constraint
+  # B
+  elif action == 'frepple_createmodel':
+    task = Task(name='generate model', submitted=now, status='Waiting', user=request.user)
+    task.arguments = "--cluster=%s --demand=%s --forecast_per_item=%s --level=%s --resource=%s " \
+      "--resource_size=%s --components=%s --components_per=%s --deliver_lt=%s --procure_lt=%s" % (
         request.POST['clusters'], request.POST['demands'], request.POST['fcst'], request.POST['levels'],
         request.POST['rsrc_number'], request.POST['rsrc_size'], request.POST['components'],
         request.POST['components_per'], request.POST['deliver_lt'], request.POST['procure_lt']
         )
-      task.save(using=request.database)
-    # C
-    elif action == 'empty database':
-      task = Task(name='empty database', submitted=now, status='Waiting', user=request.user)
-      task.save(using=request.database)
-    # D
-    elif action == 'load dataset':
-      task = Task(name='load dataset', submitted=now, status='Waiting', user=request.user, arguments=request.POST['datafile'])
-      task.save(using=request.database)
-    # E
-    elif action == 'manage scenarios':
-      worker_database = DEFAULT_DB_ALIAS
-      if 'copy' in request.POST:
-        source = request.POST.get('source', DEFAULT_DB_ALIAS)
-        for sc in Scenario.objects.all():
-          if request.POST.get(sc.name,'off') == 'on' and sc.status == u'Free':
-            task = Task(name='copy scenario', submitted=now, status='Waiting', user=request.user, arguments="%s %s" % (source, sc.name))
-            task.save()
-      elif 'release' in request.POST:
-        # Note: release is immediate and synchronous.
-        for sc in Scenario.objects.all():
-          if request.POST.get(sc.name,'off') == u'on' and sc.status != u'Free':
-            sc.status = u'Free'
-            sc.lastrefresh = now
-            sc.save()
-            if request.database == sc.name:
-              # Erasing the database that is currently selected.
-              request.prefix = ''
-      elif 'update' in request.POST:
-        # Note: update is immediate and synchronous.
-        for sc in Scenario.objects.all():
-          if request.POST.get(sc.name, 'off') == 'on':
-            sc.description = request.POST.get('description',None)
-            sc.save()
-      else:
-        raise Http404('Invalid scenario task')
-    # F
-    elif action == 'backup database':
-      task = Task(name='backup database', submitted=now, status='Waiting', user=request.user)
-      task.save(using=request.database)
-    # G
-    elif action == 'generate buckets':
-      task = Task(name='generate buckets', submitted=now, status='Waiting', user=request.user)
-      task.arguments = "--start=%s --end=%s --weekstart=%s" % (
-        request.POST['start'], request.POST['end'], request.POST['weekstart']
-        )
-      task.save(using=request.database)
+    task.save(using=request.database)
+  # C
+  elif action == 'frepple_flush':
+    task = Task(name='empty database', submitted=now, status='Waiting', user=request.user)
+    if not request.POST.get('all'):
+      task.arguments = "--models=%s" % ','.join(request.POST.getlist('entities'))
+    task.save(using=request.database)
+  # D
+  elif action == 'loaddata':
+    task = Task(name='load dataset', submitted=now, status='Waiting', user=request.user, arguments=request.POST['datafile'])
+    task.save(using=request.database)
+  # E
+  elif action == 'frepple_copy':
+    worker_database = DEFAULT_DB_ALIAS
+    if 'copy' in request.POST:
+      if not request.user.has_perm('execute.copy_scenario'):
+        raise Exception('Missing execution privileges')
+      source = request.POST.get('source', DEFAULT_DB_ALIAS)
+      for sc in Scenario.objects.all():
+        if request.POST.get(sc.name, 'off') == 'on' and sc.status == 'Free':
+          task = Task(name='copy scenario', submitted=now, status='Waiting', user=request.user, arguments="%s %s" % (source, sc.name))
+          task.save()
+    elif 'release' in request.POST:
+      # Note: release is immediate and synchronous.
+      if not request.user.has_perm('execute.release_scenario'):
+        raise Exception('Missing execution privileges')
+      for sc in Scenario.objects.all():
+        if request.POST.get(sc.name, 'off') == 'on' and sc.status != 'Free':
+          sc.status = 'Free'
+          sc.lastrefresh = now
+          sc.save()
+          if request.database == sc.name:
+            # Erasing the database that is currently selected.
+            request.prefix = ''
+    elif 'update' in request.POST:
+      # Note: update is immediate and synchronous.
+      for sc in Scenario.objects.all():
+        if request.POST.get(sc.name, 'off') == 'on':
+          sc.description = request.POST.get('description', None)
+          sc.save()
     else:
-      # Task not recognized
-      raise Http404('Invalid launching task')
+      raise Exception('Invalid scenario task')
+  # F
+  elif action == 'frepple_backup':
+    task = Task(name='backup database', submitted=now, status='Waiting', user=request.user)
+    task.save(using=request.database)
+  # G
+  elif action == 'frepple_createbuckets':
+    task = Task(name='generate buckets', submitted=now, status='Waiting', user=request.user)
+    task.arguments = "--start=%s --end=%s --weekstart=%s" % (
+      request.POST['start'], request.POST['end'], request.POST['weekstart']
+      )
+    task.save(using=request.database)
+  # H
+  elif action == 'openbravo_import' and 'freppledb.openbravo' in settings.INSTALLED_APPS:
+    task = Task(name='Openbravo import', submitted=now, status='Waiting', user=request.user)
+    task.arguments = "--delta=%s" % request.POST['delta']
+    task.save(using=request.database)
+  # I
+  elif action == 'openbravo_export' and 'freppledb.openbravo' in settings.INSTALLED_APPS:
+    task = Task(name='Openbravo export', submitted=now, status='Waiting', user=request.user)
+    task.save(using=request.database)
+  else:
+    # Task not recognized
+    raise Exception('Invalid launching task')
 
-    # Launch a worker process
-    if not checkActive(worker_database):
-      if os.path.isfile(os.path.join(settings.FREPPLE_APP,"frepplectl.py")):
+  # Launch a worker process
+  if task and not checkActive(worker_database):
+    if os.path.isfile(os.path.join(settings.FREPPLE_APP, "frepplectl.py")):
+      if "python" in sys.executable:
         # Development layout
         Popen([
-          sys.executable, # Python executable
-          os.path.join(settings.FREPPLE_APP,"frepplectl.py"),
-          "frepple_runworker",
-          "--database=%s" % worker_database
-          ])
-      elif sys.executable.find('frepplectl.exe') >= 0:
-        # Py2exe executable
-        Popen([
-          sys.executable, # Python executable
+          sys.executable,  # Python executable
+          os.path.join(settings.FREPPLE_APP, "frepplectl.py"),
           "frepple_runworker",
           "--database=%s" % worker_database
           ])
       else:
-        # Linux standard installation
+        # Deployment on Apache web server
         Popen([
-          "frepplectl",
+          "python",
+          os.path.join(settings.FREPPLE_APP, "frepplectl.py"),
           "frepple_runworker",
           "--database=%s" % worker_database
-          ])
-
-    # Task created successfully
-    return HttpResponseRedirect('%s/execute/' % request.prefix)
-  except Exception as e:
-    messages.add_message(request, messages.ERROR,
-        force_unicode(_('Failure launching action: %(msg)s') % {'msg':e}))
-    return HttpResponseRedirect('%s/execute/' % request.prefix)
+          ], creationflags=0x08000000)
+    elif sys.executable.find('freppleserver.exe') >= 0:
+      # Py2exe executable
+      Popen([
+        sys.executable.replace('freppleserver.exe', 'frepplectl.exe'),  # frepplectl executable
+        "frepple_runworker",
+        "--database=%s" % worker_database
+        ], creationflags=0x08000000)  # Do not create a console window
+    else:
+      # Linux standard installation
+      Popen([
+        "frepplectl",
+        "frepple_runworker",
+        "--database=%s" % worker_database
+        ])
+  return task
 
 
 @staff_member_required
@@ -225,9 +299,30 @@ def CancelTask(request, taskid):
     raise Http404('Only ajax post requests allowed')
   try:
     task = Task.objects.all().using(request.database).get(pk=taskid)
-    if task.status != 'Waiting':
+    if task.name == 'generate plan' and task.status.endswith("%"):
+      if request.database == DEFAULT_DB_ALIAS:
+        fname = os.path.join(settings.FREPPLE_LOGDIR, 'frepple.log')
+      else:
+        fname = os.path.join(settings.FREPPLE_LOGDIR, 'frepple_%s.log' % request.database)
+      try:
+        # The second line in the log file has the id of the frePPLe process
+        with open(fname, 'rb') as f:
+          t = 0
+          for line in f:
+            if t >= 1:
+              t = line.split()
+              break
+            else:
+              t += 1
+          if t[0] == 'FrePPLe' and t[1] == 'with' and t[2] == 'processid':
+            # Kill the process with signal 9
+            os.kill(int(t[3]), 9)
+            task.message = 'Killed process'
+      except Exception as e:
+        return HttpResponseServerError('Error canceling task')
+    elif task.status != 'Waiting':
       raise Exception('Task is not in waiting status')
-    task.status = 'Canceled';
+    task.status = 'Canceled'
     task.save(using=request.database)
     return HttpResponse(content="OK")
   except Exception as e:
@@ -254,7 +349,9 @@ def logfile(request):
       if f.tell() >= 50000:
         # Too big to display completely
         f.seek(-50000, os.SEEK_END)
-        logdata = force_unicode(_("Displaying only the last 50K from the log file")) + '...\n\n...' + f.read(50000)
+        d = f.read(50000)
+        d = d[d.index(b'\n'):] # Strip the first, incomplete line
+        logdata = force_text(_("Displaying only the last 50K from the log file")) + '...\n\n...' + force_text(d)
       else:
         # Displayed completely
         f.seek(0, os.SEEK_SET)
@@ -263,6 +360,6 @@ def logfile(request):
       f.close()
 
   return render(request, 'execute/logfrepple.html', {
-      'title': _('Log file'),
-      'logdata': logdata,
-      } )
+    'title': _('Log file'),
+    'logdata': logdata,
+    } )

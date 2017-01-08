@@ -1,4 +1,3 @@
-;(function($){
 /**
  * jqGrid Ukrainian Translation v1.0 02.07.2009
  * Sergey Dyagovchenko
@@ -7,20 +6,34 @@
  * http://www.opensource.org/licenses/mit-license.php
  * http://www.gnu.org/licenses/gpl.html
 **/
-$.jgrid = $.jgrid || {};
-$.extend($.jgrid,{
+
+/*jslint white: true */
+/*global jQuery */
+(function($){
+"use strict";
+var locInfo = {
+	isRTL: false,
 	defaults : {
 		recordtext: "Перегляд {0} - {1} з {2}",
-	  emptyrecords: "Немає записів для перегляду",
+		emptyrecords: "Немає записів для перегляду",
 		loadtext: "Завантаження...",
-		pgtext : "Стор. {0} з {1}"
+		pgtext : "Стор. {0} з {1}",
+		pgfirst : "First Page",
+		pglast : "Last Page",
+		pgnext : "Next Page",
+		pgprev : "Previous Page",
+		pgrecs : "Records per Page",
+		showhide: "Toggle Expand Collapse Grid",
+		savetext: "Збереження..."
 	},
 	search : {
     caption: "Пошук...",
     Find: "Знайти",
     Reset: "Скидання",
-    odata: [{ oper:'eq', text:"рівно"},{ oper:'ne', text:"не рівно"},{ oper:'lt', text:"менше"},{ oper:'le', text:"менше або рівне"},{ oper:'gt', text:"більше"},{ oper:'ge', text:"більше або рівне"},{ oper:'bw', text:"починається з"},{ oper:'bn', text:"не починається з"},{ oper:'in', text:"знаходиться в"},{ oper:'ni', text:"не знаходиться в"},{ oper:'ew', text:"закінчується на"},{ oper:'en', text:"не закінчується на"},{ oper:'cn', text:"містить"},{ oper:'nc', text:"не містить"}],
-    groupOps: [	{ op: "AND", text: "все" },	{ op: "OR",  text: "будь-який" }	]
+    odata: [{ oper:'eq', text:"рівно"},{ oper:'ne', text:"не рівно"},{ oper:'lt', text:"менше"},{ oper:'le', text:"менше або рівне"},{ oper:'gt', text:"більше"},{ oper:'ge', text:"більше або рівне"},{ oper:'bw', text:"починається з"},{ oper:'bn', text:"не починається з"},{ oper:'in', text:"знаходиться в"},{ oper:'ni', text:"не знаходиться в"},{ oper:'ew', text:"закінчується на"},{ oper:'en', text:"не закінчується на"},{ oper:'cn', text:"містить"},{ oper:'nc', text:"не містить"},{ oper:'nu', text:'is null'},{ oper:'nn', text:'is not null'}],
+    groupOps: [	{ op: "AND", text: "все" },	{ op: "OR",  text: "будь-який" }],
+	operandTitle : "Click to select search operation.",
+	resetTitle : "Reset Search Value"
 	},
 	edit : {
     addCaption: "Додати запис",
@@ -58,13 +71,13 @@ $.extend($.jgrid,{
 	    bCancel: "Відміна"
 	},
 	nav : {
-  		edittext: " ",
+  		edittext: "",
 	    edittitle: "Змінити вибраний запис",
-  		addtext:" ",
+  		addtext: "",
 	    addtitle: "Додати новий запис",
-	    deltext: " ",
+	    deltext: "",
 	    deltitle: "Видалити вибраний запис",
-	    searchtext: " ",
+	    searchtext: "",
 	    searchtitle: "Знайти записи",
 	    refreshtext: "",
 	    refreshtitle: "Оновити таблицю",
@@ -98,30 +111,35 @@ $.extend($.jgrid,{
 				"Січень", "Лютий", "Березень", "Квітень", "Травень", "Червень", "Липень", "Серпень", "Вересень", "Жовтень", "Листопад", "Грудень"
 			],
 			AmPm : ["am","pm","AM","PM"],
-			S: function (j) {return j < 11 || j > 13 ? ['st', 'nd', 'rd', 'th'][Math.min((j - 1) % 10, 3)] : 'th'},
+			S: function (j) {return j < 11 || j > 13 ? ['st', 'nd', 'rd', 'th'][Math.min((j - 1) % 10, 3)] : 'th';},
 			srcformat: 'Y-m-d',
 			newformat: 'd.m.Y',
-			parseRe : /[Tt\\\/:_;.,\t\s-]/,
 			masks : {
-	            ISO8601Long:"Y-m-d H:i:s",
-	            ISO8601Short:"Y-m-d",
 	            ShortDate: "n.j.Y",
 	            LongDate: "l, F d, Y",
 	            FullDateTime: "l, F d, Y G:i:s",
 	            MonthDay: "F d",
 	            ShortTime: "G:i",
 	            LongTime: "G:i:s",
-	            SortableDateTime: "Y-m-d\\TH:i:s",
-	            UniversalSortableDateTime: "Y-m-d H:i:sO",
 	            YearMonth: "F, Y"
-	        },
-	        reformatAfterEdit : false
-		},
-		baseLinkUrl: '',
-		showAction: '',
-	  target: '',
-	  checkbox : {disabled:true},
-		idName : 'id'
+	        }
+		}
+	}
+};
+$.jgrid = $.jgrid || {};
+$.extend(true, $.jgrid, {
+	defaults: {
+		locale: "ua"
+	},
+	locales: {
+		// In general the property name is free, but it's recommended to use the names based on
+		// http://www.iana.org/assignments/language-subtag-registry/language-subtag-registry
+		// http://rishida.net/utils/subtags/ and RFC 5646. See Appendix A of RFC 5646 for examples.
+		// One can use the lang attribute to specify language tags in HTML, and the xml:lang attribute for XML
+		// if it exists. See http://www.w3.org/International/articles/language-tags/#extlang
+		ua: $.extend({}, locInfo, { name: "українська", nameEnglish: "Ukrainian" }),
+		uk: $.extend({}, locInfo, { name: "українська", nameEnglish: "Ukrainian" }),
+		"uk-UA": $.extend({}, locInfo, { name: "українська (Україна)", nameEnglish: "Ukrainian (Ukraine)" })
 	}
 });
-})(jQuery);
+}(jQuery));

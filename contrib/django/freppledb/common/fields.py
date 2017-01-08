@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba
+# Copyright (C) 2007-2013 by frePPLe bvba
 #
 # This library is free software; you can redistribute it and/or modify it
 # under the terms of the GNU Affero General Public License as published
@@ -17,88 +17,92 @@
 
 from decimal import Decimal
 import json
+import math
+import re
 
 import django.forms.fields as fields
 import django.db.models as models
-from django.db.backends.util import format_number
-from django.forms.widgets import MultiWidget, TextInput, Select
 from django.utils.translation import ugettext_lazy as _
 from django.utils import six
 from django.conf import settings
+from django.forms.widgets import TextInput
+from django.core.exceptions import ValidationError
 
 
 #
-# DURATIONFIELD
+# DURATIONFIELD   TODO Use standard django duration field
 #
 # This field is stored in the database as an Decimal field, but it is displayed
-# in forms as a combination of a text window and a dropdown to select the time units.
+# in forms as a text in the form 'DD HH:MM:SS'.
 #
 
-class DurationWidget(MultiWidget):
-  def __init__(self, attrs=None):
-    widgets = (
-      TextInput(attrs),
-      Select(choices=(
-            ("",""),
-            ("seconds",_("seconds")),
-            ("minutes",_("minutes")),
-            ("hours",_("hours")),
-            ("days",_("days")),
-            ("weeks",_("weeks"))
-            ), attrs={'onclick': 'getUnits(this)', 'onchange':'setUnits(this)'} ),
-      )
-    super(DurationWidget, self).__init__(widgets, attrs)
+class DurationWidget(TextInput):
 
-  def decompress(self, value):
-    if value == None or value == 0: return [value, '']
-    if value % 604800 == 0: return [value/Decimal(604800), 'weeks']
-    if value % 60 == 0 and value < 3600: return [value/Decimal(60), 'minutes']
-    if value % 3600 != 0 and value < 86400: return [value, 'seconds']
-    if value % 86400 != 0 and value < 604800: return [value/Decimal(3600), 'hours']
-    return [value/Decimal(86400), u"days"]
-
-  def format_output(self, rendered_widgets):
-    return "%s&nbsp;%s" % (rendered_widgets[0], rendered_widgets[1])
-
-  def value_from_datadict(self, data, files, name):
-    return [data.get(name,data.get('%s_0' % name,0)), data.get('%s_1' % name,'seconds')]
+    def render(self, name, value, attrs=None):
+      try:
+        value = float(value)
+        days = math.floor(value / 86400)
+        hours = math.floor((value - (days * 86400)) / 3600)
+        minutes = math.floor((value - (days * 86400) - (hours * 3600)) / 60)
+        seconds = value - (days * 86400) - (hours * 3600) - (minutes * 60)
+        if days > 0:
+          value = "%d %02d:%02d:%02d" % (days, hours, minutes, seconds)
+        elif hours > 0:
+          value = "%2d:%02d:%02d" % (hours, minutes, seconds)
+        elif minutes > 0:
+          value = "%2d:%02d" % (minutes, seconds)
+        else:
+          value = seconds
+      except:
+        pass
+      return super(DurationWidget, self).render(name, value, attrs)
 
 
-class DurationFormField(fields.MultiValueField):
+numericTypes = (Decimal, float) + six.integer_types
+
+
+class DurationFormField(fields.RegexField):
 
   widget = DurationWidget
 
-  def __init__(self, *args, **kwargs):
-    self.max_digits = kwargs.pop('decimal_places', settings.DECIMAL_PLACES)
-    self.decimal_places = kwargs.pop('max_digits', settings.MAX_DIGITS)
-    kwargs.update({'required':False})
-    f = (
-        fields.DecimalField(*args, **kwargs),
-        fields.ChoiceField(
-          choices=(
-            ("seconds",_("seconds")),
-            ("minutes",_("minutes")),
-            ("hours",_("hours")),
-            ("days",_("days")),
-            ("weeks",_("weeks")),
-            ), required=False)
-        )
-    super(DurationFormField, self).__init__(
-      fields=f, widget=DurationWidget(),
-      label=kwargs.get('label',''),
-      help_text=kwargs.get('help_text',None)
-      )
-    self.required = kwargs.get('required',False)
+  regex = re.compile(r'[0-9]*$')
 
-  def compress(self, data_list):
-    if len(data_list) == 0: return None
-    val, unit = data_list
-    if val == None or val == u'': return None
-    elif unit == 'hours': val = val * Decimal(3600)
-    elif unit == 'minutes': val = val * Decimal(60)
-    elif unit == 'days': val = val * Decimal(86400)
-    elif unit != 'seconds': val = val * Decimal(604800)
-    return format_number(float(val), self.max_digits, self.decimal_places)
+  def __init__(self, *args, **kwargs):
+    self.max_digits = kwargs.pop('decimal_places', 4)
+    self.decimal_places = kwargs.pop('max_digits', 15)
+    kwargs.update({
+      'regex': self.regex,
+      'error_message': _('Expected format "DD HH:MM:SS", "HH:MM:SS", "MM:SS" or "SS"')
+      })
+    super(DurationFormField, self).__init__(**kwargs)
+
+  def to_python(self, value):
+    if isinstance(value, numericTypes) or value is None:
+      # Empty fields and numeric values pass directly
+      return value
+    if value == '':
+      return None
+
+    # Parse the input string to a decimal number, representing the number of seconds
+    try:
+      t = value.strip().split(":")
+      tl = len(t)
+      if tl <= 1:
+        # Seconds only
+        return float(t[0])
+      elif tl == 2:
+        # Minutes and seconds
+        return int(t[0]) * 60 + float(t[1])
+      elif tl == 3:
+        v = t[0].split(' ')
+        if len(v) > 1:
+          # Days, hours, minutes, seconds
+          return int(v[0]) * 86400 + int(v[1]) * 3600 + int(t[1]) * 60 + float(t[2])
+        else:
+          # Hours, minutes, seconds
+          return int(t[0]) * 3600 + int(t[1]) * 60 + float(t[2])
+    except:
+      raise ValidationError(_('Expected format "DD HH:MM:SS", "HH:MM:SS", "MM:SS" or "SS"'), code='invalid')
 
 
 class DurationField(models.DecimalField):
@@ -117,9 +121,7 @@ class DurationField(models.DecimalField):
 # This code is very loosely inspired on the code found at:
 #    https://github.com/bradjasper/django-jsonfield
 
-class JSONField(models.TextField):
-
-  __metaclass__ = models.SubfieldBase
+class JSONField(models.TextField, metaclass=models.SubfieldBase):
 
   def __init__(self, *args, **kwargs):
     self.dump_kwargs = kwargs.pop('dump_kwargs', {
@@ -137,7 +139,8 @@ class JSONField(models.TextField):
 
   def get_db_prep_value(self, value, connection, prepared=False):
     """Convert JSON object to a string."""
-    if self.null and value is None: return None
+    if self.null and value is None:
+      return None
     return json.dumps(value, **self.dump_kwargs)
 
   def value_to_string(self, obj):
@@ -146,7 +149,8 @@ class JSONField(models.TextField):
 
   def value_from_object(self, obj):
     value = super(JSONField, self).value_from_object(obj)
-    if self.null and value is None: return None
+    if self.null and value is None:
+      return None
     return self.dumps_for_display(value)
 
   def dumps_for_display(self, value):
@@ -157,4 +161,3 @@ class JSONField(models.TextField):
       return 'json'
     else:
       return super(JSONField, self).db_type(connection)
-

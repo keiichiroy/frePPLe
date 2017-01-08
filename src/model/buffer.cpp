@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba                 *
+ * Copyright (C) 2007-2015 by frePPLe bvba                                 *
  *                                                                         *
  * This library is free software; you can redistribute it and/or modify it *
  * under the terms of the GNU Affero General Public License as published   *
@@ -24,10 +24,10 @@
 
 // This is the name used for the dummy operation used to represent the
 // inventory.
-#define INVENTORY_OPERATION "Inventory of buffer '" + string(getName()) + "'"
+#define INVENTORY_OPERATION "Inventory " + string(getName())
 
 // This is the name used for the dummy operation used to represent procurements
-#define PROCURE_OPERATION "Procure for buffer '" + string(getName()) + "'"
+#define PURCHASE_OPERATION "Purchase " + string(getName())
 
 namespace frepple
 {
@@ -38,12 +38,16 @@ DECLARE_EXPORT const MetaClass* BufferDefault::metadata,
                *BufferInfinite::metadata,
                *BufferProcure::metadata;
 DECLARE_EXPORT const double Buffer::default_max = 1e37;
+DECLARE_EXPORT OperationFixedTime *Buffer::uninitializedProducing = NULL;
 
 
 int Buffer::initialize()
 {
   // Initialize the metadata
-  metadata = new MetaCategory("buffer", "buffers", reader, writer);
+  metadata = MetaCategory::registerCategory<Buffer>("buffer", "buffers", reader, finder);
+  registerFields<Buffer>(const_cast<MetaCategory*>(metadata));
+
+  uninitializedProducing = new OperationFixedTime();
 
   // Initialize the Python class
   return FreppleCategory<Buffer>::initialize();
@@ -53,10 +57,10 @@ int Buffer::initialize()
 int BufferDefault::initialize()
 {
   // Initialize the metadata
-  BufferDefault::metadata = new MetaClass(
+  BufferDefault::metadata = MetaClass::registerClass<BufferDefault>(
     "buffer",
     "buffer_default",
-    Object::createString<BufferDefault>, true);
+    Object::create<BufferDefault>, true);
 
   // Initialize the Python class
   return FreppleClass<BufferDefault,Buffer>::initialize();
@@ -66,10 +70,10 @@ int BufferDefault::initialize()
 int BufferInfinite::initialize()
 {
   // Initialize the metadata
-  BufferInfinite::metadata = new MetaClass(
+  metadata = MetaClass::registerClass<BufferInfinite>(
     "buffer",
     "buffer_infinite",
-    Object::createString<BufferInfinite>);
+    Object::create<BufferInfinite>);
 
   // Initialize the Python class
   return FreppleClass<BufferInfinite,Buffer>::initialize();
@@ -79,13 +83,49 @@ int BufferInfinite::initialize()
 int BufferProcure::initialize()
 {
   // Initialize the metadata
-  BufferProcure::metadata = new MetaClass(
+  metadata = MetaClass::registerClass<BufferProcure>(
     "buffer",
     "buffer_procure",
-    Object::createString<BufferProcure>);
+    Object::create<BufferProcure>);
+  registerFields<BufferProcure>(const_cast<MetaClass*>(metadata));
 
   // Initialize the Python class
   return FreppleClass<BufferProcure,Buffer>::initialize();
+}
+
+
+DECLARE_EXPORT void Buffer::setItem(Item* i)
+{
+  if (it == i)
+    // No change
+    return;
+
+  // Unlink from previous item
+  if (it)
+  {
+    if (it->firstItemBuffer == this)
+      it->firstItemBuffer = nextItemBuffer;
+    else
+    {
+      Buffer* buf = it->firstItemBuffer;
+      while (buf && buf->nextItemBuffer != this)
+        buf = buf->nextItemBuffer;
+      if (!buf)
+        throw LogicException("corrupted buffer list for an item");
+      buf->nextItemBuffer = nextItemBuffer;
+    }
+  }
+
+  // Link at new item
+  it = i;
+  if (it)
+  {
+    nextItemBuffer = it->firstItemBuffer;
+    it->firstItemBuffer = this;
+  }
+
+  // Mark changed
+  setChanged();
 }
 
 
@@ -98,8 +138,8 @@ DECLARE_EXPORT void Buffer::setOnHand(double f)
   {
     // Create a fixed time operation with zero leadtime, hidden from the xml
     // output, hidden for the solver, and without problem detection.
-    o = new OperationFixedTime(INVENTORY_OPERATION);
-    Operation::add(o);  // No need to check again for existance
+    o = new OperationFixedTime();
+    o->setName(INVENTORY_OPERATION);
     o->setHidden(true);
     o->setDetectProblems(false);
     fl = new FlowEnd(o, this, 1);
@@ -123,18 +163,32 @@ DECLARE_EXPORT void Buffer::setOnHand(double f)
     // No operationplan exists yet
     OperationPlan *opplan = o->createOperationPlan(
         fabs(f), Date::infinitePast, Date::infinitePast);
-    opplan->setLocked(true);
-    // Note that we use the max counter for the onhand operationplans.
-    opplan->activate(false);
+    opplan->setConfirmed(true);
+    opplan->activate();
   }
   else
   {
     // Update the existing operationplan
-    i->setLocked(false);
+    i->setConfirmed(false);
     i->setQuantity(fabs(f));
-    i->setLocked(true);
+    i->setConfirmed(true);
   }
   setChanged();
+}
+
+
+DECLARE_EXPORT double Buffer::getOnHand() const
+{
+  for (flowplanlist::const_iterator i = flowplans.begin(); i!=flowplans.end(); ++i)
+  {
+    if(i->getDate()) return 0.0; // Inventory event is always at start of horizon
+    if(i->getEventType() != 1) continue;
+    const FlowPlan *fp = static_cast<const FlowPlan*>(&*i);
+    if (fp->getFlow()->getOperation()->getName() == string(INVENTORY_OPERATION)
+      && fabs(fp->getQuantity()) > ROUNDING_ERROR)
+        return fp->getQuantity();
+  }
+  return 0.0;
 }
 
 
@@ -201,170 +255,6 @@ DECLARE_EXPORT double Buffer::getOnHand(Date d1, Date d2, bool min) const
 }
 
 
-DECLARE_EXPORT void Buffer::writeElement(XMLOutput *o, const Keyword &tag, mode m) const
-{
-  // Writing a reference
-  if (m == REFERENCE)
-  {
-    o->writeElement(tag, Tags::tag_name, getName());
-    return;
-  }
-
-  // Write the complete object
-  if (m != NOHEAD && m != NOHEADTAIL)
-    o->BeginObject(tag, Tags::tag_name, XMLEscape(getName()));
-
-  // Write own fields
-  HasDescription::writeElement(o, tag);
-  HasHierarchy<Buffer>::writeElement(o, tag);
-  o->writeElement(Tags::tag_producing, producing_operation);
-  o->writeElement(Tags::tag_item, it);
-  o->writeElement(Tags::tag_location, loc);
-  Plannable::writeElement(o, tag);
-
-  // Onhand
-  flowplanlist::const_iterator i = flowplans.begin();
-  // Loop through the flowplans at the start of the horizon
-  for (; i!=flowplans.end() && i->getType()!=1 && !i->getDate(); ++i) ;
-  if (i!=flowplans.end() && i->getType()==1)
-  {
-    // A flowplan has been found
-    const FlowPlan *fp = dynamic_cast<const FlowPlan*>(&*i);
-    if (fp
-        && fp->getFlow()->getOperation()->getName() == string(INVENTORY_OPERATION)
-        && fabs(fp->getQuantity()) > ROUNDING_ERROR)
-      o->writeElement(Tags::tag_onhand, fp->getQuantity());
-  }
-
-  // Minimum and maximum inventory targets, carrying cost
-  if (min_val != 0) o->writeElement(Tags::tag_minimum, min_val);
-  o->writeElement(Tags::tag_minimum_calendar, min_cal);
-  if (max_val != default_max) o->writeElement(Tags::tag_maximum, max_val);
-  o->writeElement(Tags::tag_maximum_calendar, max_cal);
-  if (getCarryingCost()!= 0.0)
-    o->writeElement(Tags::tag_carrying_cost, getCarryingCost());
-
-  // Write extra plan information
-  i = flowplans.begin();
-  if ((o->getContentType() == XMLOutput::PLAN
-      || o->getContentType() == XMLOutput::PLANDETAIL) && i!=flowplans.end())
-  {
-    o->BeginObject(Tags::tag_flowplans);
-    for (; i!=flowplans.end(); ++i)
-      if (i->getType()==1)
-        dynamic_cast<const FlowPlan*>(&*i)->writeElement(o, Tags::tag_flowplan);
-    o->EndObject(Tags::tag_flowplans);
-    bool first = true;
-    for (Problem::const_iterator j = Problem::begin(const_cast<Buffer*>(this), true); j!=Problem::end(); ++j)
-    {
-      if (first)
-      {
-        first = false;
-        o->BeginObject(Tags::tag_problems);
-      }
-      o->writeElement(Tags::tag_problem, *j, FULL);
-    }
-    if (!first) o->EndObject(Tags::tag_problems);
-  }
-
-  // Ending tag
-  if (m != NOHEADTAIL && m != NOTAIL) o->EndObject(tag);
-}
-
-
-DECLARE_EXPORT void Buffer::beginElement(XMLInput& pIn, const Attribute& pAttr)
-{
-  if (pAttr.isA(Tags::tag_flow)
-      && pIn.getParentElement().first.isA(Tags::tag_flows))
-  {
-    Flow *f =
-      dynamic_cast<Flow*>(MetaCategory::ControllerDefault(Flow::metadata,pIn.getAttributes()));
-    if (f) f->setBuffer(this);
-    pIn.readto (f);
-  }
-  else if (pAttr.isA(Tags::tag_producing))
-    pIn.readto( Operation::reader(Operation::metadata,pIn.getAttributes()) );
-  else if (pAttr.isA(Tags::tag_item))
-    pIn.readto( Item::reader(Item::metadata,pIn.getAttributes()) );
-  else if (pAttr.isA(Tags::tag_minimum_calendar)
-      || pAttr.isA(Tags::tag_maximum_calendar))
-    pIn.readto( Calendar::reader(Calendar::metadata,pIn.getAttributes()) );
-  else if (pAttr.isA(Tags::tag_location))
-    pIn.readto( Location::reader(Location::metadata,pIn.getAttributes()) );
-  else if (pAttr.isA(Tags::tag_flowplans))
-    pIn.IgnoreElement();
-  else
-    HasHierarchy<Buffer>::beginElement(pIn, pAttr);
-}
-
-
-DECLARE_EXPORT void Buffer::endElement(XMLInput& pIn, const Attribute& pAttr, const DataElement& pElement)
-{
-  if (pAttr.isA(Tags::tag_producing))
-  {
-    Operation *b = dynamic_cast<Operation*>(pIn.getPreviousObject());
-    if (b) setProducingOperation(b);
-    else throw LogicException("Incorrect object type during read operation");
-  }
-  else if (pAttr.isA(Tags::tag_item))
-  {
-    Item *a = dynamic_cast<Item*>(pIn.getPreviousObject());
-    if (a) setItem(a);
-    else throw LogicException("Incorrect object type during read operation");
-  }
-  else if (pAttr.isA(Tags::tag_onhand))
-    setOnHand(pElement.getDouble());
-  else if (pAttr.isA(Tags::tag_minimum))
-    setMinimum(pElement.getDouble());
-  else if (pAttr.isA(Tags::tag_maximum))
-    setMaximum(pElement.getDouble());
-  else if (pAttr.isA(Tags::tag_minimum_calendar))
-  {
-    CalendarDouble *mincal =
-      dynamic_cast<CalendarDouble*>(pIn.getPreviousObject());
-    if (mincal)
-      setMinimumCalendar(mincal);
-    else
-    {
-      Calendar *c = dynamic_cast<Calendar*>(pIn.getPreviousObject());
-      if (!c)
-        throw LogicException("Incorrect object type during read operation");
-      throw DataException("Calendar '" + c->getName() +
-          "' has invalid type for use as buffer min calendar");
-    }
-  }
-  else if (pAttr.isA(Tags::tag_maximum_calendar))
-  {
-    CalendarDouble *maxcal =
-      dynamic_cast<CalendarDouble*>(pIn.getPreviousObject());
-    if (maxcal)
-      setMaximumCalendar(maxcal);
-    else
-    {
-      Calendar *c = dynamic_cast<Calendar*>(pIn.getPreviousObject());
-      if (!c)
-        throw LogicException("Incorrect object type during read operation");
-      throw DataException("Calendar '" + c->getName() +
-          "' has invalid type for use as buffer max calendar");
-    }
-  }
-  else if (pAttr.isA(Tags::tag_location))
-  {
-    Location * d = dynamic_cast<Location*>(pIn.getPreviousObject());
-    if (d) setLocation(d);
-    else throw LogicException("Incorrect object type during read operation");
-  }
-  else if (pAttr.isA(Tags::tag_carrying_cost))
-    setCarryingCost(pElement.getDouble());
-  else
-  {
-    Plannable::endElement(pIn, pAttr, pElement);
-    HasDescription::endElement(pIn, pAttr, pElement);
-    HasHierarchy<Buffer>::endElement(pIn, pAttr, pElement);
-  }
-}
-
-
 DECLARE_EXPORT void Buffer::setMinimum(double m)
 {
   // There is already a minimum calendar.
@@ -383,7 +273,7 @@ DECLARE_EXPORT void Buffer::setMinimum(double m)
 
   // Create or update a single timeline min event
   for (flowplanlist::iterator oo=flowplans.begin(); oo!=flowplans.end(); oo++)
-    if (oo->getType() == 3)
+    if (oo->getEventType() == 3)
     {
       // Update existing event
       static_cast<flowplanlist::EventMinQuantity *>(&*oo)->setMin(min_val);
@@ -391,12 +281,12 @@ DECLARE_EXPORT void Buffer::setMinimum(double m)
     }
   // Create new event
   flowplanlist::EventMinQuantity *newEvent =
-    new flowplanlist::EventMinQuantity(Date::infinitePast, min_val);
+    new flowplanlist::EventMinQuantity(Date::infinitePast, &flowplans, min_val);
   flowplans.insert(newEvent);
 }
 
 
-DECLARE_EXPORT void Buffer::setMinimumCalendar(CalendarDouble *cal)
+DECLARE_EXPORT void Buffer::setMinimumCalendar(Calendar *cal)
 {
   // Resetting the same calendar
   if (min_cal == cal) return;
@@ -406,7 +296,7 @@ DECLARE_EXPORT void Buffer::setMinimumCalendar(CalendarDouble *cal)
 
   // Delete previous events.
   for (flowplanlist::iterator oo=flowplans.begin(); oo!=flowplans.end(); )
-    if (oo->getType() == 3)
+    if (oo->getEventType() == 3)
     {
       flowplans.erase(&(*oo));
       delete &(*(oo++));
@@ -422,14 +312,14 @@ DECLARE_EXPORT void Buffer::setMinimumCalendar(CalendarDouble *cal)
 
   // Create timeline structures for every event. A new entry is created only
   // when the value changes.
-  min_cal = const_cast< CalendarDouble* >(cal);
+  min_cal = cal;
   double curMin = 0.0;
-  for (CalendarDouble::EventIterator x(min_cal); x.getDate()<Date::infiniteFuture; ++x)
+  for (Calendar::EventIterator x(min_cal); x.getDate()<Date::infiniteFuture; ++x)
     if (curMin != x.getValue())
     {
       curMin = x.getValue();
       flowplanlist::EventMinQuantity *newBucket =
-        new flowplanlist::EventMinQuantity(x.getDate(), curMin);
+        new flowplanlist::EventMinQuantity(x.getDate(), &flowplans, curMin);
       flowplans.insert(newBucket);
     }
 }
@@ -453,7 +343,7 @@ DECLARE_EXPORT void Buffer::setMaximum(double m)
 
   // Create or update a single timeline max event
   for (flowplanlist::iterator oo=flowplans.begin(); oo!=flowplans.end(); oo++)
-    if (oo->getType() == 4)
+    if (oo->getEventType() == 4)
     {
       // Update existing event
       static_cast<flowplanlist::EventMaxQuantity *>(&*oo)->setMax(max_val);
@@ -461,12 +351,12 @@ DECLARE_EXPORT void Buffer::setMaximum(double m)
     }
   // Create new event
   flowplanlist::EventMaxQuantity *newEvent =
-    new flowplanlist::EventMaxQuantity(Date::infinitePast, max_val);
+    new flowplanlist::EventMaxQuantity(Date::infinitePast, &flowplans, max_val);
   flowplans.insert(newEvent);
 }
 
 
-DECLARE_EXPORT void Buffer::setMaximumCalendar(CalendarDouble *cal)
+DECLARE_EXPORT void Buffer::setMaximumCalendar(Calendar *cal)
 {
   // Resetting the same calendar
   if (max_cal == cal) return;
@@ -476,7 +366,7 @@ DECLARE_EXPORT void Buffer::setMaximumCalendar(CalendarDouble *cal)
 
   // Delete previous events.
   for (flowplanlist::iterator oo=flowplans.begin(); oo!=flowplans.end(); )
-    if (oo->getType() == 4)
+    if (oo->getEventType() == 4)
     {
       flowplans.erase(&(*oo));
       delete &(*(oo++));
@@ -492,14 +382,14 @@ DECLARE_EXPORT void Buffer::setMaximumCalendar(CalendarDouble *cal)
 
   // Create timeline structures for every bucket. A new entry is created only
   // when the value changes.
-  max_cal = const_cast<CalendarDouble*>(cal);
+  max_cal = cal;
   double curMax = 0.0;
-  for (CalendarDouble::EventIterator x(max_cal); x.getDate()<Date::infiniteFuture; ++x)
+  for (Calendar::EventIterator x(max_cal); x.getDate()<Date::infiniteFuture; ++x)
     if (curMax != x.getValue())
     {
       curMax = x.getValue();
       flowplanlist::EventMaxQuantity *newBucket =
-        new flowplanlist::EventMaxQuantity(x.getDate(), curMax);
+        new flowplanlist::EventMaxQuantity(x.getDate(), &flowplans, curMax);
       flowplans.insert(newBucket);
     }
 }
@@ -527,6 +417,22 @@ DECLARE_EXPORT Buffer::~Buffer()
   // The Flow objects are automatically deleted by the destructor of the
   // Association list class.
 
+  // Unlink from the item
+  if (it)
+  {
+    if (it->firstItemBuffer == this)
+      it->firstItemBuffer = nextItemBuffer;
+    else
+    {
+      Buffer* buf = it->firstItemBuffer;
+      while (buf && buf->nextItemBuffer != this)
+        buf = buf->nextItemBuffer;
+      if (!buf)
+        throw LogicException("corrupted buffer list for an item");
+      buf->nextItemBuffer = nextItemBuffer;
+    }
+  }
+
   // Remove the inventory operation
   Operation *invoper = Operation::find(INVENTORY_OPERATION);
   if (invoper) delete invoper;
@@ -534,20 +440,23 @@ DECLARE_EXPORT Buffer::~Buffer()
 
 
 DECLARE_EXPORT void Buffer::followPegging
-(PeggingIterator& iter, FlowPlan* curflowplan, short nextlevel, double curqty, double curfactor)
+(PeggingIterator& iter, FlowPlan* curflowplan, double qty, double offset, short lvl)
 {
+  if (!curflowplan->getOperationPlan()->getQuantity() || curflowplan->getBuffer()->getTool())
+    // Flowplans with quantity 0 have no pegging.
+    // Flowplans for buffers representing tools have no pegging either.
+    return;
 
-  double peggedQty(0);
-  Buffer::flowplanlist::const_iterator f = getFlowPlans().begin(curflowplan);
-
+  Buffer::flowplanlist::iterator f = getFlowPlans().begin(curflowplan);
   if (curflowplan->getQuantity() < -ROUNDING_ERROR && !iter.isDownstream())
   {
     // CASE 1:
     // This is a flowplan consuming from a buffer. Navigating upstream means
     // finding the flowplans producing this consumed material.
-    double endQty = f->getCumulativeConsumed();
-    double startQty = endQty + f->getQuantity();
-    if (f->getCumulativeProduced() <= startQty)
+    double scale = - curflowplan->getQuantity() / curflowplan->getOperationPlan()->getQuantity();
+    double startQty = f->getCumulativeConsumed() + f->getQuantity() + offset * scale;
+    double endQty = startQty + qty * scale;
+    if (f->getCumulativeProduced() <= startQty + ROUNDING_ERROR)
     {
       // CASE 1A: Not produced enough yet: move forward
       while (f!=getFlowPlans().end()
@@ -561,16 +470,24 @@ DECLARE_EXPORT void Buffer::followPegging
         if (f->getQuantity() > ROUNDING_ERROR)
         {
           double newqty = f->getQuantity();
+          double newoffset = 0.0;
           if (f->getCumulativeProduced()-f->getQuantity() < startQty)
-            newqty -= startQty - (f->getCumulativeProduced()-f->getQuantity());
+          {
+            newoffset = startQty - (f->getCumulativeProduced()-f->getQuantity());
+            newqty -= newoffset;
+          }
           if (f->getCumulativeProduced() > endQty)
             newqty -= f->getCumulativeProduced() - endQty;
-          peggedQty += newqty;
-          const FlowPlan *x = dynamic_cast<const FlowPlan*>(&(*f));
-          iter.updateStack(nextlevel,
-              -curqty*newqty/curflowplan->getQuantity(),
-              curfactor*newqty/f->getQuantity(),
-              curflowplan, x);
+          OperationPlan *opplan = dynamic_cast<const FlowPlan*>(&(*f))->getOperationPlan();
+          OperationPlan *topopplan = opplan->getTopOwner();
+          if (topopplan->getOperation()->getType() == *OperationSplit::metadata)
+            topopplan = opplan;
+          iter.updateStack(
+            topopplan,
+            topopplan->getQuantity() * newqty / f->getQuantity(),
+            topopplan->getQuantity() * newoffset / f->getQuantity(),
+            lvl
+            );
         }
         ++f;
       }
@@ -587,29 +504,28 @@ DECLARE_EXPORT void Buffer::followPegging
         if (f->getQuantity() > ROUNDING_ERROR)
         {
           double newqty = f->getQuantity();
+          double newoffset = 0.0;
           if (f->getCumulativeProduced()-f->getQuantity() < startQty)
-            newqty -= startQty - (f->getCumulativeProduced()-f->getQuantity());
+          {
+            newoffset = startQty - (f->getCumulativeProduced()-f->getQuantity());
+            newqty -= newoffset;
+          }
           if (f->getCumulativeProduced() > endQty)
             newqty -= f->getCumulativeProduced() - endQty;
-          peggedQty += newqty;
-          const FlowPlan *x = dynamic_cast<const FlowPlan*>(&(*f));
-          iter.updateStack(nextlevel,
-              -curqty*newqty/curflowplan->getQuantity(),
-              curfactor*newqty/f->getQuantity(),
-              curflowplan, x);
+          OperationPlan *opplan = dynamic_cast<FlowPlan*>(&(*f))->getOperationPlan();
+          OperationPlan *topopplan = opplan->getTopOwner();
+          if (topopplan->getOperation()->getType() == *OperationSplit::metadata)
+            topopplan = opplan;
+          iter.updateStack(
+            topopplan,
+            topopplan->getQuantity() * newqty / f->getQuantity(),
+            topopplan->getQuantity() * newoffset / f->getQuantity(),
+            lvl
+            );
         }
         --f;
       }
     }
-    if (peggedQty < endQty - startQty - ROUNDING_ERROR)
-      // Unproduced material (i.e. material that is consumed but never
-      // produced) is handled with a special entry on the stack.
-      iter.updateStack(nextlevel,
-          curqty*(peggedQty - endQty + startQty)/curflowplan->getQuantity(),
-          curfactor,
-          curflowplan,
-          NULL,
-          false);
     return;
   }
 
@@ -618,9 +534,10 @@ DECLARE_EXPORT void Buffer::followPegging
     // CASE 2:
     // This is a flowplan producing in a buffer. Navigating downstream means
     // finding the flowplans consuming this produced material.
-    double endQty = f->getCumulativeProduced();
-    double startQty = endQty - f->getQuantity();
-    if (f->getCumulativeConsumed() <= startQty)
+    double scale = curflowplan->getQuantity() / curflowplan->getOperationPlan()->getQuantity();
+    double startQty = f->getCumulativeProduced() - f->getQuantity() + offset * scale;
+    double endQty = startQty + qty * scale;
+    if (f->getCumulativeConsumed() <= startQty + ROUNDING_ERROR)
     {
       // CASE 2A: Not consumed enough yet: move forward
       while (f!=getFlowPlans().end()
@@ -634,16 +551,24 @@ DECLARE_EXPORT void Buffer::followPegging
         if (f->getQuantity() < -ROUNDING_ERROR)
         {
           double newqty = - f->getQuantity();
+          double newoffset = 0.0;
           if (f->getCumulativeConsumed()+f->getQuantity() < startQty)
-            newqty -= startQty - (f->getCumulativeConsumed()+f->getQuantity());
+          {
+            newoffset = startQty - (f->getCumulativeConsumed()+f->getQuantity());
+            newqty -= newoffset;
+          }
           if (f->getCumulativeConsumed() > endQty)
             newqty -= f->getCumulativeConsumed() - endQty;
-          peggedQty += newqty;
-          const FlowPlan *x = dynamic_cast<const FlowPlan*>(&(*f));
-          iter.updateStack(nextlevel,
-              curqty*newqty/curflowplan->getQuantity(),
-              -curfactor*newqty/f->getQuantity(),
-              x, curflowplan);
+          OperationPlan *opplan = dynamic_cast<FlowPlan*>(&(*f))->getOperationPlan();
+          OperationPlan *topopplan = opplan->getTopOwner();
+          if (topopplan->getOperation()->getType() == *OperationSplit::metadata)
+            topopplan = opplan;
+          iter.updateStack(
+            topopplan,
+            - topopplan->getQuantity() * newqty / f->getQuantity(),
+            - topopplan->getQuantity() * newoffset / f->getQuantity(),
+            lvl
+            );
         }
         ++f;
       }
@@ -659,108 +584,26 @@ DECLARE_EXPORT void Buffer::followPegging
         if (f->getQuantity() < -ROUNDING_ERROR)
         {
           double newqty = - f->getQuantity();
+          double newoffset = 0.0;
           if (f->getCumulativeConsumed()+f->getQuantity() < startQty)
             newqty -= startQty - (f->getCumulativeConsumed()+f->getQuantity());
           if (f->getCumulativeConsumed() > endQty)
             newqty -= f->getCumulativeConsumed() - endQty;
-          peggedQty += newqty;
-          const FlowPlan *x = dynamic_cast<const FlowPlan*>(&(*f));
-          iter.updateStack(nextlevel,
-              curqty*newqty/curflowplan->getQuantity(),
-              -curfactor*newqty/f->getQuantity(),
-              x, curflowplan);
+          OperationPlan *opplan = dynamic_cast<FlowPlan*>(&(*f))->getOperationPlan();
+          OperationPlan *topopplan = opplan->getTopOwner();
+          if (topopplan->getOperation()->getType() == *OperationSplit::metadata)
+            topopplan = opplan;
+          iter.updateStack(
+            topopplan,
+            - topopplan->getQuantity() * newqty / f->getQuantity(),
+            - topopplan->getQuantity() * newoffset / f->getQuantity(),
+            lvl
+            );
         }
         --f;
       }
     }
-    if (peggedQty < endQty - startQty)
-      // Unpegged material (i.e. material that is produced but never consumed)
-      // is handled with a special entry on the stack.
-      iter.updateStack(nextlevel,
-          curqty*(endQty - startQty - peggedQty)/curflowplan->getQuantity(),
-          curfactor,
-          NULL, curflowplan,
-          false);
-    return;
   }
-}
-
-
-DECLARE_EXPORT void BufferInfinite::writeElement
-(XMLOutput *o, const Keyword &tag, mode m) const
-{
-  // Writing a reference
-  if (m == REFERENCE)
-  {
-    o->writeElement
-    (tag, Tags::tag_name, getName(), Tags::tag_type, getType().type);
-    return;
-  }
-
-  // Write the complete object
-  if (m != NOHEAD && m != NOHEADTAIL) o->BeginObject
-    (tag, Tags::tag_name, XMLEscape(getName()), Tags::tag_type, getType().type);
-
-  // Write the fields and an ending tag
-  Buffer::writeElement(o, tag, NOHEAD);
-}
-
-
-DECLARE_EXPORT void BufferProcure::endElement(XMLInput& pIn, const Attribute& pAttr, const DataElement& pElement)
-{
-  if (pAttr.isA(Tags::tag_leadtime))
-    setLeadtime(pElement.getTimeperiod());
-  else if (pAttr.isA(Tags::tag_fence))
-    setFence(pElement.getTimeperiod());
-  else if (pAttr.isA(Tags::tag_size_maximum))
-    setSizeMaximum(pElement.getDouble());
-  else if (pAttr.isA(Tags::tag_size_minimum))
-    setSizeMinimum(pElement.getDouble());
-  else if (pAttr.isA(Tags::tag_size_multiple))
-    setSizeMultiple(pElement.getDouble());
-  else if (pAttr.isA(Tags::tag_mininterval))
-    setMinimumInterval(pElement.getTimeperiod());
-  else if (pAttr.isA(Tags::tag_maxinterval))
-    setMaximumInterval(pElement.getTimeperiod());
-  else if (pAttr.isA(Tags::tag_mininventory))
-    setMinimumInventory(pElement.getDouble());
-  else if (pAttr.isA(Tags::tag_maxinventory))
-    setMaximumInventory(pElement.getDouble());
-  else
-    Buffer::endElement(pIn, pAttr, pElement);
-}
-
-
-DECLARE_EXPORT void BufferProcure::writeElement(XMLOutput *o, const Keyword &tag, mode m) const
-{
-  // Writing a reference
-  if (m == REFERENCE)
-  {
-    o->writeElement
-    (tag, Tags::tag_name, getName(), Tags::tag_type, getType().type);
-    return;
-  }
-
-  // Write the complete object
-  if (m != NOHEAD && m != NOHEADTAIL) o->BeginObject
-    (tag, Tags::tag_name, XMLEscape(getName()), Tags::tag_type, getType().type);
-
-  // Write the standard buffer fields
-  Buffer::writeElement(o, tag, NOHEADTAIL);
-
-  // Write the extra fields
-  if (leadtime) o->writeElement(Tags::tag_leadtime, leadtime);
-  if (fence) o->writeElement(Tags::tag_fence, fence);
-  if (size_maximum != DBL_MAX) o->writeElement(Tags::tag_size_maximum, size_maximum);
-  if (size_minimum) o->writeElement(Tags::tag_size_minimum, size_minimum);
-  if (size_multiple) o->writeElement(Tags::tag_size_multiple, size_multiple);
-  if (min_interval) o->writeElement(Tags::tag_mininterval, min_interval);
-  if (max_interval) o->writeElement(Tags::tag_maxinterval, max_interval);
-  if (getMinimumInventory()) o->writeElement(Tags::tag_mininventory, getMinimumInventory());
-  if (getMaximumInventory()) o->writeElement(Tags::tag_maxinventory, getMaximumInventory());
-
-  // Write the tail
-  if (m != NOHEADTAIL && m != NOTAIL) o->EndObject(tag);
 }
 
 
@@ -768,208 +611,280 @@ DECLARE_EXPORT Operation* BufferProcure::getOperation() const
 {
   if (!oper)
   {
-    Operation *o = Operation::find(PROCURE_OPERATION);
+    Operation *o = Operation::find(PURCHASE_OPERATION);
     if (!o)
     {
-      // Create the operation if it didn't exist yet
-      o = new OperationFixedTime(PROCURE_OPERATION);
+      // Create a new purchase operation
+      o = new OperationFixedTime();
+      o->setName(PURCHASE_OPERATION);
       static_cast<OperationFixedTime*>(o)->setDuration(leadtime);
-      o->setFence(getFence());
-      o->setSizeMaximum(getSizeMaximum());
-      o->setSizeMinimum(getSizeMinimum());
-      o->setSizeMultiple(getSizeMultiple());
-      Operation::add(o);  // No need to check again for existence
       new FlowEnd(o, const_cast<BufferProcure*>(this), 1);
     }
+    // Copy procurement parameters to the existing operation
+    if (o->getType() == *OperationFixedTime::metadata)
+      static_cast<OperationFixedTime*>(o)->setDuration(leadtime);
     const_cast<BufferProcure*>(this)->oper = o;
+    o->setFence(getFence());
+    o->setSizeMaximum(getSizeMaximum());
+    o->setSizeMinimum(getSizeMinimum());
+    o->setSizeMultiple(getSizeMultiple());
+    if (!o->getLocation()) o->setLocation(getLocation());
+    o->setSource(getSource());
   }
   return oper;
 }
 
 
-DECLARE_EXPORT PyObject* Buffer::getattro(const Attribute& attr)
+DECLARE_EXPORT void Buffer::buildProducingOperation()
 {
-  if (attr.isA(Tags::tag_name))
-    return PythonObject(getName());
-  if (attr.isA(Tags::tag_description))
-    return PythonObject(getDescription());
-  if (attr.isA(Tags::tag_category))
-    return PythonObject(getCategory());
-  if (attr.isA(Tags::tag_subcategory))
-    return PythonObject(getSubCategory());
-  if (attr.isA(Tags::tag_owner))
-    return PythonObject(getOwner());
-  if (attr.isA(Tags::tag_location))
-    return PythonObject(getLocation());
-  if (attr.isA(Tags::tag_producing))
-    return PythonObject(getProducingOperation());
-  if (attr.isA(Tags::tag_item))
-    return PythonObject(getItem());
-  if (attr.isA(Tags::tag_onhand))
-    return PythonObject(getOnHand());
-  if (attr.isA(Tags::tag_flowplans))
-    return new FlowPlanIterator(this);
-  if (attr.isA(Tags::tag_maximum))
-    return PythonObject(getMaximum());
-  if (attr.isA(Tags::tag_minimum))
-    return PythonObject(getMinimum());
-  if (attr.isA(Tags::tag_maximum_calendar))
-    return PythonObject(getMaximumCalendar());
-  if (attr.isA(Tags::tag_minimum_calendar))
-    return PythonObject(getMinimumCalendar());
-  if (attr.isA(Tags::tag_carrying_cost))
-    return PythonObject(getCarryingCost());
-  if (attr.isA(Tags::tag_hidden))
-    return PythonObject(getHidden());
-  if (attr.isA(Tags::tag_flows))
-    return new FlowIterator(this);
-  if (attr.isA(Tags::tag_level))
-    return PythonObject(getLevel());
-  if (attr.isA(Tags::tag_cluster))
-    return PythonObject(getCluster());
-  if (attr.isA(Tags::tag_members))
-    return new BufferIterator(this);
-  return NULL;
+  if (producing_operation
+    && producing_operation != uninitializedProducing
+    && !producing_operation->getHidden())
+    // Leave manually specified producing operations alone
+    return;
+
+  // Loop over this item and all its parent items
+  Item* item = getItem();
+  while (item)
+  {
+    // Loop over all suppliers of this item+location combination
+    Item::supplierlist::const_iterator supitem_iter = item->getSupplierIterator();
+    while (ItemSupplier *supitem = supitem_iter.next())
+    {
+      // Verify whether the ItemSupplier is applicable to the buffer location
+      // We need to reject the following 2 mismatches:
+      //   - buffer location is not null, and is not a member of the
+      //     ItemSupplier location
+      //   - buffer location is null, and the ItemSupplier location isn't
+      if (supitem->getLocation())
+      {
+        if ((getLocation() && !getLocation()->isMemberOf(supitem->getLocation()))
+          || !getLocation())
+          continue;
+      }
+
+      // Check if there is already a producing operation referencing this ItemSupplier
+      if (producing_operation && producing_operation != uninitializedProducing)
+      {
+        if (producing_operation->getType() == *OperationItemSupplier::metadata)
+        {
+          OperationItemSupplier* o = static_cast<OperationItemSupplier*>(producing_operation);
+          if (o->getItemSupplier() == supitem)
+            // Already exists
+            continue;
+        }
+        else
+        {
+          SubOperation::iterator subiter(producing_operation->getSubOperations());
+          while (SubOperation *o = subiter.next())
+            if (o->getOperation()->getType() == *OperationItemSupplier::metadata)
+            {
+              OperationItemSupplier* s = static_cast<OperationItemSupplier*>(o->getOperation());
+              if (s->getItemSupplier() == supitem)
+                // Already exists
+                continue;
+            }
+        }
+      }
+
+      // New operation needs to be created
+      OperationItemSupplier *oper = OperationItemSupplier::findOrCreate(supitem, this);
+
+      // Merge the new operation in an alternate operation if required
+      if (producing_operation && producing_operation != uninitializedProducing)
+      {
+        // We're not the first
+        SubOperation* subop = new SubOperation();
+        subop->setOperation(oper);
+        subop->setPriority(supitem->getPriority());
+        subop->setEffective(supitem->getEffective());
+        if (producing_operation->getType() != *OperationAlternate::metadata)
+        {
+          // We are the second: create an alternate and add 2 suboperations
+          OperationAlternate *superop = new OperationAlternate();
+          stringstream o;
+          o << "Replenish " << getName();
+          superop->setName(o.str());
+          superop->setHidden(true);
+          superop->setSearch("PRIORITY");
+          SubOperation* subop2 = new SubOperation();
+          subop2->setOperation(producing_operation);
+          // Note that priority and effectivity are at default values.
+          // If not, the alternate would already have been created.
+          subop2->setOwner(superop);
+          producing_operation = superop;
+          subop->setOwner(producing_operation);
+        }
+        else
+          // We are third or later: just add a suboperation
+          subop->setOwner(producing_operation);
+      }
+      else
+      {
+        // We are the first: only create an operationItemSupplier instance
+        if (supitem->getEffective() == DateRange() && supitem->getPriority() == 1)
+          // Use a single operation. If an alternate is required
+          // later on, we know it has the default priority and effectivity.
+          producing_operation = oper;
+        else
+        {
+          // Already create an alternate now
+          OperationAlternate *superop = new OperationAlternate();
+          producing_operation = superop;
+          stringstream o;
+          o << "Replenish " << getName();
+          superop->setName(o.str());
+          superop->setHidden(true);
+          superop->setSearch("PRIORITY");
+          SubOperation* subop = new SubOperation();
+          subop->setOperation(oper);
+          subop->setPriority(supitem->getPriority());
+          subop->setEffective(supitem->getEffective());
+          subop->setOwner(superop);
+        }
+      }
+    } // End loop over itemsuppliers
+
+    // Loop over all item distributions to replenish this item+location combination
+    Item::distributionIterator itemdist_iter = item->getDistributionIterator();
+    while (ItemDistribution *itemdist = itemdist_iter.next())
+    {
+      // Verify whether the ItemDistribution is applicable to the buffer location
+      // We need to reject the following 2 mismatches:
+      //   - buffer location is not null, and is not a member of the
+      //     ItemDistribution destination location
+      //   - buffer location is null, and the ItemDistribution destination location isn't
+      if (itemdist->getDestination())
+      {
+        if ((getLocation() && !getLocation()->isMemberOf(itemdist->getDestination()))
+          || !getLocation())
+          continue;
+      }
+
+      // Check if there is already a producing operation referencing this ItemDistribution
+      if (producing_operation && producing_operation != uninitializedProducing)
+      {
+        if (producing_operation->getType() == *OperationItemDistribution::metadata)
+        {
+          OperationItemDistribution* o = static_cast<OperationItemDistribution*>(producing_operation);
+          if (o->getItemDistribution() == itemdist)
+            // Already exists
+            continue;
+        }
+        else
+        {
+          SubOperation::iterator subiter(producing_operation->getSubOperations());
+          while (SubOperation *o = subiter.next())
+            if (o->getOperation()->getType() == *OperationItemDistribution::metadata)
+            {
+              OperationItemDistribution* s = static_cast<OperationItemDistribution*>(o->getOperation());
+              if (s->getItemDistribution() == itemdist)
+                // Already exists
+                continue;
+            }
+        }
+      }
+
+      // New operation needs to be created for each allowed source location
+      for (Location::iterator loc = Location::begin(); loc != Location::end(); ++loc)
+      {
+        // Skip unqualified locations
+        if (itemdist->getOrigin() && !loc->isMemberOf(itemdist->getOrigin()))
+          continue;
+
+        // Find or create the source buffer
+        Buffer* originbuf = NULL;
+        for (Buffer::iterator buf = Buffer::begin(); buf != Buffer::end(); ++buf)
+          if (buf->getLocation() == &*loc && buf->getItem() == getItem())
+          {
+            originbuf = &*buf;
+            break;
+          }
+        if (!originbuf)
+        {
+          originbuf = new BufferDefault();
+          originbuf->setItem(getItem());
+          originbuf->setLocation(&*loc);
+          stringstream o;
+          o << getItem() << " @ " << loc->getName();
+          // We assume there is no buffer with that name yet. If there is,
+          // we'll get an error here.
+          originbuf->setName(o.str());
+        }
+
+        // Create new operation
+        OperationItemDistribution *oper = new OperationItemDistribution(itemdist, originbuf, this);
+
+        // Merge the new operation in an alternate operation if required
+        if (producing_operation && producing_operation != uninitializedProducing)
+        {
+          // We're not the first
+          SubOperation* subop = new SubOperation();
+          subop->setOperation(oper);
+          subop->setPriority(itemdist->getPriority());
+          subop->setEffective(itemdist->getEffective());
+          if (producing_operation->getType() != *OperationAlternate::metadata)
+          {
+            // We are the second: create an alternate and add 2 suboperations
+            OperationAlternate *superop = new OperationAlternate();
+            stringstream o;
+            o << "Replenish " << getName();
+            superop->setName(o.str());
+            superop->setHidden(true);
+            superop->setSearch("PRIORITY");
+            SubOperation* subop2 = new SubOperation();
+            subop2->setOperation(producing_operation);
+            // Note that priority and effectivity are at default values.
+            // If not, the alternate would already have been created.
+            subop2->setOwner(superop);
+            producing_operation = superop;
+            subop->setOwner(producing_operation);
+          }
+          else
+            // We are third or later: just add a suboperation
+            subop->setOwner(producing_operation);
+        }
+        else
+        {
+          // We are the first: only create an operationItemSupplier instance
+          if (itemdist->getEffective() == DateRange() && itemdist->getPriority() == 1)
+            // Use a single operation. If an alternate is required
+            // later on, we know it has the default priority and effectivity.
+            producing_operation = oper;
+          else
+          {
+            // Already create an alternate now
+            OperationAlternate *superop = new OperationAlternate();
+            producing_operation = superop;
+            stringstream o;
+            o << "Replenish " << getName();
+            superop->setName(o.str());
+            superop->setHidden(true);
+            superop->setSearch("PRIORITY");
+            SubOperation* subop = new SubOperation();
+            subop->setOperation(oper);
+            subop->setPriority(itemdist->getPriority());
+            subop->setEffective(itemdist->getEffective());
+            subop->setOwner(superop);
+          }
+        }
+      } // End loop over origin locations
+
+    } // End loop over itemdistributions
+
+    // While-loop to add suppliers defined at parent items
+    item = item->getOwner();
+  }
+
+  if (producing_operation == uninitializedProducing)
+  {
+    // No producer could be generated. No replenishment will be possible.
+    new ProblemInvalidData(this, "no replenishment defined", "buffer",
+      Date::infinitePast, Date::infiniteFuture, 1);
+    logger << "Warning: Can't replenish buffer '" << this << "'" << endl;
+    producing_operation = NULL;
+  }
 }
 
-
-DECLARE_EXPORT int Buffer::setattro(const Attribute& attr, const PythonObject& field)
-{
-  if (attr.isA(Tags::tag_name))
-    setName(field.getString());
-  else if (attr.isA(Tags::tag_description))
-    setDescription(field.getString());
-  else if (attr.isA(Tags::tag_category))
-    setCategory(field.getString());
-  else if (attr.isA(Tags::tag_subcategory))
-    setSubCategory(field.getString());
-  else if (attr.isA(Tags::tag_owner))
-  {
-    if (!field.check(Buffer::metadata))
-    {
-      PyErr_SetString(PythonDataException, "buffer owner must be of type buffer");
-      return -1;
-    }
-    Buffer* y = static_cast<Buffer*>(static_cast<PyObject*>(field));
-    setOwner(y);
-  }
-  else if (attr.isA(Tags::tag_location))
-  {
-    if (!field.check(Location::metadata))
-    {
-      PyErr_SetString(PythonDataException, "buffer location must be of type location");
-      return -1;
-    }
-    Location* y = static_cast<Location*>(static_cast<PyObject*>(field));
-    setLocation(y);
-  }
-  else if (attr.isA(Tags::tag_item))
-  {
-    if (!field.check(Item::metadata))
-    {
-      PyErr_SetString(PythonDataException, "buffer item must be of type item");
-      return -1;
-    }
-    Item* y = static_cast<Item*>(static_cast<PyObject*>(field));
-    setItem(y);
-  }
-  else if (attr.isA(Tags::tag_minimum))
-    setMinimum(field.getDouble());
-  else if (attr.isA(Tags::tag_maximum))
-    setMaximum(field.getDouble());
-  else if (attr.isA(Tags::tag_maximum_calendar))
-  {
-    if (!field.check(CalendarDouble::metadata))
-    {
-      PyErr_SetString(PythonDataException, "buffer maximum must be of type calendar_double");
-      return -1;
-    }
-    CalendarDouble* y = static_cast<CalendarDouble*>(static_cast<PyObject*>(field));
-    setMaximumCalendar(y);
-  }
-  else if (attr.isA(Tags::tag_minimum_calendar))
-  {
-    if (!field.check(CalendarDouble::metadata))
-    {
-      PyErr_SetString(PythonDataException, "buffer minimum must be of type calendar_double");
-      return -1;
-    }
-    CalendarDouble* y = static_cast<CalendarDouble*>(static_cast<PyObject*>(field));
-    setMinimumCalendar(y);
-  }
-  else if (attr.isA(Tags::tag_onhand))
-    setOnHand(field.getDouble());
-  else if (attr.isA(Tags::tag_carrying_cost))
-    setCarryingCost(field.getDouble());
-  else if (attr.isA(Tags::tag_producing))
-  {
-    if (!field.check(Operation::metadata))
-    {
-      PyErr_SetString(PythonDataException, "buffer producing must be of type operation");
-      return -1;
-    }
-    Operation* y = static_cast<Operation*>(static_cast<PyObject*>(field));
-    setProducingOperation(y);
-  }
-  else if (attr.isA(Tags::tag_hidden))
-    setHidden(field.getBool());
-  else
-    return -1;  // Error
-  return 0;  // OK
-}
-
-
-DECLARE_EXPORT PyObject* BufferProcure::getattro(const Attribute& attr)
-{
-  if (attr.isA(Tags::tag_leadtime))
-    return PythonObject(getLeadtime());
-  if (attr.isA(Tags::tag_mininventory))
-    return PythonObject(getMinimumInventory());
-  if (attr.isA(Tags::tag_maxinventory))
-    return PythonObject(getMaximumInventory());
-  if (attr.isA(Tags::tag_mininterval))
-    return PythonObject(getMinimumInterval());
-  if (attr.isA(Tags::tag_maxinterval))
-    return PythonObject(getMaximumInterval());
-  if (attr.isA(Tags::tag_fence))
-    return PythonObject(getFence());
-  if (attr.isA(Tags::tag_size_minimum))
-    return PythonObject(getSizeMinimum());
-  if (attr.isA(Tags::tag_size_multiple))
-    return PythonObject(getSizeMultiple());
-  if (attr.isA(Tags::tag_size_maximum))
-    return PythonObject(getSizeMaximum());
-  if (attr.isA(Tags::tag_producing))
-    return PythonObject(getOperation());
-  return Buffer::getattro(attr);
-}
-
-
-DECLARE_EXPORT int BufferProcure::setattro(const Attribute& attr, const PythonObject& field)
-{
-  if (attr.isA(Tags::tag_leadtime))
-    setLeadtime(field.getTimeperiod());
-  else if (attr.isA(Tags::tag_mininventory))
-    setMinimumInventory(field.getDouble());
-  else if (attr.isA(Tags::tag_maxinventory))
-    setMaximumInventory(field.getDouble());
-  else if (attr.isA(Tags::tag_mininterval))
-    setMinimumInterval(field.getTimeperiod());
-  else if (attr.isA(Tags::tag_maxinterval))
-    setMaximumInterval(field.getTimeperiod());
-  else if (attr.isA(Tags::tag_size_minimum))
-    setSizeMinimum(field.getDouble());
-  else if (attr.isA(Tags::tag_size_multiple))
-    setSizeMultiple(field.getDouble());
-  else if (attr.isA(Tags::tag_size_maximum))
-    setSizeMaximum(field.getDouble());
-  else if (attr.isA(Tags::tag_fence))
-    setFence(field.getTimeperiod());
-  else if (attr.isA(Tags::tag_producing))
-    return 0;
-  else
-    return Buffer::setattro(attr, field);
-  return 0;
-}
 
 } // end namespace

@@ -1,4 +1,3 @@
-;(function($){
 /**
  * jqGrid Danish Translation
  * Aesiras A/S
@@ -7,20 +6,34 @@
  * http://www.opensource.org/licenses/mit-license.php
  * http://www.gnu.org/licenses/gpl.html
 **/
-$.jgrid = $.jgrid || {};
-$.extend($.jgrid,{
+
+/*jslint white: true */
+/*global jQuery */
+(function($){
+"use strict";
+var locInfo = {
+	isRTL: false,
 	defaults : {
 		recordtext: "Vis {0} - {1} of {2}",
 	    emptyrecords: "Ingen linjer fundet",
 		loadtext: "Henter...",
-		pgtext : "Side {0} af {1}"
+		pgtext : "Side {0} af {1}",
+		pgfirst : "First Page",
+		pglast : "Last Page",
+		pgnext : "Next Page",
+		pgprev : "Previous Page",
+		pgrecs : "Records per Page",
+		showhide: "Toggle Expand Collapse Grid",
+		savetext: "Gemmer..."
 	},
 	search : {
 	    caption: "Søg...",
 	    Find: "Find",
 	    Reset: "Nulstil",
-	    odata: [{ oper:'eq', text:"lig"},{ oper:'ne', text:"forskellige fra"},{ oper:'lt', text:"mindre"},{ oper:'le', text:"mindre eller lig"},{ oper:'gt', text:"større"},{ oper:'ge', text:"større eller lig"},{ oper:'bw', text:"begynder med"},{ oper:'bn', text:"begynder ikke med"},{ oper:'in', text:"findes i"},{ oper:'ni', text:"findes ikke i"},{ oper:'ew', text:"ender med"},{ oper:'en', text:"ender ikke med"},{ oper:'cn', text:"indeholder"},{ oper:'nc', text:"indeholder ikke"}],
-	    groupOps: [	{ op: "AND", text: "all" },	{ op: "OR",  text: "any" }	]
+	    odata: [{ oper:'eq', text:"lig"},{ oper:'ne', text:"forskellige fra"},{ oper:'lt', text:"mindre"},{ oper:'le', text:"mindre eller lig"},{ oper:'gt', text:"større"},{ oper:'ge', text:"større eller lig"},{ oper:'bw', text:"begynder med"},{ oper:'bn', text:"begynder ikke med"},{ oper:'in', text:"findes i"},{ oper:'ni', text:"findes ikke i"},{ oper:'ew', text:"ender med"},{ oper:'en', text:"ender ikke med"},{ oper:'cn', text:"indeholder"},{ oper:'nc', text:"indeholder ikke"},{ oper:'nu', text:'is null'},{ oper:'nn', text:'is not null'}],
+	    groupOps: [	{ op: "AND", text: "all" },	{ op: "OR",  text: "any" }	],
+		operandTitle : "Click to select search operation.",
+		resetTitle : "Reset Search Value"
 	},
 	edit : {
 	    addCaption: "Tilføj",
@@ -58,13 +71,13 @@ $.extend($.jgrid,{
 	    bCancel: "Fortryd"
 	},
 	nav : {
-		edittext: " ",
+		edittext: "",
 	    edittitle: "Rediger valgte linje",
-		addtext:" ",
+		addtext: "",
 	    addtitle: "Tilføj ny linje",
-	    deltext: " ",
+	    deltext: "",
 	    deltitle: "Slet valgte linje",
-	    searchtext: " ",
+	    searchtext: "",
 	    searchtitle: "Find linjer",
 	    refreshtext: "",
 	    refreshtitle: "Indlæs igen",
@@ -98,31 +111,34 @@ $.extend($.jgrid,{
 				"Januar", "Februar", "Marts", "April", "Maj", "Juni", "Juli", "August", "September", "Oktober", "November", "December"
 			],
 			AmPm : ["","","",""],
-			S: function (j) {return '.'},
+			S: function () {return '.';},
 			srcformat: 'Y-m-d',
 			newformat: 'd/m/Y',
-			parseRe : /[Tt\\\/:_;.,\t\s-]/,
 			masks : {
-	            ISO8601Long:"Y-m-d H:i:s",
-	            ISO8601Short:"Y-m-d",
 	            ShortDate: "j/n/Y",
 	            LongDate: "l d. F Y",
 	            FullDateTime: "l d F Y G:i:s",
 	            MonthDay: "d. F",
 	            ShortTime: "G:i",
 	            LongTime: "G:i:s",
-	            SortableDateTime: "Y-m-d\\TH:i:s",
-	            UniversalSortableDateTime: "Y-m-d H:i:sO",
 	            YearMonth: "F Y"
-	        },
-	        reformatAfterEdit : false
-		},
-		baseLinkUrl: '',
-		showAction: '',
-	    target: '',
-	    checkbox : {disabled:true},
-		idName : 'id'
+	        }
+		}
+	}
+};
+$.jgrid = $.jgrid || {};
+$.extend(true, $.jgrid, {
+	defaults: {
+		locale: "da"
+	},
+	locales: {
+		// In general the property name is free, but it's recommended to use the names based on
+		// http://www.iana.org/assignments/language-subtag-registry/language-subtag-registry
+		// http://rishida.net/utils/subtags/ and RFC 5646. See Appendix A of RFC 5646 for examples.
+		// One can use the lang attribute to specify language tags in HTML, and the xml:lang attribute for XML
+		// if it exists. See http://www.w3.org/International/articles/language-tags/#extlang
+		da: $.extend({}, locInfo, { name: "dansk", nameEnglish: "Danish" }),
+		dk: $.extend({}, locInfo, { name: "dansk", nameEnglish: "Danish" })
 	}
 });
-// DA
-})(jQuery);
+}(jQuery));

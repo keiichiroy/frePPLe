@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba                 *
+ * Copyright (C) 2007-2015 by frePPLe bvba                                 *
  *                                                                         *
  * This library is free software; you can redistribute it and/or modify it *
  * under the terms of the GNU Affero General Public License as published   *
@@ -46,9 +46,9 @@ DECLARE_EXPORT void Resource::updateProblems()
       iter != loadplans.end(); )
   {
     // Process changes in the maximum or minimum targets
-    if (iter->getType() == 4)
+    if (iter->getEventType() == 4)
       curMax = iter->getMax();
-    else if (iter->getType() == 3)
+    else if (iter->getEventType() == 3)
       curMin = iter->getMin();
 
     // Only consider the last loadplan for a certain date
@@ -120,6 +120,40 @@ DECLARE_EXPORT void Resource::updateProblems()
   if (shortageProblem)
     new ProblemCapacityUnderload(this, DateRange(shortageProblemStart,
         Date::infiniteFuture), -shortageQty);
+}
+
+
+DECLARE_EXPORT void ResourceBuckets::updateProblems()
+{
+  // Delete existing problems for this resource
+  Problem::clearProblems(*this);
+
+  // Problem detection disabled on this resource
+  if (!getDetectProblems()) return;
+
+  // Loop over all events
+  Date startdate = Date::infinitePast;
+  double load = 0.0;
+  for (loadplanlist::const_iterator iter = loadplans.begin();
+      iter != loadplans.end(); iter++)
+  {
+    if (iter->getEventType() != 2)
+      load = iter->getOnhand();
+    else
+    {
+      // Evaluate previous bucket
+      if (load < 0.0)
+        new ProblemCapacityOverload(this, startdate,
+          iter->getDate(), -load);
+      // Reset evaluation for the new bucket
+      startdate = iter->getDate();
+      load = 0.0;
+    }
+  }
+  // Evaluate the final bucket
+  if (load < 0.0)
+    new ProblemCapacityOverload(this, startdate,
+      Date::infiniteFuture, -load);
 }
 
 

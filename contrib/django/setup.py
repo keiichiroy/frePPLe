@@ -1,7 +1,6 @@
-#!/usr/bin/env python
-
+#!/usr/bin/python3
 #
-# Copyright (C) 2009-2012 by Johan De Taeye, frePPLe bvba
+# Copyright (C) 2009-2013 by frePPLe bvba
 #
 # This library is free software; you can redistribute it and/or modify it
 # under the terms of the GNU Affero General Public License as published
@@ -72,7 +71,7 @@ setup(name = 'freppledb',
         'Intended Audience :: Manufacturing',
         'Framework :: Django',
         ],
-      description = "Open source Production PLanning",
+      description = "frePPLe - Open source Production PLanning",
       long_description = '''FrePPLe stands for "Free Production Planning Library".
 It is a framework for modeling and solving production planning problems,
 targeted primarily at discrete manufacturing industries.

@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba                 *
+ * Copyright (C) 2007-2015 by frePPLe bvba                                 *
  *                                                                         *
  * This library is free software; you can redistribute it and/or modify it *
  * under the terms of the GNU Affero General Public License as published   *
@@ -24,9 +24,13 @@ namespace frepple
 {
 
 DECLARE_EXPORT const MetaClass* SolverMRP::metadata;
-const Keyword tag_iterationthreshold("iterationthreshold");
-const Keyword tag_iterationaccuracy("iterationaccuracy");
-const Keyword tag_lazydelay("lazydelay");
+const Keyword SolverMRP::tag_iterationthreshold("iterationthreshold");
+const Keyword SolverMRP::tag_iterationaccuracy("iterationaccuracy");
+const Keyword SolverMRP::tag_lazydelay("lazydelay");
+const Keyword SolverMRP::tag_allowsplits("allowsplits");
+const Keyword SolverMRP::tag_rotateresources("rotateresources");
+const Keyword SolverMRP::tag_planSafetyStockFirst("plansafetystockfirst");
+const Keyword SolverMRP::tag_iterationmax("iterationmax");
 
 
 void LibrarySolver::initialize()
@@ -42,22 +46,72 @@ void LibrarySolver::initialize()
   init = true;
 
   // Register all classes.
-  if (SolverMRP::initialize())
-    throw RuntimeException("Error registering solver_mrp Python type");
+  int nok = 0;
+  nok += SolverMRP::initialize();
+  nok += OperatorDelete::initialize();
+  if (nok) throw RuntimeException("Error registering new Python types");
 }
 
 
 int SolverMRP::initialize()
 {
   // Initialize the metadata
-  metadata = new MetaClass
-  ("solver","solver_mrp",Object::createString<SolverMRP>,true);
+  metadata = MetaClass::registerClass<SolverMRP>(
+    "solver", "solver_mrp", Object::create<SolverMRP>, true
+    );
+  registerFields<SolverMRP>(const_cast<MetaClass*>(metadata));
 
   // Initialize the Python class
-  FreppleClass<SolverMRP,Solver>::getType().addMethod("solve", solve, METH_VARARGS, "run the solver");
-  FreppleClass<SolverMRP,Solver>::getType().addMethod("commit", commit, METH_NOARGS, "commit the plan changes");
-  FreppleClass<SolverMRP,Solver>::getType().addMethod("rollback", rollback, METH_NOARGS, "rollback the plan changes");
-  return FreppleClass<SolverMRP,Solver>::initialize();
+  PythonType& x = FreppleClass<SolverMRP, Solver>::getPythonType();
+  x.setName("solver_mrp");
+  x.setDoc("frePPLe solver_mrp");
+  x.supportgetattro();
+  x.supportsetattro();
+  x.supportcreate(create);
+  x.addMethod("solve", solve, METH_NOARGS, "run the solver");
+  x.addMethod("commit", commit, METH_NOARGS, "commit the plan changes");
+  x.addMethod("rollback", rollback, METH_NOARGS, "rollback the plan changes");
+  const_cast<MetaClass*>(metadata)->pythonClass = x.type_object();
+  return x.typeReady();
+}
+
+
+PyObject* SolverMRP::create(PyTypeObject* pytype, PyObject* args, PyObject* kwds)
+{
+  try
+  {
+    // Create the solver
+    SolverMRP *s = new SolverMRP();
+
+    // Iterate over extra keywords, and set attributes.   @todo move this responsibility to the readers...
+    PyObject *key, *value;
+    Py_ssize_t pos = 0;
+    while (PyDict_Next(kwds, &pos, &key, &value))
+    {
+      PythonData field(value);
+      PyObject* key_utf8 = PyUnicode_AsUTF8String(key);
+      DataKeyword attr(PyBytes_AsString(key_utf8));
+      Py_DECREF(key_utf8);
+      const MetaFieldBase* fmeta = SolverMRP::metadata->findField(attr.getHash());
+      if (!fmeta)
+        fmeta = Solver::metadata->findField(attr.getHash());
+      if (fmeta)
+        // Update the attribute
+        fmeta->setField(s, field);
+      else
+        s->setProperty(attr.getName(), value);
+    };
+
+    // Return the object. The reference count doesn't need to be increased
+    // as we do with other objects, because we want this object to be available
+    // for the garbage collector of Python.
+    return static_cast<PyObject*>(s);
+  }
+  catch (...)
+  {
+    PythonType::evalException();
+    return NULL;
+  }
 }
 
 
@@ -75,33 +129,42 @@ DECLARE_EXPORT bool SolverMRP::demand_comparison(const Demand* l1, const Demand*
 DECLARE_EXPORT void SolverMRP::SolverMRPdata::commit()
 {
   // Check
-  if (!demands || !getSolver())
+  SolverMRP* solver = getSolver();
+  if (!demands || !solver)
     throw LogicException("Missing demands or solver.");
 
   // Message
-  SolverMRP* Solver = getSolver();
-  if (Solver->getLogLevel()>0)
+  if (solver->getLogLevel()>0)
     logger << "Start solving cluster " << cluster << " at " << Date::now() << endl;
 
   // Solve the planning problem
   try
   {
-    // TODO Propagate & solve initial shortages in buffers
+    // TODO Propagate & solve initial shortages and overloads
 
     // Sort the demands of this problem.
     // We use a stable sort to get reproducible results between platforms
     // and STL implementations.
     stable_sort(demands->begin(), demands->end(), demand_comparison);
 
+    // Solve for safety stock in buffers.
+    if (solver->getPlanSafetyStockFirst())
+    {
+      constrainedPlanning = (solver->getPlanType() == 1);
+      solveSafetyStock(solver);
+    }
+
     // Loop through the list of all demands in this planning problem
-    constrainedPlanning = (Solver->getPlanType() == 1);
+    safety_stock_planning = false;
+    constrainedPlanning = (solver->getPlanType() == 1);
     for (deque<Demand*>::const_iterator i = demands->begin();
         i != demands->end(); ++i)
     {
+      iteration_count = 0;
       try
       {
         // Plan the demand
-        (*i)->solve(*Solver,this);
+        (*i)->solve(*solver, this);
       }
       catch (...)
       {
@@ -118,8 +181,8 @@ DECLARE_EXPORT void SolverMRP::SolverMRPdata::commit()
     // Clean the list of demands of this cluster
     demands->clear();
 
-    // TODO Solve for safety stock in buffers that haven't been planned by any demand yet.
-
+    // Solve for safety stock in buffers.
+    if (!solver->getPlanSafetyStockFirst()) solveSafetyStock(solver);
   }
   catch (...)
   {
@@ -146,14 +209,73 @@ DECLARE_EXPORT void SolverMRP::SolverMRPdata::commit()
   }
 
   // Message
-  if (Solver->getLogLevel()>0)
+  if (solver->getLogLevel()>0)
     logger << "End solving cluster " << cluster << " at " << Date::now() << endl;
+}
+
+
+void SolverMRP::SolverMRPdata::solveSafetyStock(SolverMRP* solver)
+{
+  OperatorDelete cleanup(this);
+  safety_stock_planning = true;
+  if (getLogLevel()>0) logger << "Start safety stock replenishment pass   " << solver->getConstraints() << endl;
+  vector< list<Buffer*> > bufs(HasLevel::getNumberOfLevels() + 1);
+  for (Buffer::iterator buf = Buffer::begin(); buf != Buffer::end(); ++buf)
+    if (buf->getCluster() == cluster
+      && ( buf->getMinimum() || buf->getMinimumCalendar()
+        || buf->getType() == *BufferProcure::metadata )
+      )
+      bufs[(buf->getLevel()>=0) ? buf->getLevel() : 0].push_back(&*buf);
+  for (vector< list<Buffer*> >::iterator b_list = bufs.begin(); b_list != bufs.end(); ++b_list)
+    for (list<Buffer*>::iterator b = b_list->begin(); b != b_list->end(); ++b)
+      try
+      {
+        state->curBuffer = NULL;
+        // A quantity of -1 is a flag for the buffer solver to solve safety stock.
+        state->q_qty = -1.0;
+        state->q_date = Date::infinitePast;
+        state->a_cost = 0.0;
+        state->a_penalty = 0.0;
+        planningDemand = NULL;
+        state->curDemand = NULL;
+        state->curOwnerOpplan = NULL;
+        // Call the buffer solver
+        iteration_count = 0;
+        (*b)->solve(*solver, this);
+        // Check for excess
+        if ((*b)->getType() != *BufferProcure::metadata)
+          (*b)->solve(cleanup, this);
+        CommandManager::commit();
+      }
+      catch(...)
+      {
+        CommandManager::rollback();
+      }
+  if (getLogLevel()>0) logger << "Finished safety stock replenishment pass" << endl;
+  safety_stock_planning = false;
+}
+
+
+DECLARE_EXPORT void SolverMRP::update_user_exits()
+{
+  setUserExitBuffer(getPyObjectProperty(Tags::userexit_buffer.getName()));
+  setUserExitDemand(getPyObjectProperty(Tags::userexit_demand.getName()));
+  setUserExitFlow(getPyObjectProperty(Tags::userexit_flow.getName()));
+  setUserExitOperation(getPyObjectProperty(Tags::userexit_operation.getName()));
+  setUserExitResource(getPyObjectProperty(Tags::userexit_resource.getName()));
 }
 
 
 DECLARE_EXPORT void SolverMRP::solve(void *v)
 {
+  // Configure user exits
+  update_user_exits();
+
+  // Count how many clusters we have to plan
+  int cl = HasLevel::getNumberOfClusters() + 1;
+
   // Categorize all demands in their cluster
+  demands_per_cluster.resize(cl);
   for (Demand::iterator i = Demand::begin(); i != Demand::end(); ++i)
     demands_per_cluster[i->getCluster()].push_back(&*i);
 
@@ -161,17 +283,12 @@ DECLARE_EXPORT void SolverMRP::solve(void *v)
   // This deletion is not multi-threaded... But on the other hand we need to
   // loop through the operations only once (rather than as many times as there
   // are clusters)
-  // A multi-threaded alternative would be to hash the operations here, and
-  // then delete in each thread.
-  if (getLogLevel()>0) logger << "Deleting previous plan" << endl;
-  for (Operation::iterator e=Operation::begin(); e!=Operation::end(); ++e)
-    // The next if-condition is actually redundant if we plan everything
-    if (demands_per_cluster.find(e->getCluster())!=demands_per_cluster.end())
+  if (getErasePreviousFirst())
+  {
+    if (getLogLevel()>0) logger << "Deleting previous plan" << endl;
+    for (Operation::iterator e=Operation::begin(); e!=Operation::end(); ++e)
       e->deleteOperationPlans();
-
-  // Count how many clusters we have to plan
-  int cl = demands_per_cluster.size();
-  if (cl<1) return;
+  }
 
   // Solve in parallel threads.
   // When not solving in silent and autocommit mode, we only use a single
@@ -182,9 +299,11 @@ DECLARE_EXPORT void SolverMRP::solve(void *v)
     threads.setMaxParallel(1);
 
   // Register all clusters to be solved
-  for (classified_demand::iterator j = demands_per_cluster.begin();
-      j != demands_per_cluster.end(); ++j)
-    threads.add(SolverMRPdata::runme, new SolverMRPdata(this, j->first, &(j->second)));
+  for (int j = 0; j < cl; ++j)
+    threads.add(
+      SolverMRPdata::runme,
+      new SolverMRPdata(this, j, &(demands_per_cluster[j]))
+      );
 
   // Run the planning command threads and wait for them to exit
   threads.execute();
@@ -192,140 +311,6 @@ DECLARE_EXPORT void SolverMRP::solve(void *v)
   // @todo Check the resource setups that were broken - needs to be removed
   for (Resource::iterator gres = Resource::begin(); gres != Resource::end(); ++gres)
     if (gres->getSetupMatrix()) gres->updateSetups();
-}
-
-
-DECLARE_EXPORT void SolverMRP::writeElement(XMLOutput *o, const Keyword& tag, mode m) const
-{
-  // Writing a reference
-  if (m == REFERENCE)
-  {
-    o->writeElement
-    (tag, Tags::tag_name, getName(), Tags::tag_type, getType().type);
-    return;
-  }
-
-  // Write the complete object
-  if (m != NOHEAD && m != NOHEADTAIL) o->BeginObject
-    (tag, Tags::tag_name, XMLEscape(getName()), Tags::tag_type, getType().type);
-
-  // Write the fields
-  if (constrts != 15) o->writeElement(Tags::tag_constraints, constrts);
-  if (plantype != 1) o->writeElement(Tags::tag_plantype, plantype);
-
-  // Parameters
-  o->writeElement(tag_iterationthreshold, iteration_threshold);
-  o->writeElement(tag_iterationaccuracy, iteration_accuracy);
-  o->writeElement(tag_lazydelay, lazydelay);
-  o->writeElement(Tags::tag_autocommit, autocommit);
-
-  // User exit
-  if (userexit_flow)
-    o->writeElement(Tags::tag_userexit_flow, static_cast<string>(userexit_flow));
-  if (userexit_demand)
-    o->writeElement(Tags::tag_userexit_demand, static_cast<string>(userexit_demand));
-  if (userexit_buffer)
-    o->writeElement(Tags::tag_userexit_buffer, static_cast<string>(userexit_buffer));
-  if (userexit_resource)
-    o->writeElement(Tags::tag_userexit_resource, static_cast<string>(userexit_resource));
-  if (userexit_operation)
-    o->writeElement(Tags::tag_userexit_operation, static_cast<string>(userexit_operation));
-
-  // Write the parent class
-  Solver::writeElement(o, tag, NOHEAD);
-}
-
-
-DECLARE_EXPORT void SolverMRP::endElement(XMLInput& pIn, const Attribute& pAttr, const DataElement& pElement)
-{
-  if (pAttr.isA(Tags::tag_constraints))
-    setConstraints(pElement.getInt());
-  else if (pAttr.isA(Tags::tag_autocommit))
-    setAutocommit(pElement.getBool());
-  else if (pAttr.isA(Tags::tag_userexit_flow))
-    setUserExitFlow(pElement.getString());
-  else if (pAttr.isA(Tags::tag_userexit_demand))
-    setUserExitDemand(pElement.getString());
-  else if (pAttr.isA(Tags::tag_userexit_buffer))
-    setUserExitBuffer(pElement.getString());
-  else if (pAttr.isA(Tags::tag_userexit_resource))
-    setUserExitResource(pElement.getString());
-  else if (pAttr.isA(Tags::tag_userexit_operation))
-    setUserExitOperation(pElement.getString());
-  else if (pAttr.isA(Tags::tag_plantype))
-    setPlanType(pElement.getInt());
-  // Less common parameters
-  else if (pAttr.isA(tag_iterationthreshold))
-    setIterationThreshold(pElement.getDouble());
-  else if (pAttr.isA(tag_iterationaccuracy))
-    setIterationAccuracy(pElement.getDouble());
-  else if (pAttr.isA(tag_lazydelay))
-    setLazyDelay(pElement.getTimeperiod());
-  // Default parameters
-  else
-    Solver::endElement(pIn, pAttr, pElement);
-}
-
-
-DECLARE_EXPORT PyObject* SolverMRP::getattro(const Attribute& attr)
-{
-  if (attr.isA(Tags::tag_constraints))
-    return PythonObject(getConstraints());
-  if (attr.isA(Tags::tag_autocommit))
-    return PythonObject(getAutocommit());
-  if (attr.isA(Tags::tag_userexit_flow))
-    return getUserExitFlow();
-  if (attr.isA(Tags::tag_userexit_demand))
-    return getUserExitDemand();
-  if (attr.isA(Tags::tag_userexit_buffer))
-    return getUserExitBuffer();
-  if (attr.isA(Tags::tag_userexit_resource))
-    return getUserExitResource();
-  if (attr.isA(Tags::tag_userexit_operation))
-    return getUserExitOperation();
-  if (attr.isA(Tags::tag_plantype))
-    return PythonObject(getPlanType());
-  // Less common parameters
-  if (attr.isA(tag_iterationthreshold))
-    return PythonObject(getIterationThreshold());
-  if (attr.isA(tag_iterationaccuracy))
-    return PythonObject(getIterationAccuracy());
-  if (attr.isA(tag_lazydelay))
-    return PythonObject(getLazyDelay());
-  // Default parameters
-  return Solver::getattro(attr);
-}
-
-
-DECLARE_EXPORT int SolverMRP::setattro(const Attribute& attr, const PythonObject& field)
-{
-  if (attr.isA(Tags::tag_constraints))
-    setConstraints(field.getInt());
-  else if (attr.isA(Tags::tag_autocommit))
-    setAutocommit(field.getBool());
-  else if (attr.isA(Tags::tag_userexit_flow))
-    setUserExitFlow(field);
-  else if (attr.isA(Tags::tag_userexit_demand))
-    setUserExitDemand(field);
-  else if (attr.isA(Tags::tag_userexit_buffer))
-    setUserExitBuffer(field);
-  else if (attr.isA(Tags::tag_userexit_resource))
-    setUserExitResource(field);
-  else if (attr.isA(Tags::tag_userexit_operation))
-    setUserExitOperation(field);
-  else if (attr.isA(Tags::tag_plantype))
-    setPlanType(field.getInt());
-  // Less common parameters
-  else if (attr.isA(tag_iterationthreshold))
-    setIterationThreshold(field.getDouble());
-  else if (attr.isA(tag_iterationaccuracy))
-    setIterationAccuracy(field.getDouble());
-  else if (attr.isA(tag_lazydelay))
-    setLazyDelay(field.getTimeperiod());
-  // Default parameters
-  else
-    return Solver::setattro(attr, field);
-  return 0;
 }
 
 
@@ -354,8 +339,8 @@ DECLARE_EXPORT PyObject* SolverMRP::solve(PyObject *self, PyObject *args)
     {
       // Incrementally plan a single demand
       sol->setAutocommit(false);
-      sol->commands.sol = sol;
-      static_cast<Demand*>(dem)->solve(*sol, &(sol->commands));
+      sol->update_user_exits();
+      static_cast<Demand*>(dem)->solve(*sol, &(sol->getCommands()));
     }
   }
   catch(...)

@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba                 *
+ * Copyright (C) 2007-2015 by frePPLe bvba                                 *
  *                                                                         *
  * This library is free software; you can redistribute it and/or modify it *
  * under the terms of the GNU Affero General Public License as published   *
@@ -42,7 +42,7 @@ DECLARE_EXPORT void SolverMRP::chooseResource(const Load* l, void* v)   // @todo
 
   // CASE 2: Skill involved, or aggregate resource
   SolverMRPdata* data = static_cast<SolverMRPdata*>(v);
-  unsigned int loglevel = data->getSolver()->getLogLevel();
+  short loglevel = data->getSolver()->getLogLevel();
 
   // Control the planning mode
   bool originalPlanningMode = data->constrainedPlanning;
@@ -56,7 +56,6 @@ DECLARE_EXPORT void SolverMRP::chooseResource(const Load* l, void* v)   // @todo
   Date min_next_date(Date::infiniteFuture);
   LoadPlan *lplan = data->state->q_loadplan;
   Resource *bestAlternateSelection = NULL;
-  double bestCost = DBL_MAX;
   bool qualified_resource_exists = false;
   double bestAlternateValue = DBL_MAX;
   double bestAlternateQuantity = DBL_MIN;
@@ -78,7 +77,7 @@ DECLARE_EXPORT void SolverMRP::chooseResource(const Load* l, void* v)   // @todo
     // If it's an aggregate, push it's members on the stack
     if (res->isGroup())
     {
-      for (Resource::memberIterator x = res->beginMember(); x != Resource::end(); ++x)
+      for (Resource::memberIterator x = res->getMembers(); x != Resource::end(); ++x)
         res_stack.push(&*x);
       continue;
     }
@@ -87,12 +86,12 @@ DECLARE_EXPORT void SolverMRP::chooseResource(const Load* l, void* v)   // @todo
     if (l->getSkill())
     {
       bool isqualified = false;
-      for (Resource::skilllist::const_iterator i = res->getSkills().begin();
-        i != res->getSkills().end() && !isqualified; ++i)
+      Resource::skilllist::const_iterator i = res->getSkills();
+      while (ResourceSkill *rs = i.next())
       {
-        if (i->getSkill() == l->getSkill()
-            && originalOpplan.start >= i->getEffective().getStart()
-            && originalOpplan.end <= i->getEffective().getEnd())
+        if (rs->getSkill() == l->getSkill()
+            && originalOpplan.start >= rs->getEffective().getStart()
+            && originalOpplan.end <= rs->getEffective().getEnd())
           isqualified = true;
       }
       // Next resource in the loop if not qualified
@@ -212,13 +211,11 @@ DECLARE_EXPORT void SolverMRP::chooseResource(const Load* l, void* v)   // @todo
   data->constrainedPlanning = originalPlanningMode;
 
   // Maintain the constraint list
-  if (originalLogConstraints)
-  {
+  if (originalLogConstraints && data->planningDemand)
     data->planningDemand->getConstraints().push(
       ProblemCapacityOverload::metadata,
       l->getResource(), originalOpplan.start, originalOpplan.end,
       -originalLoadplanQuantity);
-  }
   data->logConstraints = originalLogConstraints;
 
   if (loglevel>1)
@@ -233,7 +230,6 @@ void SolverMRP::solve(const Load* l, void* v)
   // Note: This method is only called for decrease loadplans and for the leading
   // load of an alternate group. See SolverMRP::checkOperation
   SolverMRPdata* data = static_cast<SolverMRPdata*>(v);
-  unsigned int loglevel = data->getSolver()->getLogLevel();
 
   if (data->state->q_qty >= 0.0)
   {
@@ -255,6 +251,7 @@ void SolverMRP::solve(const Load* l, void* v)
   // CASE II: It is an alternate load.
   // We ask each alternate load in order of priority till we find a load
   // that has a non-zero reply.
+  short loglevel = data->getSolver()->getLogLevel();
 
   // 1) collect a list of alternates
   list<const Load*> thealternates;
@@ -295,7 +292,7 @@ void SolverMRP::solve(const Load* l, void* v)
     data->state->q_loadplan = lplan; // because q_loadplan can change!
 
     // 4a) Switch to this load
-    if (lplan->getLoad() != curload) lplan->setLoad(curload);
+    if (lplan->getLoad() != curload) lplan->setLoad(const_cast<Load*>(curload));
     lplan->getOperationPlan()->restore(originalOpplan);
     data->state->q_qty = lplan->getQuantity();
     data->state->q_date = lplan->getDate();
@@ -426,7 +423,7 @@ void SolverMRP::solve(const Load* l, void* v)
     data->state->a_cost = beforeCost;
     data->state->a_penalty = beforePenalty;
     if (lplan->getLoad() != bestAlternateSelection)
-      lplan->setLoad(bestAlternateSelection);
+      lplan->setLoad(const_cast<Load*>(bestAlternateSelection));
     lplan->getOperationPlan()->restore(originalOpplan);
     // TODO XXX need to restore also the selected resource with the right skill!
     data->state->q_qty = lplan->getQuantity();
@@ -447,7 +444,7 @@ void SolverMRP::solve(const Load* l, void* v)
   data->constrainedPlanning = originalPlanningMode;
 
   // Maintain the constraint list
-  if (originalLogConstraints)
+  if (originalLogConstraints && data->planningDemand)
   {
     const Load *primary = *(thealternates.begin());
     data->planningDemand->getConstraints().push(

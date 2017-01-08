@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba                 *
+ * Copyright (C) 2007-2015 by frePPLe bvba                                 *
  *                                                                         *
  * This library is free software; you can redistribute it and/or modify it *
  * under the terms of the GNU Affero General Public License as published   *
@@ -30,10 +30,11 @@ DECLARE_EXPORT const MetaCategory* PeggingIterator::metadata;
 int PeggingIterator::initialize()
 {
   // Initialize the pegging metadata
-  PeggingIterator::metadata = new MetaCategory("pegging","peggings");
+  PeggingIterator::metadata = MetaCategory::registerCategory<PeggingIterator>("pegging","peggings");
+  registerFields<PeggingIterator>(const_cast<MetaCategory*>(metadata));
 
   // Initialize the Python type
-  PythonType& x = PythonExtension<PeggingIterator>::getType();
+  PythonType& x = PythonExtension<PeggingIterator>::getPythonType();
   x.setName("peggingIterator");
   x.setDoc("frePPLe iterator for demand pegging");
   x.supportgetattro();
@@ -43,81 +44,76 @@ int PeggingIterator::initialize()
 }
 
 
-DECLARE_EXPORT PeggingIterator::PeggingIterator(const Demand* d)
-  : downstream(false), firstIteration(true)
+DECLARE_EXPORT PeggingIterator::PeggingIterator(const PeggingIterator& c)
+  : downstream(c.downstream), firstIteration(c.firstIteration), first(c.first)
 {
-  // Loop through all delivery operationplans
-  first = false;  // ... because the stack is still empty
-  for (Demand::OperationPlan_list::const_iterator opplaniter = d->getDelivery().begin();
-      opplaniter != d->getDelivery().end(); ++opplaniter)
-    followPegging(*opplaniter, 0, (*opplaniter)->getQuantity(), 1.0);
-
-  // Initialize Python type information
   initType(metadata);
+  for (statestack::const_iterator i = c.states.begin(); i != c.states.end(); ++i)
+    states.push_back( state(i->opplan, i->quantity, i->offset, i->level) );
+}
+
+
+DECLARE_EXPORT PeggingIterator::PeggingIterator(const Demand* d)
+  : downstream(false), firstIteration(true), first(false)
+{
+  initType(metadata);
+  const Demand::OperationPlanList &deli = d->getDelivery();
+  for (Demand::OperationPlanList::const_iterator opplaniter = deli.begin();
+      opplaniter != deli.end(); ++opplaniter)
+  {
+    OperationPlan *t = (*opplaniter)->getTopOwner();
+    updateStack(t, t->getQuantity(), 0.0, 0);
+  }
 }
 
 
 DECLARE_EXPORT PeggingIterator::PeggingIterator(const OperationPlan* opplan, bool b)
-  : downstream(b), firstIteration(true)
+  : downstream(b), firstIteration(true), first(false)
 {
-  first = false;  // ... because the stack is still empty
-  followPegging(opplan, 0, opplan->getQuantity(), 1.0);
   initType(metadata);
-}
-
-
-DECLARE_EXPORT void PeggingIterator::updateStack
-(short l, double q, double f, const FlowPlan* fc, const FlowPlan* fp, bool p)
-{
-  // Avoid very small pegging quantities
-  if (q < 0.1) return;
-
-  if (first)
-  {
-    // We can update the current top element of the stack
-    state& t = states.top();
-    t.cons_flowplan = fc;
-    t.prod_flowplan = fp;
-    t.qty = q;
-    t.factor = f;
-    t.level = l;
-    t.pegged = p;
-    first = false;
-  }
+  if (!opplan) return;
+  if (opplan->getTopOwner()->getOperation()->getType() == *OperationSplit::metadata)
+    updateStack(
+      opplan,
+      opplan->getQuantity(),
+      0.0,
+      0
+      );
   else
-    // We need to create a new element on the stack
-    states.push(state(l, q, f, fc, fp, p));
+    updateStack(
+      opplan->getTopOwner(),
+      opplan->getTopOwner()->getQuantity(),
+      0.0,
+      0
+      );
 }
 
 
-DECLARE_EXPORT PeggingIterator& PeggingIterator::operator++()
+DECLARE_EXPORT PeggingIterator::PeggingIterator(FlowPlan* fp, bool b)
+  : downstream(b), firstIteration(true), first(false)
 {
-  // Validate
-  if (states.empty())
-    throw LogicException("Incrementing the iterator beyond it's end");
-  if (!downstream)
-    throw LogicException("Incrementing a downstream iterator");
-  state& st = states.top();
+  initType(metadata);
+  if (!fp) return;
+  updateStack(
+    fp->getOperationPlan()->getTopOwner(),
+    fp->getOperationPlan()->getQuantity(),
+    0.0,
+    0
+    );
+}
 
-  // Handle unconsumed material entries on the stack
-  if (!st.pegged)
-  {
-    states.pop();
-    return *this;
-  }
 
-  // Mark the top entry in the stack as invalid, so it can be reused
-  first = true;
-
-  // Take the consuming flowplan and follow the pegging
-  if (st.cons_flowplan)
-    followPegging(st.cons_flowplan->getOperationPlan()->getTopOwner(),
-        st.level-1, st.qty, st.factor);
-
-  // Pop invalid entries from the stack
-  if (first) states.pop();
-
-  return *this;
+DECLARE_EXPORT PeggingIterator::PeggingIterator(LoadPlan* lp, bool b)
+  : downstream(b), firstIteration(true), first(false)
+{
+  initType(metadata);
+  if (!lp) return;
+  updateStack(
+    lp->getOperationPlan()->getTopOwner(),
+    lp->getOperationPlan()->getQuantity(),
+    0.0,
+    0
+    );
 }
 
 
@@ -127,104 +123,117 @@ DECLARE_EXPORT PeggingIterator& PeggingIterator::operator--()
   if (states.empty())
     throw LogicException("Incrementing the iterator beyond it's end");
   if (downstream)
-    throw LogicException("Decrementing an upstream iterator");
-  state& st = states.top();
+    throw LogicException("Decrementing a downstream iterator");
 
-  // Handle unconsumed material entries on the stack
-  if (!st.pegged)
-  {
-    states.pop();
-    return *this;
-  }
-
-  // Mark the top entry in the stack as invalid, so it can be reused
+  // Mark the top entry in the stack as invalid, so it can be reused.
   first = true;
 
-  // Take the producing flowplan and follow the pegging
-  if (st.prod_flowplan)
-    followPegging(st.prod_flowplan->getOperationPlan()->getTopOwner(),
-        st.level+1, st.qty, st.factor);
+  // Find other operationplans to add to the stack
+  state t = states.back(); // Copy the top element
+  followPegging(t.opplan, t.quantity, t.offset, t.level);
 
-  // Pop invalid entries from the stack
-  if (first) states.pop();
+  // Pop invalid top entry from the stack.
+  // This will happen if we didn't find an operationplan to replace the
+  // top entry.
+  if (first) states.pop_back();
+
+  return *this;
+}
+
+
+DECLARE_EXPORT PeggingIterator& PeggingIterator::operator++()
+{
+  // Validate
+  if (states.empty())
+    throw LogicException("Incrementing the iterator beyond it's end");
+  if (!downstream)
+    throw LogicException("Incrementing an upstream iterator");
+
+  // Mark the top entry in the stack as invalid, so it can be reused.
+  first = true;
+
+  // Find other operationplans to add to the stack
+  state t = states.back(); // Copy the top element
+  followPegging(t.opplan, t.quantity, t.offset, t.level);
+
+  // Pop invalid top entry from the stack.
+  // This will happen if we didn't find an operationplan to replace the
+  // top entry.
+  if (first) states.pop_back();
 
   return *this;
 }
 
 
 DECLARE_EXPORT void PeggingIterator::followPegging
-(const OperationPlan* op, short nextlevel, double qty, double factor)
+(const OperationPlan* op, double qty, double offset, short lvl)
 {
-  // For each flowplan (producing or consuming depending on whether we go
-  // upstream or downstream) ask the buffer to give us the pegged flowplans.
-  bool noFlowPlans = true;
+  // Zero quantity operationplans don't have further pegging
+  if (!op->getQuantity()) return;
+
+  // For each flowplan ask the buffer to find the pegged operationplans.
   if (downstream)
     for (OperationPlan::FlowPlanIterator i = op->beginFlowPlans();
         i != op->endFlowPlans(); ++i)
     {
-      // We're interested in producing flowplans of an operationplan when
-      // walking downstream.
-      if (i->getQuantity()>ROUNDING_ERROR)
-      {
-        i->getFlow()->getBuffer()->followPegging(*this, &*i, nextlevel, qty, factor);
-        noFlowPlans = false;
-      }
+      if (i->getQuantity() > ROUNDING_ERROR) // Producing flowplan
+        i->getFlow()->getBuffer()->followPegging(*this, &*i, qty, offset, lvl+1);
     }
   else
     for (OperationPlan::FlowPlanIterator i = op->beginFlowPlans();
         i != op->endFlowPlans(); ++i)
     {
-      // We're interested in consuming flowplans of an operationplan when
-      // walking upstream.
-      if (i->getQuantity()<-ROUNDING_ERROR)
-      {
-        i->getFlow()->getBuffer()->followPegging(*this, &*i, nextlevel, qty, factor);
-        noFlowPlans = false;
-      }
+      if (i->getQuantity() < -ROUNDING_ERROR) // Consuming flowplan
+        i->getFlow()->getBuffer()->followPegging(*this, &*i, qty, offset, lvl+1);
     }
 
-  // Special case: the operationplan doesn't have flowplans
-  // @todo if (noFlowPlans) updateStack(nextlevel, qty, factor, NULL, NULL);
-
-  // Recursively call this function for all sub-operationplans.
+  // Push child operationplans on the stack.
+  // The pegged quantity is equal to the ratio of the quantities of the
+  // parent and child operationplan.
   for (OperationPlan::iterator j(op); j != OperationPlan::end(); ++j)
-    followPegging(&*j, nextlevel, qty, factor);
+    updateStack(
+      &*j,
+      qty * j->getQuantity() / op->getQuantity(),
+      offset * j->getQuantity() / op->getQuantity(),
+      lvl+1
+      );
 }
 
 
-DECLARE_EXPORT PyObject* PeggingIterator::iternext()
+DECLARE_EXPORT PeggingIterator* PeggingIterator::next()
 {
   if (firstIteration)
     firstIteration = false;
+  else if (downstream)
+    ++*this;
   else
-    operator--();
-  if (!operator bool()) return NULL;
-  Py_INCREF(this);
-  return static_cast<PyObject*>(this);
+    --*this;
+  if (!operator bool())
+    return NULL;
+  else
+    return this;
 }
 
 
-DECLARE_EXPORT PyObject* PeggingIterator::getattro(const Attribute& attr)
+DECLARE_EXPORT void PeggingIterator::updateStack
+(const OperationPlan* op, double qty, double o, short lvl)
 {
-  if (attr.isA(Tags::tag_level))
-    return PythonObject(getLevel());
-  if (attr.isA(Tags::tag_consuming))
-    return PythonObject(getConsumingOperationplan());
-  if (attr.isA(Tags::tag_producing))
-    return PythonObject(getProducingOperationplan());
-  if (attr.isA(Tags::tag_buffer))
-    return PythonObject(getBuffer());
-  if (attr.isA(Tags::tag_quantity_demand))
-    return PythonObject(getQuantityDemand());
-  if (attr.isA(Tags::tag_quantity_buffer))
-    return PythonObject(getQuantityBuffer());
-  if (attr.isA(Tags::tag_pegged))
-    return PythonObject(getPegged());
-  if (attr.isA(Tags::tag_consuming_date))
-    return PythonObject(getConsumingDate());
-  if (attr.isA(Tags::tag_producing_date))
-    return PythonObject(getProducingDate());
-  return NULL;
+  // Avoid very small pegging quantities
+  if (qty < ROUNDING_ERROR) return;
+
+  if (first)
+  {
+    // Update the current top element of the stack
+    state& t = states.back();
+    t.opplan = op;
+    t.quantity = qty;
+    t.offset = o;
+    t.level = lvl;
+    first = false;
+  }
+  else
+    // We need to create a new element on the stack
+    states.push_back( state(op, qty, o, lvl) );
 }
 
 

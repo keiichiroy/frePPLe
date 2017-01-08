@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba                 *
+ * Copyright (C) 2007-2015 by frePPLe bvba                                 *
  *                                                                         *
  * This library is free software; you can redistribute it and/or modify it *
  * under the terms of the GNU Affero General Public License as Objecthed   *
@@ -24,7 +24,7 @@
   * @namespace frepple::utils
   * @brief Utilities for the frePPle core
   */
-
+#pragma once
 #ifndef FREPPLE_UTILS_H
 #define FREPPLE_UTILS_H
 
@@ -120,11 +120,10 @@ using namespace std;
 #include <config.h>
 #else
 // Define the version for (windows) compilers that don't use autoconf
-#define PACKAGE_VERSION "2.1.beta"
+#define PACKAGE_VERSION "3.1.beta"
 #endif
 
 // Header for multithreading
-#if defined(MT)
 #if defined(HAVE_PTHREAD_H)
 #include <pthread.h>
 #elif defined(WIN32)
@@ -133,7 +132,6 @@ using namespace std;
 #include <process.h>
 #else
 #error Multithreading not supported on your platform
-#endif
 #endif
 
 // For the disabled and ansi-challenged people...
@@ -158,24 +156,6 @@ using namespace std;
   */
 #define ROUNDING_ERROR   0.000001
 
-// Header files for the Xerces-c XML parser.
-#ifndef DOXYGEN
-#define XERCES_STATIC_LIBRARY
-#include <xercesc/util/PlatformUtils.hpp>
-#include <xercesc/util/TransService.hpp>
-#include <xercesc/sax2/SAX2XMLReader.hpp>
-#include <xercesc/sax2/Attributes.hpp>
-#include <xercesc/sax2/DefaultHandler.hpp>
-#include <xercesc/framework/MemBufInputSource.hpp>
-#include <xercesc/sax2/XMLReaderFactory.hpp>
-#include <xercesc/util/XMLUni.hpp>
-#include <xercesc/framework/MemBufInputSource.hpp>
-#include <xercesc/framework/LocalFileInputSource.hpp>
-#include <xercesc/framework/StdInInputSource.hpp>
-#include <xercesc/framework/URLInputSource.hpp>
-#include <xercesc/util/XMLException.hpp>
-#endif
-
 /** @def DECLARE_EXPORT
   * Used to define which symbols to export from a Windows DLL.
   * @def MODULE_EXPORT
@@ -189,8 +169,10 @@ using namespace std;
 #undef DECLARE_EXPORT
 #undef MODULE_EXPORT
 #if defined(WIN32) && !defined(DOXYGEN)
-  #ifdef FREPPLE_CORE
+  #if defined(FREPPLE_CORE)
     #define DECLARE_EXPORT __declspec (dllexport)
+  #elif defined(FREPPLE_STATIC)
+    #define DECLARE_EXPORT
   #else
     #define DECLARE_EXPORT __declspec (dllimport)
   #endif
@@ -212,9 +194,26 @@ namespace utils
 
 // Forward declarations
 class Object;
+class Serializer;
 class Keyword;
-class XMLInput;
-class AttributeList;
+class DataInput;
+class DataValue;
+class PythonFunction;
+template<class T, class U> class PythonIterator;
+class DataValueDict;
+class MetaClass;
+template<class T> class MetaFieldDate;
+template<class T> class MetaFieldDouble;
+template<class T> class MetaFieldBool;
+template<class T> class MetaFieldDuration;
+template<class T> class MetaFieldDurationDouble;
+template<class T> class MetaFieldString;
+template<class T, class u> class MetaFieldEnum;
+template<class T, class U> class MetaFieldPointer;
+template<class T> class MetaFieldUnsignedLong;
+template<class Cls, class Iter, class PyIter, class Ptr> class MetaFieldIterator;
+template<class T> class MetaFieldInt;
+template<class T> class MetaFieldShort;
 
 // Include the list of predefined tags
 #include "frepple/tags.h"
@@ -239,6 +238,9 @@ enum Action
     */
   ADD_CHANGE = 3
 };
+
+
+enum tribool { BOOL_UNSET, BOOL_TRUE, BOOL_FALSE };
 
 
 /** Writes an action description to an output stream. */
@@ -287,14 +289,20 @@ extern DECLARE_EXPORT ostream logger;
 struct indent
 {
   short level;
+
   indent(short l) : level(l) {}
-  indent operator() (short l) {return indent(l);}
+
+  indent operator() (short l)
+  {
+    return indent(l);
+  }
 };
 
 /** Print a number of spaces to the output stream. */
 inline ostream& operator <<(ostream &os, const indent& i)
 {
-  for (short c = i.level; c>0; --c) os << ' ';
+  for (short c = i.level; c>0; --c)
+    os << ' ';
   return os;
 }
 
@@ -557,7 +565,10 @@ class PythonInterpreter
     static DECLARE_EXPORT void registerGlobalObject(const char*, PyObject*, bool = true);
 
     /** Return a pointer to the main extension module. */
-    static PyObject* getModule() {return module;}
+    static PyObject* getModule()
+    {
+      return module;
+    }
 
     /** Create a new Python thread state.<br>
       * Each OS-level thread needs to initialize a Python thread state as well.
@@ -576,10 +587,8 @@ class PythonInterpreter
     static DECLARE_EXPORT void deleteThread();
 
   private:
-#if PY_MAJOR_VERSION >= 3
     /** Callback function to create the extension module. */
     static PyObject* createModule();
-#endif
 
     /** A pointer to the frePPLe extension module. */
     static DECLARE_EXPORT PyObject *module;
@@ -607,816 +616,6 @@ DECLARE_EXPORT bool matchWildcard(const char*, const char*);
 
 
 //
-// METADATA AND OBJECT FACTORY
-//
-
-/** @brief This class defines a keyword for the frePPLe data model.
-  *
-  * The keywords are used to define the attribute names for the objects.<br>
-  * They are used as:
-  *  - Element and attribute names in XML documents
-  *  - Attribute names in the Python extension.
-  *
-  * Special for this class is the requirement to have a "perfect" hash
-  * function, i.e. a function that returns a distinct number for each
-  * defined tag. The class prints a warning message when the hash
-  * function doesn't satisfy this criterion.
-  */
-class Keyword : public NonCopyable
-{
-  private:
-    /** Stores the hash value of this tag. */
-    hashtype dw;
-
-    /** Store different preprocessed variations of the name of the tag.
-      * These are all stored in memory for improved performance. */
-    string strName, strStartElement, strEndElement, strElement, strAttribute;
-
-    /** Name of the string transcoded to its Xerces-internal representation. */
-    XMLCh* xmlname;
-
-    /** A function to verify the uniquess of our hashes. */
-    void check();
-
-  public:
-    /** Container for maintaining a list of all tags. */
-    typedef map<hashtype,Keyword*> tagtable;
-
-    /** This is the constructor.<br>
-      * The tag doesn't belong to an XML namespace. */
-    DECLARE_EXPORT Keyword(const string&);
-
-    /** This is the constructor. The tag belongs to the XML namespace passed
-      * as second argument.<br>
-      * Note that we still require the first argument to be unique, since it
-      * is used as a keyword for the Python extensions.
-      */
-    DECLARE_EXPORT Keyword(const string&, const string&);
-
-    /** Destructor. */
-    DECLARE_EXPORT ~Keyword();
-
-    /** Returns the hash value of the tag. */
-    hashtype getHash() const {return dw;}
-
-    /** Returns the name of the tag. */
-    const string& getName() const {return strName;}
-
-    /** Returns a pointer to an array of XML characters. This format is used
-      * by Xerces for the internal representation of character strings. */
-    const XMLCh* getXMLCharacters() const {return xmlname;}
-
-    /** Returns a string to start an XML element with this tag: \<TAG */
-    const string& stringStartElement() const {return strStartElement;}
-
-    /** Returns a string to end an XML element with this tag: \</TAG\> */
-    const string& stringEndElement() const {return strEndElement;}
-
-    /** Returns a string to start an XML element with this tag: \<TAG\> */
-    const string& stringElement() const {return strElement;}
-
-    /** Returns a string to start an XML attribute with this tag: TAG=" */
-    const string& stringAttribute() const {return strAttribute;}
-
-    /** This is the hash function. See the note on the perfectness of
-      * this function at the start. This function should be as simple
-      * as possible while still garantueeing the perfectness.<br>
-      * The hash function is based on the Xerces-C implementation,
-      * with the difference that the hash calculated by our function is
-      * portable between platforms.<br>
-      * The hash modulus is 954991 (which is the biggest prime number
-      * lower than 1000000).
-      */
-    static DECLARE_EXPORT hashtype hash(const char*);
-
-    /** This is the hash function.
-      * @see hash(const char*)
-      */
-    static hashtype hash(const string& c) {return hash(c.c_str());}
-
-    /** This is the hash function taken an XML character string as input.<br>
-      * The function is expected to return exactly the same result as when a
-      * character pointer is passed as argument.
-      * @see hash(const char*)
-      */
-    static DECLARE_EXPORT hashtype hash(const XMLCh*);
-
-    /** Finds a tag when passed a certain string. If no tag exists yet, it
-      * will be created. */
-    static DECLARE_EXPORT const Keyword& find(const char*);
-
-    /** Return a reference to a table with all defined tags. */
-    static DECLARE_EXPORT tagtable& getTags();
-
-    /** Prints a list of all tags that have been defined. This can be useful
-      * for debugging and also for creating a good hashing function.<br>
-      * GNU gperf is a program that can generate a perfect hash function for
-      * a given set of symbols.
-      */
-    static DECLARE_EXPORT void printTags();
-};
-
-
-/** @brief This abstract class is the base class used for callbacks.
-  * @see MetaClass::callback
-  * @see FunctorStatic
-  * @see FunctorInstance
-  */
-class Functor : public NonCopyable
-{
-  public:
-    /** This is the callback method.<br>
-      * The return value should be true in case the action is allowed to
-      * happen. In case a subscriber disapproves the action false is
-      * returned.<br>
-      * It is important that the callback methods are implemented in a
-      * thread-safe and re-entrant way!!!
-      */
-    virtual bool callback(Object* v, const Signal a) const = 0;
-
-    /** Destructor. */
-    virtual ~Functor() {}
-};
-
-
-// The following handler functions redirect the call from Python onto a
-// matching virtual function in a PythonExtensionBase subclass.
-extern "C"
-{
-  /** Handler function called from Python. Internal use only. */
-  DECLARE_EXPORT PyObject* getattro_handler (PyObject*, PyObject*);
-  /** Handler function called from Python. Internal use only. */
-  DECLARE_EXPORT int setattro_handler (PyObject*, PyObject*, PyObject*);
-  /** Handler function called from Python. Internal use only. */
-  DECLARE_EXPORT PyObject* compare_handler (PyObject*, PyObject*, int);
-  /** Handler function called from Python. Internal use only. */
-  DECLARE_EXPORT PyObject* iternext_handler (PyObject*);
-  /** Handler function called from Python. Internal use only. */
-  DECLARE_EXPORT PyObject* call_handler(PyObject*, PyObject*, PyObject*);
-  /** Handler function called from Python. Internal use only. */
-  DECLARE_EXPORT PyObject* str_handler(PyObject*);
-}
-
-
-/** @brief This class is a thin wrapper around the type information in Python.
-  *
-  * This class defines a number of convenience functions to interact with the
-  * PyTypeObject struct of the Python C API.
-  */
-class PythonType : public NonCopyable
-{
-  private:
-    /** This static variable is a template for cloning type definitions.<br>
-      * It is copied for each type object we create.
-      */
-    static const PyTypeObject PyTypeObjectTemplate;
-
-    /** Incremental size of the method table.<br>
-      * We allocate memory for the method definitions per block, not
-      * one-by-one.
-      */
-    static const unsigned short methodArraySize = 5;
-
-    /** The Python type object which this class is wrapping. */
-    PyTypeObject* table;
-
-  public:
-    /** A static function that evaluates an exception and sets the Python
-       * error string properly.<br>
-       * This function should only be called from within a catch-block, since
-       * internally it rethrows the exception!
-       */
-    static DECLARE_EXPORT void evalException();
-
-    /** Constructor, sets the tp_base_size member. */
-    DECLARE_EXPORT PythonType(size_t, const type_info*);
-
-    /** Return a pointer to the actual Python PyTypeObject. */
-    PyTypeObject* type_object() const {return table;}
-
-    /** Add a new method. */
-    DECLARE_EXPORT void addMethod(const char*, PyCFunction, int, const char*);
-
-    /** Add a new method. */
-    DECLARE_EXPORT void addMethod(const char*, PyCFunctionWithKeywords, int, const char*);
-
-    /** Updates tp_name. */
-    void setName (const string n)
-    {
-      string *name = new string("frepple." + n);
-      table->tp_name = const_cast<char*>(name->c_str());
-    }
-
-    /** Updates tp_doc. */
-    void setDoc (const string n)
-    {
-      string *doc = new string(n);
-      table->tp_doc = const_cast<char*>(doc->c_str());
-    }
-
-    /** Updates tp_base. */
-    void setBase(PyTypeObject* b)
-    {
-      table->tp_base = b;
-    }
-
-    /** Updates the deallocator. */
-    void supportdealloc(void (*f)(PyObject*))
-    {
-      table->tp_dealloc = f;
-    }
-
-    /** Updates tp_getattro.<br>
-      * The extension class will need to define a member function with this
-      * prototype:<br>
-      *   PythonObject getattro(const XMLElement& name)
-      */
-    void supportgetattro()
-    {table->tp_getattro = getattro_handler;}
-
-    /** Updates tp_setattro.<br>
-      * The extension class will need to define a member function with this
-      * prototype:<br>
-      *   int setattro(const Attribute& attr, const PythonObject& field)
-      */
-    void supportsetattro()
-    {table->tp_setattro = setattro_handler;}
-
-    /** Updates tp_richcompare.<br>
-      * The extension class will need to define a member function with this
-      * prototype:<br>
-      *   int compare(const PyObject* other) const
-      */
-    void supportcompare()
-    {
-      table->tp_richcompare = compare_handler;
-    }
-
-    /** Updates tp_iter and tp_iternext.<br>
-      * The extension class will need to define a member function with this
-      * prototype:<br>
-      *   PyObject* iternext()
-      */
-    void supportiter()
-    {
-      table->tp_iter = PyObject_SelfIter;
-      table->tp_iternext = iternext_handler;
-    }
-
-    /** Updates tp_call.<br>
-      * The extension class will need to define a member function with this
-      * prototype:<br>
-      *   PyObject* call(const PythonObject& args, const PythonObject& kwds)
-      */
-    void supportcall()
-    {table->tp_call = call_handler;}
-
-    /** Updates tp_str.<br>
-      * The extension class will need to define a member function with this
-      * prototype:<br>
-      *   PyObject* str()
-      */
-    void supportstr()
-    {table->tp_str = str_handler;}
-
-    /** Type definition for create functions. */
-    typedef PyObject* (*createfunc)(PyTypeObject*, PyObject*, PyObject*);
-
-    /** Updates tp_new with the function passed as argument. */
-    void supportcreate(createfunc c) {table->tp_new = c;}
-
-    /** This method needs to be called after the type information has all
-      * been updated. It adds the type to the frepple module. */
-    DECLARE_EXPORT int typeReady();
-
-    /** Comparison operator. */
-    bool operator == (const PythonType& i) const
-    {
-      return *cppClass == *(i.cppClass);
-    }
-
-    /** Comparison operator. */
-    bool operator == (const type_info& i) const
-    {
-      return *cppClass == i;
-    }
-
-    /** Type info of the registering class. */
-    const type_info* cppClass;
-};
-
-
-class MetaCategory;
-/** @brief This class stores metadata about the classes in the library.
-  * The stored information goes well beyond the standard 'type_info'.
-  *
-  * A MetaClass instance represents metadata for a specific instance type.
-  * A MetaCategory instance represents metadata for a category of object.
-  * For instance, 'Resource' is a category while 'ResourceDefault' and
-  * 'ResourceInfinite' are specific classes.<br>
-  * The metadata class also maintains subscriptions to certain events.
-  * Registered classes and objects will receive callbacks when objects are
-  * being created, changed or deleted.<br>
-  * The proper usage is to include the following code snippet in every
-  * class:<br>
-  * @code
-  *  In the header file:
-  *    class X : public Object
-  *    {
-  *      public:
-  *        virtual const MetaClass& getType() {return *metadata;}
-  *        static const MetaClass *metadata;
-  *    }
-  *  In the implementation file:
-  *    const MetaClass *X::metadata;
-  * @endcode
-  * Creating a MetaClass object isn't sufficient. It needs to be registered,
-  * typically in an initialization method:
-  * @code
-  *    void initialize()
-  *    {
-  *      ...
-  *      Y::metadata = new MetaCategory("Y","Ys", reader_method, writer_method);
-  *      X::metadata = new MetaClass("Y","X", factory_method);
-  *      ...
-  *    }
-  * @endcode
-  * @see MetaCategory
-  */
-class MetaClass : public NonCopyable
-{
-    friend class MetaCategory;
-    template <class T, class U> friend class FunctorStatic;
-    template <class T, class U> friend class FunctorInstance;
-
-  public:
-    /** Type definition for a factory method calling the default
-     * constructor.. */
-    typedef Object* (*creatorDefault)();
-
-    /** Type definition for a factory method calling the constructor that
-      * takes a string as argument. */
-    typedef Object* (*creatorString)(const string&);
-
-    /** A string specifying the object type, i.e. the subclass within the
-      * category. */
-    string type;
-
-    /** A reference to an Keyword of the base string. */
-    const Keyword* typetag;
-
-    /** The category of this class. */
-    const MetaCategory* category;
-
-    /** A pointer to the Python type. */
-    PyTypeObject* pythonClass;
-
-    /** A factory method for the registered class. */
-    union
-    {
-      creatorDefault factoryMethodDefault;
-      creatorString factoryMethodString;
-    };
-
-    /** Destructor. */
-    virtual ~MetaClass() {}
-
-    /** Initialize the data structure and register the class. */
-    DECLARE_EXPORT void registerClass(const string&, const string&,
-        bool = false, creatorDefault = NULL);
-
-    /** This constructor registers the metadata of a class. */
-    MetaClass (const string& cat, const string& cls, bool def = false)
-      : pythonClass(NULL)
-    {
-      registerClass(cat,cls,def);
-    }
-
-    /** This constructor registers the metadata of a class, with a factory
-      * method that uses the default constructor of the class. */
-    MetaClass (const string& cat, const string& cls, creatorDefault f,
-        bool def = false) : pythonClass(NULL)
-    {
-      registerClass(cat,cls,def);
-      factoryMethodDefault = f;
-    }
-
-    /** This constructor registers the metadata of a class, with a factory
-      * method that uses a constructor with a string argument. */
-    MetaClass (const string& cat, const string& cls, creatorString f,
-        bool def = false) : pythonClass(NULL)
-    {
-      registerClass(cat,cls,def);
-      factoryMethodString = f;
-    }
-
-    /** This function will analyze the string being passed, and return the
-      * appropriate action.
-      * The string is expected to be one of the following:
-      *  - 'A' for action ADD
-      *  - 'C' for action CHANGE
-      *  - 'AC' for action ADD_CHANGE
-      *  - 'R' for action REMOVE
-      *  - Any other value will result in a data exception
-      */
-    static DECLARE_EXPORT Action decodeAction(const char*);
-
-    /** This method picks up the attribute named "ACTION" from the list and
-      * calls the method decodeAction(const XML_Char*) to analyze it.
-      * @see decodeAction(const XML_Char*)
-      */
-    static DECLARE_EXPORT Action decodeAction(const AttributeList&);
-
-    /** Sort two metaclass objects. This is used to sort entities on their
-      * type information in a stable and platform independent way.
-      * @see operator !=
-      * @see operator ==
-      */
-    bool operator < (const MetaClass& b) const
-    {
-      return typetag->getHash() < b.typetag->getHash();
-    }
-
-    /** Compare two metaclass objects. We are not always sure that only a
-      * single instance of a metadata object exists in the system, and a
-      * pointer comparison is therefore not appropriate.
-      * @see operator !=
-      * @see operator <
-      */
-    bool operator == (const MetaClass& b) const
-    {
-      return typetag->getHash() == b.typetag->getHash();
-    }
-
-    /** Compare two metaclass objects. We are not always sure that only a
-      * single instance of a metadata object exists in the system, and a
-      * pointer comparison is therefore not appropriate.
-      * @see operator ==
-      * @see operator <
-      */
-    bool operator != (const MetaClass& b) const
-    {
-      return typetag->getHash() != b.typetag->getHash();
-    }
-
-    /** This method should be called whenever objects of this class are being
-      * created, updated or deleted. It will run the callback method of all
-      * subscribers.<br>
-      * If the function returns true, all callback methods approved of the
-      * event. If false is returned, one of the callbacks disapproved it and
-      * the event action should be allowed to execute.
-      */
-    DECLARE_EXPORT bool raiseEvent(Object* v, Signal a) const;
-
-    /** Connect a new subscriber to the class. */
-    void connect(Functor *c, Signal a) const
-    {const_cast<MetaClass*>(this)->subscribers[a].push_front(c);}
-
-    /** Disconnect a subscriber from the class. */
-    void disconnect(Functor *c, Signal a) const
-    {const_cast<MetaClass*>(this)->subscribers[a].remove(c);}
-
-    /** Print all registered factory methods to the standard output for
-      * debugging purposes. */
-    static DECLARE_EXPORT void printClasses();
-
-    /** Find a particular class by its name. If it can't be located the return
-      * value is NULL. */
-    static DECLARE_EXPORT const MetaClass* findClass(const char*);
-
-    /** Default constructor. */
-    MetaClass() : type("unspecified"), typetag(&Keyword::find("unspecified")),
-      category(NULL), pythonClass(NULL), factoryMethodDefault(NULL) {}
-
-  private:
-    /** This is a list of objects that will receive a callback when the call
-      * method is being used.<br>
-      * There is limited error checking in maintaining this list, and it is the
-      * user's responsability of calling the connect() and disconnect() methods
-      * correctly.<br>
-      * This design garantuees maximum performance, but assumes a properly
-      * educated user.
-      */
-    list<Functor*> subscribers[4];
-};
-
-
-class XMLOutput;
-
-/** @brief This class stores metadata on a data field of a class. 
-  *
-  * A field
-  */
-//class MetaField : public NonCopyable
-//{
-//  private:
-//    Keyword& name;
-//    
-//  public:
-//    typedef double (*getDouble)() const;
-//    typedef void (*setDouble)(double);
-//    typedef int (*getInt)() const;
-//    typedef void (*setInt)(int);
-//    typedef long (*getLong)() const;
-//    typedef void (*setLong)(long);
-//    typedef unsigned long (*getUnsignedLong)() const;
-//    typedef void (*setUnsignedLong)(unsigned long);
-//    typedef bool (*getBool)() const;
-//    typedef void (*setBool)(int);
-//    typedef bool (*getString)() const;
-//    typedef void (*setString)(string);
-//    typedef Date (*getDate)() const;
-//    typedef void (*setDate)(Date);
-//    typedef TimePeriod (*getTimePeriod)() const;
-//    typedef void (*setTimePeriod)(TimePeriod);
-//    /* Other types: list of things... */
-//
-//    /** Constructor. */
-//    MetaField(Keyword&, getDouble, setDouble);
-//    MetaField(Keyword&, getInt, setInt);
-//    MetaField(Keyword&, getBool, setBool);
-//    MetaField(Keyword&, getString, setString );
-//    template <class T> MetaField(Keyword&, T*(*getFunction)() const, void (*setFunction)(T*));
-//
-//    bool get(Object*);
-//    int get(Object*);
-//    double get(Object*);
-//    string get(Object*);
-//    
-//    void set(Object*, bool);
-//    void set(Object*, int);
-//    void set(Object*, double);
-//    void set(Object*, string);
-//
-//    /* for class MetaClass: */
-//    void write(writer, object*);
-//    void read(reader, Object*);
-//};
-
-
-/** @brief A MetaCategory instance represents metadata for a category of
-  * object.
-  *
-  * A MetaClass instance represents metadata for a specific instance type.
-  * For instance, 'Resource' is a category while 'ResourceDefault' and
-  * 'ResourceInfinite' are specific classes.<br>
-  * A category has the following specific pieces of data:
-  *  - A reader function for creating objects.<br>
-  *    The reader function creates objects for all classes registered with it.
-  *  - A writer function for persisting objects.<br>
-  *    The writer function will typically iterate over all objects of the
-  *    category and call the writeElement method on them.
-  *  - A group tag used for the grouping objects of the category in the XML
-  *    output stream.
-  * @see MetaClass
-  */
-class MetaCategory : public MetaClass
-{
-    friend class MetaClass;
-    template<class T> friend class HasName;
-  public:
-    /** The name used to name a collection of objects of this category. */
-    string group;
-
-    /** A XML tag grouping objects of the category. */
-    const Keyword* grouptag;
-
-    /** Type definition for the read control function. */
-    typedef Object* (*readController)(const MetaClass*, const AttributeList&);
-
-    /** Type definition for the write control function. */
-    typedef void (*writeController)(const MetaCategory*, XMLOutput *o);
-
-    /** This template method is available as a object creation factory for
-      * classes without key fields and which rely on a default constructor.
-      */
-    static Object* ControllerDefault (const MetaClass*, const AttributeList&);
-
-    /** Destructor. */
-    virtual ~MetaCategory() {}
-
-    /** Constructor. */
-    DECLARE_EXPORT MetaCategory (const string& t, const string& g,
-        readController = NULL, writeController = NULL);
-
-    /** Type definition for the map of all registered classes. */
-    typedef map < hashtype, const MetaClass*, less<hashtype> > ClassMap;
-
-    /** Type definition for the map of all categories. */
-    typedef map < hashtype, const MetaCategory*, less<hashtype> > CategoryMap;
-
-    /** Looks up a category name in the registry. If the catgory can't be
-      * located the return value is NULL. */
-    static DECLARE_EXPORT const MetaCategory* findCategoryByTag(const char*);
-
-    /** Looks up a category name in the registry. If the catgory can't be
-      * located the return value is NULL. */
-    static DECLARE_EXPORT const MetaCategory* findCategoryByTag(const hashtype);
-
-    /** Looks up a category name in the registry. If the catgory can't be
-      * located the return value is NULL. */
-    static DECLARE_EXPORT const MetaCategory* findCategoryByGroupTag(const char*);
-
-    /** Looks up a category name in the registry. If the category can't be
-      * located the return value is NULL. */
-    static DECLARE_EXPORT const MetaCategory* findCategoryByGroupTag(const hashtype);
-
-    /** Find a class in this category with a specified name.<br>
-      * If the catrgory can't be found the return value is NULL.
-      */
-    DECLARE_EXPORT const MetaClass* findClass(const char*) const;
-
-    /** Find a class in this category with a specified name.<br>
-      * If the catrgory can't be found the return value is NULL.
-      */
-    DECLARE_EXPORT const MetaClass* findClass(const hashtype) const;
-
-    /** This method takes care of the persistence of all categories. It loops
-      * through all registered categories (in the order of their registration)
-      * and calls the persistance handler.
-      */
-    static DECLARE_EXPORT void persist(XMLOutput *);
-
-    /** A control function for reading objects of a category.
-      * The controller function manages the creation and destruction of
-      * objects in this category.
-      */
-    readController readFunction;
-
-  private:
-    /** A map of all classes registered for this category. */
-    ClassMap classes;
-
-    /** Compute the hash for "default" once and store it in this variable for
-      * efficiency. */
-    static DECLARE_EXPORT const hashtype defaultHash;
-
-    /** This is the root for a linked list of all categories.
-      * Categories are chained to the list in the order of their registration.
-      */
-    static DECLARE_EXPORT const MetaCategory* firstCategory;
-
-    /** A pointer to the next category in the singly linked list. */
-    const MetaCategory* nextCategory;
-
-    /** A control function for writing the category.
-      * The controller function will loop over the objects in the category and
-      * call write them one by one.
-      */
-    writeController writeFunction;
-
-    /** A map of all categories by their name. */
-    static DECLARE_EXPORT CategoryMap categoriesByTag;
-
-    /** A map of all categories by their group name. */
-    static DECLARE_EXPORT CategoryMap categoriesByGroupTag;
-};
-
-
-/** @brief This class represents a static subscription to a signal.
-  *
-  * When the signal callback is triggered the static method callback() on the
-  * parameter class will be called.
-  */
-template <class T, class U> class FunctorStatic : public Functor
-{
-    friend class MetaClass;
-  public:
-    /** Add a signal subscriber. */
-    static void connect(const Signal a)
-    {T::metadata->connect(new FunctorStatic<T,U>(), a);}
-
-    /** Remove a signal subscriber. */
-    static void disconnect(const Signal a)
-    {
-      MetaClass &t =
-        const_cast<MetaClass&>(static_cast<const MetaClass&>(*T::metadata));
-      // Loop through all subscriptions
-      for (list<Functor*>::iterator i = t.subscribers[a].begin();
-          i != t.subscribers[a].end(); ++i)
-      {
-        // Try casting the functor to the right type
-        FunctorStatic<T,U> *f = dynamic_cast< FunctorStatic<T,U>* >(*i);
-        if (f)
-        {
-          // Casting was successfull. Delete the functor.
-          delete *i;
-          t.subscribers[a].erase(i);
-          return;
-        }
-      }
-      // Not found in the list of subscriptions
-      throw LogicException("Subscription doesn't exist");
-    }
-
-  private:
-    /** This is the callback method. The functor will call the static callback
-      * method of the subscribing class.
-      */
-    virtual bool callback(Object* v, const Signal a) const
-    {return U::callback(static_cast<T*>(v),a);}
-};
-
-
-/** @brief This class represents an object subscribing to a signal.
-  *
-  * When the signal callback is triggered the method callback() on the
-  * instance object will be called.
-  */
-template <class T, class U> class FunctorInstance : public Functor
-{
-  public:
-    /** Connect a new subscriber to a signal.<br>
-      * It is the users' responsibility to call the disconnect method
-      * when the subscriber is being deleted. Otherwise the application
-      * will crash.
-      */
-    static void connect(U* u, const Signal a)
-    {if (u) T::metadata.connect(new FunctorInstance(u), a);}
-
-    /** Disconnect from a signal. */
-    static void disconnect(U *u, const Signal a)
-    {
-      MetaClass &t =
-        const_cast<MetaClass&>(static_cast<const MetaClass&>(T::metadata));
-      // Loop through all subscriptions
-      for (list<Functor*>::iterator i = t.subscribers[a].begin();
-          i != t.subscribers[a].end(); ++i)
-      {
-        // Try casting the functor to the right type
-        FunctorInstance<T,U> *f = dynamic_cast< FunctorInstance<T,U>* >(*i);
-        if (f && f->instance == u)
-        {
-          // Casting was successfull. Delete the functor.
-          delete *i;
-          t.subscribers[a].erase(i);
-          return;
-        }
-      }
-      // Not found in the list of subscriptions
-      throw LogicException("Subscription doesn't exist");
-    }
-
-    /** Constructor. */
-    FunctorInstance(U* u) : instance(u) {}
-
-  private:
-    /** This is the callback method. */
-    virtual bool callback(Object* v, const Signal a) const
-    {return instance ? instance->callback(static_cast<T*>(v),a) : true;}
-
-    /** The object whose callback method will be called. */
-    U* instance;
-};
-
-
-//
-// UTILITY CLASS "TIMER".
-//
-
-/** @brief This class is used to measure the processor time used by the
-  * program.
-  *
-  * The accuracy of the timer is dependent on the implementation of the
-  * ANSI C-function clock() by your compiler and your platform.
-  * You may count on milli-second accuracy. Different platforms provide
-  * more accurate timer functions, which can be used if the accuracy is a
-  * prime objective.<br>
-  * When compiled with Visual C++, the timer is returning the elapsed
-  * time - which is not the expected ANSI behavior!<br>
-  * Other compilers and platforms return the consumed cpu time, as expected.
-  * When the load on a machine is low, the consumed cpu-time and the elapsed
-  * time are close to each other. On a system with a higher load, the
-  * elapsed time deviates a lot from the consumed cpu-time.
-  */
-class Timer
-{
-  public:
-    /** Default constructor. Creating the timer object sets the start point
-      * for the time measurement. */
-    explicit Timer() : start_time(clock()) {}
-
-    /** Reset the time counter to 0. */
-    void restart() {start_time = clock();}
-
-    /** Return the cpu-time in seconds consumed since the creation or the last
-      * reset of the timer. */
-    double elapsed() const {return double(clock()-start_time)/CLOCKS_PER_SEC;}
-
-  private:
-    /** Stores the time when the timer is started. */
-    clock_t start_time;
-};
-
-
-/** Prints a timer to the outputstream. The output is formatted as a double. */
-inline ostream & operator << (ostream& os, const Timer& t)
-{
-  return os << t.elapsed();
-}
-
-
-//
 // UTILITY CLASSES "DATE", "DATE_RANGE" AND "TIME".
 //
 
@@ -1426,59 +625,104 @@ inline ostream & operator << (ostream& os, const Timer& t)
   *
   * The duration can be both positive and negative.
   */
-class TimePeriod
+class Duration
 {
-    friend ostream& operator << (ostream &, const TimePeriod &);
+    friend ostream& operator << (ostream &, const Duration &);
   public:
-    /** Default constructor and constructor with timeperiod passed. */
-    TimePeriod(const long l = 0) : lval(l) {}
+    /** Default constructor and constructor with Duration passed. */
+    Duration(const long l = 0) : lval(l) {}
 
     /** Constructor from a character string.<br>
       * See the parse() method for details on the format of the argument.
       */
-    TimePeriod(const char* s) {parse(s);}
+    Duration(const char* s)
+    {
+      parse(s);
+    }
 
     /** Comparison between periods of time. */
-    bool operator < (const long& b) const {return lval < b;}
+    bool operator < (const long& b) const
+    {
+      return lval < b;
+    }
 
     /** Comparison between periods of time. */
-    bool operator > (const long& b) const {return lval > b;}
+    bool operator > (const long& b) const
+    {
+      return lval > b;
+    }
 
     /** Comparison between periods of time. */
-    bool operator <= (const long& b) const {return lval <= b;}
+    bool operator <= (const long& b) const
+    {
+      return lval <= b;
+    }
 
     /** Comparison between periods of time. */
-    bool operator >= (const long& b) const {return lval >= b;}
+    bool operator >= (const long& b) const
+    {
+      return lval >= b;
+    }
 
     /** Comparison between periods of time. */
-    bool operator < (const TimePeriod& b) const {return lval < b.lval;}
+    bool operator < (const Duration& b) const
+    {
+      return lval < b.lval;
+    }
 
     /** Comparison between periods of time. */
-    bool operator > (const TimePeriod& b) const {return lval > b.lval;}
+    bool operator > (const Duration& b) const
+    {
+      return lval > b.lval;
+    }
 
     /** Comparison between periods of time. */
-    bool operator <= (const TimePeriod& b) const {return lval <= b.lval;}
+    bool operator <= (const Duration& b) const
+    {
+      return lval <= b.lval;
+    }
 
     /** Comparison between periods of time. */
-    bool operator >= (const TimePeriod& b) const {return lval >= b.lval;}
+    bool operator >= (const Duration& b) const
+    {
+      return lval >= b.lval;
+    }
 
     /** Equality operator. */
-    bool operator == (const TimePeriod& b) const {return lval == b.lval;}
+    bool operator == (const Duration& b) const
+    {
+      return lval == b.lval;
+    }
 
     /** Inequality operator. */
-    bool operator != (const TimePeriod& b) const {return lval != b.lval;}
+    bool operator != (const Duration& b) const
+    {
+      return lval != b.lval;
+    }
 
-    /** Increase the timeperiod. */
-    void operator += (const TimePeriod& l) {lval += l.lval;}
+    /** Increase the Duration. */
+    void operator += (const Duration& l)
+    {
+      lval += l.lval;
+    }
 
-    /** Decrease the timeperiod. */
-    void operator -= (const TimePeriod& l) {lval -= l.lval;}
+    /** Decrease the Duration. */
+    void operator -= (const Duration& l)
+    {
+      lval -= l.lval;
+    }
 
     /** Returns true of the duration is equal to 0. */
-    bool operator ! () const {return lval == 0L;}
+    bool operator ! () const
+    {
+      return lval == 0L;
+    }
 
-    /** This conversion operator creates a long value from a timeperiod. */
-    operator long() const {return lval;}
+    /** This conversion operator creates a long value from a Duration. */
+    operator long() const
+    {
+      return lval;
+    }
 
     /** Converts the date to a string, formatted according to ISO 8601. */
     operator string() const
@@ -1492,7 +736,7 @@ class TimePeriod
       * The string format is following the ISO 8601 specification for
       * durations: [-]P[nY][nM][nW][nD][T[nH][nM][nS]]<br>
       * Some examples to illustrate how the string is converted to a
-      * timeperiod, expressed in seconds:<br>
+      * Duration, expressed in seconds:<br>
       *    P1Y = 1 year = 365 days = 31536000 seconds
       *    P1M = 365/12 days = 2628000 seconds
       *    P1W = 1 week = 7 days = 604800 seconds
@@ -1507,18 +751,31 @@ class TimePeriod
       */
     DECLARE_EXPORT void parse(const char*);
 
-    /** The maximum value for a timeperiod. */
-    DECLARE_EXPORT static const TimePeriod MAX;
+    /** Function to parse a string to a double, representing the
+      * number of seconds.<br>
+      * Compared to the parse() method it also processes the
+      * decimal part of the duration.
+      * @see parse(const char*)
+      */
+    static DECLARE_EXPORT double parse2double(const char*);
 
-    /** The minimum value for a timeperiod. */
-    DECLARE_EXPORT static const TimePeriod MIN;
+    /** Write out a double as a time period string.
+      * @see toCharBuffer()
+      */
+    static DECLARE_EXPORT void double2CharBuffer(double, char*);
+
+    /** The maximum value for a Duration. */
+    DECLARE_EXPORT static const Duration MAX;
+
+    /** The minimum value for a Duration. */
+    DECLARE_EXPORT static const Duration MIN;
 
   private:
     /** The time is stored as a number of seconds. */
     long lval;
 
     /** This function fills a character buffer with a text representation of
-      * the TimePeriod.<br>
+      * the Duration.<br>
       * The character buffer passed MUST have room for at least 20 characters.
       * 20 characters is sufficient for even the most longest possible time
       * duration.<br>
@@ -1529,10 +786,10 @@ class TimePeriod
 };
 
 
-/** Prints a Timeperiod to the outputstream.
-  * @see TimePeriod::string()
+/** Prints a Duration to the outputstream.
+  * @see Duration::string()
   */
-inline ostream & operator << (ostream & os, const TimePeriod & t)
+inline ostream & operator << (ostream & os, const Duration & t)
 {
   char str[20];
   t.toCharBuffer(str);
@@ -1580,36 +837,48 @@ class Date
     time_t lval;
 
     /** Checks whether we stay within the boundaries of finite Dates. */
-    DECLARE_EXPORT void checkFinite(long long);
+    void checkFinite(long long i)
+    {
+      if (i < infinitePast.lval) lval = infinitePast.lval;
+      else if (i > infiniteFuture.lval) lval = infiniteFuture.lval;
+      else lval = static_cast<long>(i);
+    }
 
     /** A private constructor used to create the infinitePast and
       * infiniteFuture constants. */
-    Date(const char* s, bool dummy) {parse(s);}
+    Date(const char* s, bool dummy)
+    {
+      parse(s);
+    }
 
     /** A utility function that uses the C function localtime to compute the
       * details of the current time: day of the week, day of the month,
       * day of the year, hour, minutes, seconds
       */
-    inline void getInfo(struct tm* tm_struct) const 
+    inline void getInfo(struct tm* tm_struct) const
     {
       // The standard library function localtime() is not re-entrant: the same
       // static structure is used for all calls. In a multi-threaded environment
       // the function is not to be used.
-      // The POSIX standard defines a re-entrant version of the function:
-      // localtime_r.
-      // Visual C++ 6.0 and Borland 5.5 are missing it, but provide a thread-safe
-      // variant without changing the function semantics.
       #ifdef HAVE_LOCALTIME_R
+        // The POSIX standard defines a re-entrant version of the function.
         localtime_r(&lval, tm_struct);
+      #elif defined(WIN32)
+        // Microsoft uses another function name with, of course, a different
+        // name and a different order of arguments.
+        localtime_s(tm_struct, &lval);
       #else
-        *tm_struct = *localtime(&lval);
+        #error A multi-threading safe localtime function is required
       #endif
     }
 
   public:
 
     /** Constructor initialized with a long value. */
-    Date(const time_t l) : lval(l) {checkFinite(lval);}
+    Date(const time_t l) : lval(l)
+    {
+      checkFinite(lval);
+    }
 
     /** Default constructor. */
     // This constructor can skip the check for finite dates, and
@@ -1619,48 +888,76 @@ class Date
     /* Note: the automatic copy constructor works fine and is faster than
        writing our own. */
 
-    /** Constructor initialized with a string. The string needs to be in
-      * the format specified by the "format". */
-    Date(const char* s) {parse(s); checkFinite(lval);}
+    /** Constructor initialized with a string and an optional format string. */
+    Date(const char* s, const char* f = format.c_str())
+    {
+      parse(s, f);
+      checkFinite(lval);
+    }
 
     /** Constructor with year, month and day as arguments. Hours, minutes
       * and seconds can optionally be passed too.
       */
     DECLARE_EXPORT Date(int year, int month, int day,
         int hr=0, int min=0, int sec=0
-                       );
+        );
 
     /** Comparison between dates. */
-    bool operator < (const Date& b) const {return lval < b.lval;}
+    bool operator < (const Date& b) const
+    {
+      return lval < b.lval;
+    }
 
     /** Comparison between dates. */
-    bool operator > (const Date& b) const {return lval > b.lval;}
+    bool operator > (const Date& b) const
+    {
+      return lval > b.lval;
+    }
 
     /** Equality of dates. */
-    bool operator == (const Date& b) const {return lval == b.lval;}
+    bool operator == (const Date& b) const
+    {
+      return lval == b.lval;
+    }
 
     /** Inequality of dates. */
-    bool operator != (const Date& b) const {return lval != b.lval;}
+    bool operator != (const Date& b) const
+    {
+      return lval != b.lval;
+    }
 
     /** Comparison between dates. */
-    bool operator >= (const Date& b) const {return lval >= b.lval;}
+    bool operator >= (const Date& b) const
+    {
+      return lval >= b.lval;
+    }
 
     /** Comparison between dates. */
-    bool operator <= (const Date& b) const {return lval <= b.lval;}
+    bool operator <= (const Date& b) const
+    {
+      return lval <= b.lval;
+    }
 
     /** Assignment operator. */
-    void operator = (const Date& b) {lval = b.lval;}
+    void operator = (const Date& b)
+    {
+      lval = b.lval;
+    }
 
     /** Adds some time to this date. */
-    void operator += (const TimePeriod& l)
-    {checkFinite(static_cast<long long>(l) + lval);}
+    void operator += (const Duration& l)
+    {
+      checkFinite(static_cast<long long>(l) + lval);
+    }
 
     /** Subtracts some time to this date. */
-    void operator -= (const TimePeriod& l)
-    {checkFinite(- static_cast<long long>(l) + lval);}
+    void operator -= (const Duration& l)
+    {
+      checkFinite(- static_cast<long long>(l) + lval);
+    }
 
     /** Adding a time to a date returns a new date. */
-    Date operator + (const TimePeriod& l) const
+    Date operator + (const Duration& l) const
     {
       Date d;
       d.checkFinite(static_cast<long long>(l) + lval);
@@ -1668,7 +965,7 @@ class Date
     }
 
     /** Subtracting a time from a date returns a new date. */
-    Date operator - (const TimePeriod& l) const
+    Date operator - (const Duration& l) const
     {
       Date d;
       d.checkFinite(- static_cast<long>(l) + lval);
@@ -1676,19 +973,30 @@ class Date
     }
 
     /** Subtracting two date values returns the time difference in a
-      * TimePeriod object. */
-    TimePeriod operator - (const Date& l) const
-    {return static_cast<long>(lval - l.lval);}
+      * Duration object. */
+    Duration operator - (const Date& l) const
+    {
+      return static_cast<long>(lval - l.lval);
+    }
 
     /** Check whether the date has been initialized. */
-    bool operator ! () const {return lval == infinitePast.lval;}
+    bool operator ! () const
+    {
+      return lval == infinitePast.lval;
+    }
 
     /** Check whether the date has been initialized. */
-    operator bool() const {return lval != infinitePast.lval;}
+    operator bool() const
+    {
+      return lval != infinitePast.lval;
+    }
 
     /** Static function returns a date object initialized with the current
       * Date and time. */
-    static Date now() {return Date(time(0));}
+    static Date now()
+    {
+      return Date(time(0));
+    }
 
     /** Converts the date to a string. The format can be controlled by the
       * setFormat() function. */
@@ -1714,16 +1022,25 @@ class Date
 
     /** Return the seconds since the epoch, which is also the internal
       * representation of a date. */
-    time_t getTicks() const {return lval;}
+    time_t getTicks() const
+    {
+      return lval;
+    }
 
     /** Function that parses a string according to the format string. */
-    DECLARE_EXPORT void parse(const char*, const string& = format);
+    DECLARE_EXPORT void parse(const char*, const char* = format.c_str());
 
     /** Updates the default date format. */
-    static void setFormat(const string& n) {format = n;}
+    static void setFormat(const string& n)
+    {
+      format = n;
+    }
 
     /** Retrieves the default date format. */
-    static string getFormat() {return format;}
+    static string getFormat()
+    {
+      return format;
+    }
 
     /** A constant representing the infinite past, i.e. the earliest time which
       * we can represent.<br>
@@ -1738,42 +1055,42 @@ class Date
     static DECLARE_EXPORT const Date infiniteFuture;
 
     /** Return the number of seconds since january 1st. */
-    long getSecondsYear() const 
-    { 
+    long getSecondsYear() const
+    {
       struct tm t;
       getInfo(&t);
       return t.tm_yday * 86400 + t.tm_sec + t.tm_min * 60 + t.tm_hour * 3600;
-    } 
+    }
 
     /** Return the number of seconds since the start of the month. */
-    long getSecondsMonth() const 
-    { 
+    long getSecondsMonth() const
+    {
       struct tm t;
       getInfo(&t);
       return (t.tm_mday-1) * 86400 + t.tm_sec + t.tm_min * 60 + t.tm_hour * 3600;
-    } 
+    }
 
-    /** Return the number of seconds since the start of the week. 
+    /** Return the number of seconds since the start of the week.
       * The week is starting on Sunday.
       */
     long getSecondsWeek() const
-    { 
+    {
       struct tm t;
       getInfo(&t);
       int result = t.tm_wday * 86400 + t.tm_sec + t.tm_min * 60 + t.tm_hour * 3600;
       assert(result >= 0 && result < 604800L);
       return result;
-    } 
+    }
 
     /** Return the number of seconds since the start of the day. */
-    long getSecondsDay() const 
-    { 
+    long getSecondsDay() const
+    {
       struct tm t;
       getInfo(&t);
       int result = t.tm_sec + t.tm_min * 60 + t.tm_hour * 3600;
       assert(result >= 0 && result < 86400L);
       return result;
-    } 
+    }
 
 #ifndef HAVE_STRPTIME
   private:
@@ -1799,14 +1116,20 @@ inline ostream & operator << (ostream & os, const Date & d)
   * The start and end dates are always such that the start date is less than
   * or equal to the end date.
   */
-class DateRange
+class DateRange  // TODO REMOVE THIS CLASS, because it is not a native data format.
 {
   public:
     /** Constructor with specified start and end dates.<br>
       * If the start date is later than the end date parameter, the
       * parameters will be swapped. */
     DateRange(const Date& st, const Date& nd) : start(st), end(nd)
-    {if(st>nd) {start=nd; end=st;}}
+    {
+      if(st>nd)
+      {
+        start=nd;
+        end=st;
+      }
+    }
 
     /** Default constructor.<br>
       * This will create a daterange covering the complete horizon.
@@ -1817,49 +1140,100 @@ class DateRange
     DateRange(const DateRange& n) : start(n.start), end(n.end) {}
 
     /** Returns the start date. */
-    const Date& getStart() const {return start;}
+    const Date& getStart() const
+    {
+      return start;
+    }
 
     /** Updates the start date.<br>
       * If the new start date is later than the end date, the end date will
       * be set equal to the new start date.
       */
-    void setStart(const Date& d) {start=d; if(start>end) end=start;}
+    void setStart(const Date& d)
+    {
+      start=d;
+      if(start>end) end=start;
+    }
 
     /** Returns the end date. */
-    const Date & getEnd() const {return end;}
+    const Date & getEnd() const
+    {
+      return end;
+    }
 
     /** Updates the end date.<br>
       * If the new end date is earlier than the start date, the start date will
       * be set equal to the new end date.
       */
-    void setEnd(const Date& d) {end=d; if(start>end) start=end;}
+    void setEnd(const Date& d)
+    {
+      end=d;
+      if (start>end) start=end;
+    }
 
     /** Updates the start and end dates simultaneously. */
     void setStartAndEnd(const Date& st, const Date& nd)
-    {if (st<nd) {start=st; end=nd;} else {start=nd; end=st;}}
+    {
+      if (st<nd)
+      {
+        start=st;
+        end=nd;
+      }
+      else
+      {
+        start=nd;
+        end=st;
+      }
+    }
 
     /** Returns the duration of the interval. Note that this number will always
       * be greater than or equal to 0, since the end date is always later than
       * the start date.
       */
-    TimePeriod getDuration() const {return end - start;}
+    Duration getDuration() const
+    {
+      return end - start;
+    }
+
+    /** Bool conversion operator.<br>
+      * Returns true if the daterange is different from the default. */
+    operator bool() const
+    {
+      return start != Date::infinitePast || end != Date::infiniteFuture;
+    }
 
     /** Equality of date ranges. */
     bool operator == (const DateRange& b) const
-    {return start==b.start && end==b.end;}
+    {
+      return start==b.start && end==b.end;
+    }
 
     /** Inequality of date ranges. */
     bool operator != (const DateRange& b) const
-    {return start!=b.start || end!=b.end;}
+    {
+      return start!=b.start || end!=b.end;
+    }
 
     /** Move the daterange later in time. */
-    void operator += (const TimePeriod& l) {start += l; end += l;}
+    void operator += (const Duration& l)
+    {
+      start += l;
+      end += l;
+    }
 
     /** Move the daterange earlier in time. */
-    void operator -= (const TimePeriod& l) {start -= l; end -= l;}
+    void operator -= (const Duration& l)
+    {
+      start -= l;
+      end -= l;
+    }
 
     /** Assignment operator. */
-    void operator = (const DateRange& dr) {start = dr.start; end = dr.end;}
+    void operator = (const DateRange& dr)
+    {
+      start = dr.start;
+      end = dr.end;
+    }
 
     /** Return true if two date ranges are overlapping.<br>
       * The start point of the first interval is included in the comparison,
@@ -1868,10 +1242,12 @@ class DateRange
       * not nessarily true.
       */
     bool intersect(const DateRange& dr) const
-    {return dr.start<=end && dr.end>start;}
+    {
+      return dr.start<=end && dr.end>start;
+    }
 
     /** Returns the number of seconds the two dateranges overlap. */
-    TimePeriod overlap(const DateRange& dr) const
+    Duration overlap(const DateRange& dr) const
     {
       long x = (dr.end<end ? dr.end : end)
           - (dr.start>start ? dr.start : start);
@@ -1880,7 +1256,10 @@ class DateRange
 
     /** Returns true if the date passed as argument does fall within the
       * daterange. */
-    bool within(const Date& d) const {return d>=start && d<end;}
+    bool within(const Date& d) const
+    {
+      return d>=start && d<end;
+    }
 
     /** Convert the daterange to a string. */
     DECLARE_EXPORT operator string() const;
@@ -1893,7 +1272,10 @@ class DateRange
     }
 
     /** Retrieves the default seperator. */
-    static const string& getSeparator() {return separator;}
+    static const string& getSeparator()
+    {
+      return separator;
+    }
 
   private:
     /** Start date of the interval. */
@@ -1919,446 +1301,1314 @@ inline ostream & operator << (ostream & os, const DateRange & dr)
 
 
 //
+// METADATA AND OBJECT FACTORY
+//
+
+/** @brief This class defines a keyword for the frePPLe data model.
+  *
+  * The keywords are used to define the attribute names for the objects.<br>
+  * They are used as:
+  *  - Element and attribute names in XML documents
+  *  - Attribute names in the Python extension.
+  *
+  * Special for this class is the requirement to have a "perfect" hash
+  * function, i.e. a function that returns a distinct number for each
+  * defined tag. The class prints a warning message when the hash
+  * function doesn't satisfy this criterion.
+  */
+class Keyword : public NonCopyable
+{
+  private:
+    /** Stores the hash value of this tag. */
+    hashtype dw;
+
+    /** Store different preprocessed variations of the name of the tag.
+      * These are all stored in memory for improved performance. */
+    string strName, strStartElement, strEndElement, strElement, strAttribute;
+
+    /** A function to verify the uniquess of our hashes. */
+    void check();
+
+  public:
+    /** Container for maintaining a list of all tags. */
+    typedef map<hashtype,Keyword*> tagtable;
+
+    /** This is the constructor.<br>
+      * The tag doesn't belong to an XML namespace. */
+    DECLARE_EXPORT Keyword(const string&);
+
+    /** This is the constructor. The tag belongs to the XML namespace passed
+      * as second argument.<br>
+      * Note that we still require the first argument to be unique, since it
+      * is used as a keyword for the Python extensions.
+      */
+    DECLARE_EXPORT Keyword(const string&, const string&);
+
+    /** Destructor. */
+    DECLARE_EXPORT ~Keyword();
+
+    /** Returns the hash value of the tag. */
+    hashtype getHash() const
+    {
+      return dw;
+    }
+
+    /** Returns the name of the tag. */
+    const string& getName() const
+    {
+      return strName;
+    }
+
+    /** Returns a string to start an XML element with this tag: \<TAG */
+    const string& stringStartElement() const
+    {
+      return strStartElement;
+    }
+
+    /** Returns a string to end an XML element with this tag: \</TAG\> */
+    const string& stringEndElement() const
+    {
+      return strEndElement;
+    }
+
+    /** Returns a string to start an XML element with this tag: \<TAG\> */
+    const string& stringElement() const
+    {
+      return strElement;
+    }
+
+    /** Returns a string to start an XML attribute with this tag: TAG=" */
+    const string& stringAttribute() const
+    {
+      return strAttribute;
+    }
+
+    /** This is the hash function. See the note on the perfectness of
+      * this function at the start. This function should be as simple
+      * as possible while still garantueeing the perfectness.<br>
+      * The hash function is based on the Xerces-C implementation,
+      * with the difference that the hash calculated by our function is
+      * portable between platforms.<br>
+      * The hash modulus is 954991 (which is the biggest prime number
+      * lower than 1000000).
+      */
+    static DECLARE_EXPORT hashtype hash(const char*);
+
+    /** This is the hash function.
+      * @see hash(const char*)
+      */
+    static hashtype hash(const string& c)
+    {
+      return hash(c.c_str());
+    }
+
+    /** Finds a tag when passed a certain string. If no tag exists yet, it
+      * will be created. */
+    static DECLARE_EXPORT const Keyword& find(const char*);
+
+    /** Return a reference to a table with all defined tags. */
+    static DECLARE_EXPORT tagtable& getTags();
+
+    /** Prints a list of all tags that have been defined. This can be useful
+      * for debugging and also for creating a good hashing function.<br>
+      * GNU gperf is a program that can generate a perfect hash function for
+      * a given set of symbols.
+      */
+    static DECLARE_EXPORT void printTags();
+
+    /** Equality operator. */
+    bool operator==(const Keyword& k) const
+    {
+      return dw == k.dw;
+    }
+
+    /** Inequality operator. */
+    bool operator!=(const Keyword& k) const
+    {
+      return dw != k.dw;
+    }
+};
+
+
+/** @brief This abstract class is the base class used for callbacks.
+  * @see MetaClass::callback
+  * @see FunctorStatic
+  * @see FunctorInstance
+  */
+class Functor : public NonCopyable
+{
+  public:
+    /** This is the callback method.<br>
+      * The return value should be true in case the action is allowed to
+      * happen. In case a subscriber disapproves the action false is
+      * returned.
+      */
+    virtual bool callback(Object* v, const Signal a) const = 0;
+
+    /** Destructor. */
+    virtual ~Functor() {}
+};
+
+
+// The following handler functions redirect the call from Python onto a
+// matching virtual function in a Ojbect subclass.
+extern "C"
+{
+  /** Handler function called from Python. Internal use only. */
+  DECLARE_EXPORT PyObject* getattro_handler (PyObject*, PyObject*);
+
+  /** Handler function called from Python. Internal use only. */
+  DECLARE_EXPORT int setattro_handler (PyObject*, PyObject*, PyObject*);
+
+  /** Handler function called from Python. Internal use only. */
+  DECLARE_EXPORT PyObject* compare_handler (PyObject*, PyObject*, int);
+
+  /** Handler function called from Python. Internal use only. */
+  DECLARE_EXPORT PyObject* iternext_handler (PyObject*);
+
+  /** Handler function called from Python. Internal use only. */
+  DECLARE_EXPORT PyObject* call_handler(PyObject*, PyObject*, PyObject*);
+
+  /** Handler function called from Python. Internal use only. */
+  DECLARE_EXPORT PyObject* str_handler(PyObject*);
+}
+
+
+/** @brief This class is a thin wrapper around the type information in Python.
+  *
+  * This class defines a number of convenience functions to interact with the
+  * PyTypeObject struct of the Python C API.
+  */
+class PythonType : public NonCopyable
+{
+  private:
+    /** This static variable is a template for cloning type definitions.<br>
+      * It is copied for each type object we create.
+      */
+    static const PyTypeObject PyTypeObjectTemplate;
+
+    /** Incremental size of the method table.<br>
+      * We allocate memory for the method definitions per block, not
+      * one-by-one.
+      */
+    static const unsigned short methodArraySize = 5;
+
+    /** The Python type object which this class is wrapping. */
+    PyTypeObject* table;
+
+  public:
+    /** A static function that evaluates an exception and sets the Python
+       * error string properly.<br>
+       * This function should only be called from within a catch-block, since
+       * internally it rethrows the exception!
+       */
+    static DECLARE_EXPORT void evalException();
+
+    /** Constructor, sets the tp_base_size member. */
+    DECLARE_EXPORT PythonType(size_t, const type_info*);
+
+    /** Return a pointer to the actual Python PyTypeObject. */
+    inline PyTypeObject* type_object() const
+    {
+      return table;
+    }
+
+    /** Add a new method. */
+    DECLARE_EXPORT void addMethod(const char*, PyCFunction, int, const char*);
+
+    /** Add a new method. */
+    DECLARE_EXPORT void addMethod(const char*, PyCFunctionWithKeywords, int, const char*);
+
+    /** Updates tp_name. */
+    void setName (const string& n)
+    {
+      string *name = new string("frepple." + n);
+      table->tp_name = const_cast<char*>(name->c_str());
+    }
+
+    /** Updates tp_doc. */
+    void setDoc (const string& n)
+    {
+      string *doc = new string(n);
+      table->tp_doc = const_cast<char*>(doc->c_str());
+    }
+
+    /** Updates tp_base. */
+    void setBase(PyTypeObject* b)
+    {
+      table->tp_base = b;
+    }
+
+    /** Updates the deallocator. */
+    void supportdealloc(void (*f)(PyObject*))
+    {
+      table->tp_dealloc = f;
+    }
+
+    /** Updates tp_getattro.<br>
+      * The extension class will need to define a member function with this
+      * prototype:<br>
+      *   PythonData getattro(const XMLData& name)
+      */
+    void supportgetattro()
+    {
+      table->tp_getattro = getattro_handler;
+    }
+
+    /** Updates tp_setattro.<br>
+      * The extension class will need to define a member function with this
+      * prototype:<br>
+      *   int setattro(const Attribute& attr, const PythonData& field)
+      */
+    void supportsetattro()
+    {
+      table->tp_setattro = setattro_handler;
+    }
+
+    /** Updates tp_richcompare.<br>
+      * The extension class will need to define a member function with this
+      * prototype:<br>
+      *   int compare(const PyObject* other) const
+      */
+    void supportcompare()
+    {
+      table->tp_richcompare = compare_handler;
+    }
+
+    /** Updates tp_iter and tp_iternext.<br>
+      * The extension class will need to define a member function with this
+      * prototype:<br>
+      *   PyObject* iternext()
+      */
+    void supportiter()
+    {
+      table->tp_iter = PyObject_SelfIter;
+      table->tp_iternext = iternext_handler;
+    }
+
+    /** Updates tp_call.<br>
+      * The extension class will need to define a member function with this
+      * prototype:<br>
+      *   PyObject* call(const PythonData& args, const PythonData& kwds)
+      */
+    void supportcall()
+    {
+      table->tp_call = call_handler;
+    }
+
+    /** Updates tp_str.<br>
+      * The extension class will need to define a member function with this
+      * prototype:<br>
+      *   PyObject* str()
+      */
+    void supportstr()
+    {
+      table->tp_str = str_handler;
+    }
+
+    /** Type definition for create functions. */
+    typedef PyObject* (*createfunc)(PyTypeObject*, PyObject*, PyObject*);
+
+    /** Updates tp_new with the function passed as argument. */
+    void supportcreate(createfunc c)
+    {
+      table->tp_new = c;
+    }
+
+    /** This method needs to be called after the type information has all
+      * been updated. It adds the type to the frepple module. */
+    DECLARE_EXPORT int typeReady();
+
+    /** Comparison operator. */
+    bool operator == (const PythonType& i) const
+    {
+      return *cppClass == *(i.cppClass);
+    }
+
+    /** Comparison operator. */
+    bool operator == (const type_info& i) const
+    {
+      return *cppClass == i;
+    }
+
+    /** Type info of the registering class. */
+    const type_info* cppClass;
+};
+
+
+enum FieldCategory
+{
+  MANDATORY = 1,         // Marks a key field of the object. This is
+                         // used when we need to serialize only a reference
+                         // to the object.
+  BASE = 2,              // The default value. The field will be serialized
+                         // and deserialized normally.
+  PLAN = 4,              // Marks fields containing planning output. It is
+                         // only serialized when we request such info.
+  DETAIL = 8,            // Marks fields containing more detail than is
+                         // required to restore all state.
+  DONT_SERIALIZE = 16,   // These fields are not intended to be ever
+                         // serialized.
+  COMPUTED = 32,         // A computed field doesn't consume any storage
+  PARENT = 64,           // If set, the constructor of the child object
+                         // will get a pointer to the parent as extra
+                         // argument.
+  WRITE_FULL = 128,      // Write this field in full, even at deeper
+                         // indentation levels.
+  WRITE_HIDDEN = 256     // Force serializing of hidden objects
+};
+
+
+/** @brief This class stores metadata on a data field of a class. */
+class MetaFieldBase
+{
+  public:
+    MetaFieldBase(const Keyword& k, unsigned int fl)
+      : name(k), flags(fl) {}
+
+    const Keyword& getName() const
+    {
+      return name;
+    }
+
+    /** Function to update a field given a data value. */
+    virtual void setField(Object*, const DataValue&) const = 0;
+
+    /** Function to retrieve a field value. */
+    virtual void getField(Object*, DataValue&) const = 0;
+
+    /** Function to serialize a field value. */
+    virtual void writeField(Serializer&) const = 0;
+
+    /** Return the extra size used by this object.
+      * Only the size that is additional to the class instance size needs
+      * to be reported here.
+      */
+    virtual size_t getSize(const Object* o) const
+    {
+      return 0;
+    }
+
+    bool getFlag(unsigned int i) const
+    {
+      return (flags & i) != 0;
+    }
+
+    hashtype getHash() const
+    {
+      return name.getHash();
+    }
+
+    virtual bool isPointer() const
+    {
+      return false;
+    }
+
+    virtual bool isGroup() const
+    {
+      return false;
+    }
+
+    virtual const MetaClass* getClass() const
+    {
+      return NULL;
+    }
+
+    virtual const Keyword* getKeyword() const
+    {
+      return NULL;
+    }
+
+  private:
+    /** Field name. */
+    const Keyword& name;
+
+    /** A series of bit flags for specific behavior. */
+   unsigned int flags;
+};
+
+
+class MetaCategory;
+/** @brief This class stores metadata about the classes in the library.
+  * The stored information goes well beyond the standard 'type_info'.
+  *
+  * A MetaClass instance represents metadata for a specific instance type.
+  * A MetaCategory instance represents metadata for a category of object.
+  * For instance, 'Resource' is a category while 'ResourceDefault' and
+  * 'ResourceInfinite' are specific classes.<br>
+  * The metadata class also maintains subscriptions to certain events.
+  * Registered classes and objects will receive callbacks when objects are
+  * being created, changed or deleted.<br>
+  * The proper usage is to include the following code snippet in every
+  * class:<br>
+  * @code
+  *  In the header file:
+  *    class X : public Object
+  *    {
+  *      public:
+  *        virtual const MetaClass& getType() {return *metadata;}
+  *        static const MetaClass *metadata;
+  *    }
+  *  In the implementation file:
+  *    const MetaClass *X::metadata;
+  * @endcode
+  * Creating a MetaClass object isn't sufficient. It needs to be registered,
+  * typically in an initialization method:
+  * @code
+  *    void initialize()
+  *    {
+  *      ...
+  *      Y::metadata = MetaCategory::registerCategory<CLS>("Y","Ys", reader_method);
+  *      X::metadata = MetaClass::registerClass<CLS>("Y","X", factory_method);
+  *      ...
+  *    }
+  * @endcode
+  * @see MetaCategory
+  */
+class MetaClass : public NonCopyable
+{
+    friend class MetaCategory;
+    template <class T, class U> friend class FunctorStatic;
+    template <class T, class U> friend class FunctorInstance;
+
+  public:
+    /** Type definition for a factory method that calls the
+      * default constructor. */
+    typedef Object* (*creatorDefault)();
+
+    /** A string specifying the object type, i.e. the subclass within
+      * the category. */
+    string type;
+
+    /** The size of an instance of this class. */
+    size_t size;
+
+    /** A reference to a keyword of the base string. */
+    const Keyword* typetag;
+
+    /** The category of this class. */
+    const MetaCategory* category;
+
+    /** A pointer to the Python type. */
+    PyTypeObject* pythonClass;
+
+    /** A factory method for the registered class. */
+    creatorDefault factoryMethod;
+
+    /** A flag that tracks whether this object can inherit context from
+      * its parent during creation.
+      */
+    bool parent;
+
+    /** A flag whether this is the default class in its category. */
+    bool isDefault;
+
+    /** Destructor. */
+    virtual ~MetaClass() {}
+
+    /** Initialize the data structure and register the class. */
+    DECLARE_EXPORT void addClass(const string&, const string&,
+        bool = false, creatorDefault = NULL);
+
+    /** This constructor registers the metadata of a class. */
+    template <class T> static inline MetaClass* registerClass(
+      const string& cat, const string& cls, bool def = false
+      )
+    {
+      return new MetaClass(cat, cls, sizeof(T), def);
+    }
+
+    /** This constructor registers the metadata of a class that is intended
+      * only for internal use. */
+    template <class T> static inline MetaClass* registerClass(const string& cls, creatorDefault f)
+    {
+      return new MetaClass(cls, sizeof(T), f);
+    }
+
+    /** This constructor registers the metadata of a class, with a factory
+      * method that uses the default constructor of the class. */
+    template <class T> static inline MetaClass* registerClass(
+      const string& cat, const string& cls, creatorDefault f, bool def = false
+      )
+    {
+      return new MetaClass(cat, cls, sizeof(T), f, def);
+    }
+
+    /** This function will analyze the string being passed, and return the
+      * appropriate action.
+      * The string is expected to be one of the following:
+      *  - 'A' for action ADD
+      *  - 'C' for action CHANGE
+      *  - 'AC' for action ADD_CHANGE
+      *  - 'R' for action REMOVE
+      *  - Any other value will result in a data exception
+      */
+    static DECLARE_EXPORT Action decodeAction(const char*);
+
+    /** This method picks up the attribute named "ACTION" from the list and
+      * calls the method decodeAction(const XML_Char*) to analyze it.
+      * @see decodeAction(const XML_Char*)
+      */
+    static DECLARE_EXPORT Action decodeAction(const DataValueDict&);
+
+    /** Sort two metaclass objects. This is used to sort entities on their
+      * type information in a stable and platform independent way.
+      * @see operator !=
+      * @see operator ==
+      */
+    bool operator < (const MetaClass& b) const
+    {
+      return typetag->getHash() < b.typetag->getHash();
+    }
+
+    /** Compare two metaclass objects. We are not always sure that only a
+      * single instance of a metadata object exists in the system, and a
+      * pointer comparison is therefore not appropriate.
+      * @see operator !=
+      * @see operator <
+      */
+    bool operator == (const MetaClass& b) const
+    {
+      return typetag->getHash() == b.typetag->getHash();
+    }
+
+    /** Compare two metaclass objects. We are not always sure that only a
+      * single instance of a metadata object exists in the system, and a
+      * pointer comparison is therefore not appropriate.
+      * @see operator ==
+      * @see operator <
+      */
+    bool operator != (const MetaClass& b) const
+    {
+      return typetag->getHash() != b.typetag->getHash();
+    }
+
+    /** This method should be called whenever objects of this class are being
+      * created, updated or deleted. It will run the callback method of all
+      * subscribers.<br>
+      * If the function returns true, all callback methods approved of the
+      * event. If false is returned, one of the callbacks disapproved it and
+      * the event action should be allowed to execute.
+      */
+    DECLARE_EXPORT bool raiseEvent(Object* v, Signal a) const;
+
+    /** Connect a new subscriber to the class. */
+    void connect(Functor *c, Signal a) const
+    {
+      const_cast<MetaClass*>(this)->subscribers[a].push_front(c);
+    }
+
+    /** Disconnect a subscriber from the class. */
+    void disconnect(Functor *c, Signal a) const
+    {
+      const_cast<MetaClass*>(this)->subscribers[a].remove(c);
+    }
+
+    /** Print all registered factory methods to the standard output for
+      * debugging purposes. */
+    static DECLARE_EXPORT void printClasses();
+
+    /** Find a particular class by its name. If it can't be located the return
+      * value is NULL. */
+    static DECLARE_EXPORT const MetaClass* findClass(const char*);
+
+    /** Default constructor. */
+    MetaClass() : type("unspecified"), typetag(&Keyword::find("unspecified")),
+      category(NULL), pythonClass(NULL), factoryMethod(NULL), parent(false) {}
+
+    /** Register a field. */
+    template <class Cls> inline void addStringField(
+      const Keyword& k,
+      string (Cls::*getfunc)(void) const,
+      void (Cls::*setfunc)(const string&) = NULL,
+      string dflt = "",
+      unsigned int c = BASE
+      )
+		{
+      fields.push_back( new MetaFieldString<Cls>(k, getfunc, setfunc, dflt, c) );  // TODO use a block allocator to keep all metadata compact
+		}
+
+    template <class Cls> inline void addIntField(
+      const Keyword& k,
+      int (Cls::*getfunc)(void) const,
+      void (Cls::*setfunc)(int) = NULL,
+      int d = 0,
+      unsigned int c = BASE
+      )
+		{
+      fields.push_back( new MetaFieldInt<Cls>(k, getfunc, setfunc, d, c) );
+		}
+
+    template <class Cls, class Enum> inline void addEnumField(
+      const Keyword& k,
+      Enum (Cls::*getfunc)(void) const,
+      void (Cls::*setfunc)(string),
+      Enum d,
+      unsigned int c = BASE
+      )
+		{
+      fields.push_back( new MetaFieldEnum<Cls, Enum>(k, getfunc, setfunc, d, c) );
+		}
+
+    template <class Cls> inline void addShortField(
+      const Keyword& k,
+      short (Cls::*getfunc)(void) const,
+      void (Cls::*setfunc)(short) = NULL,
+      int d = 0,
+      unsigned int c = BASE
+      )
+		{
+      fields.push_back( new MetaFieldShort<Cls>(k, getfunc, setfunc, d, c) );
+		}
+
+    template <class Cls> inline void addUnsignedLongField(
+      const Keyword& k,
+      unsigned long (Cls::*getfunc)(void) const,
+      void (Cls::*setfunc)(unsigned long) = NULL,
+      unsigned long d = 0.0,
+      unsigned int c = BASE
+      )
+		{
+      fields.push_back( new MetaFieldUnsignedLong<Cls>(k, getfunc, setfunc, d, c) );
+		}
+
+    template <class Cls> inline void addDoubleField(
+      const Keyword& k,
+      double (Cls::*getfunc)(void) const,
+      void (Cls::*setfunc)(double) = NULL,
+      double d = 0.0,
+      unsigned int c = BASE
+      )
+		{
+      fields.push_back( new MetaFieldDouble<Cls>(k, getfunc, setfunc, d, c) );
+		}
+
+    template <class Cls, class Ptr> inline void addPointerField(
+      const Keyword& k,
+      Ptr* (Cls::*getfunc)(void) const,
+      void (Cls::*setfunc)(Ptr*) = NULL,
+      unsigned int c = BASE
+      )
+    {
+      fields.push_back( new MetaFieldPointer<Cls, Ptr>(k, getfunc, setfunc, c) );
+      if (c & PARENT)
+        parent = true;
+    }
+
+    template <class Cls, class Iter, class Ptr> inline void addIteratorField(
+      const Keyword& k1, const Keyword& k2,
+      Iter (Cls::*getfunc)(void) const = NULL,
+      unsigned int c = BASE
+      )
+    {
+      PythonIterator<Iter, Ptr>::initialize();
+      fields.push_back( new MetaFieldIterator<Cls, Iter, PythonIterator<Iter, Ptr>, Ptr>(k1, k2, getfunc, c) );
+      if (c & PARENT)
+        parent = true;
+    }
+
+    template <class Cls> inline void addBoolField(
+      const Keyword& k,
+      bool (Cls::*getfunc)(void) const,
+      void (Cls::*setfunc)(bool) = NULL,
+      tribool d = BOOL_UNSET,
+      unsigned int c = BASE
+      )
+		{
+      fields.push_back( new MetaFieldBool<Cls>(k, getfunc, setfunc, d, c) );
+		}
+
+    template <class Cls> inline void addDateField(
+      const Keyword& k,
+      Date (Cls::*getfunc)(void) const,
+      void (Cls::*setfunc)(Date) = NULL,
+      Date d = Date::infinitePast,
+      unsigned int c = BASE
+      )
+		{
+      fields.push_back( new MetaFieldDate<Cls>(k, getfunc, setfunc, d, c) );
+		}
+
+    template <class Cls> inline void addDurationField(
+      const Keyword& k,
+      Duration (Cls::*getfunc)(void) const,
+      void (Cls::*setfunc)(Duration),
+      Duration d = 0L,
+      unsigned int c = BASE
+      )
+		{
+      fields.push_back( new MetaFieldDuration<Cls>(k, getfunc, setfunc, d, c) );
+		}
+
+    template <class Cls> inline void addDurationDoubleField(
+      const Keyword& k,
+      double (Cls::*getfunc)(void) const,
+      void (Cls::*setfunc)(double),
+      double d = 0L,
+      unsigned int c = BASE
+      )
+		{
+      fields.push_back( new MetaFieldDurationDouble<Cls>(k, getfunc, setfunc, d, c) );
+		}
+
+    /** Search a field. */
+    DECLARE_EXPORT const MetaFieldBase* findField(const Keyword&) const;
+
+    /** Search a field. */
+    DECLARE_EXPORT const MetaFieldBase* findField(hashtype) const;
+
+    typedef vector<MetaFieldBase*> fieldlist;
+
+    /** Return a reference to a list of fields. */
+    const fieldlist& getFields() const
+    {
+      return fields;
+    }
+
+  private:
+    /** This constructor registers the metadata of a class. */
+    MetaClass(const string& cls, size_t sz, creatorDefault f)
+      : type(cls), size(sz), category(NULL), pythonClass(NULL), factoryMethod(f),
+      parent(false), isDefault(false)
+    {
+      factoryMethod = f;
+      typetag = &Keyword::find(cls.c_str());
+    }
+
+    /** This constructor registers the metadata of a class. */
+    MetaClass(const string& cat, const string& cls, size_t sz, bool def = false)
+      : size(sz), pythonClass(NULL), isDefault(def)
+    {
+      addClass(cat, cls, def);
+    }
+
+    /** This constructor registers the metadata of a class, with a factory
+      * method that uses the default constructor of the class. */
+    MetaClass(const string& cat, const string& cls, size_t sz, creatorDefault f,
+        bool def = false) : size(sz), pythonClass(NULL), isDefault(def)
+    {
+      addClass(cat, cls, def);
+      factoryMethod = f;
+    }
+
+    /** This is a list of objects that will receive a callback when the call
+      * method is being used.<br>
+      * There is limited error checking in maintaining this list, and it is the
+      * user's responsability of calling the connect() and disconnect() methods
+      * correctly.<br>
+      * This design garantuees maximum performance, but assumes a properly
+      * educated user.
+      */
+    list<Functor*> subscribers[4];
+
+    /** Registry of all fields of the model. */
+    fieldlist fields;
+};
+
+
+/** @brief A MetaCategory instance represents metadata for a category of
+  * object.
+  *
+  * A MetaClass instance represents metadata for a specific instance type.
+  * For instance, 'Resource' is a category while 'ResourceDefault' and
+  * 'ResourceInfinite' are specific classes.<br>
+  * A category has the following specific pieces of data:
+  *  - A reader function for creating objects.<br>
+  *    The reader function creates objects for all classes registered with it.
+  *  - A group tag used for the grouping objects of the category in the XML
+  *    output stream.
+  * @see MetaClass
+  */
+class MetaCategory : public MetaClass
+{
+    friend class MetaClass;
+    template<class T> friend class HasName;
+  public:
+    /** The name used to name a collection of objects of this category. */
+    string group;
+
+    /** A XML tag grouping objects of the category. */
+    const Keyword* grouptag;
+
+    /** Type definition for the find control function. */
+    typedef Object* (*findController)(const DataValueDict&);
+
+    /** Type definition for the read control function. */
+    typedef Object* (*readController)(const MetaClass*, const DataValueDict&);
+
+    /** This template method is available as a object creation factory for
+      * classes without key fields and which rely on a default constructor.
+      */
+    static Object* ControllerDefault (const MetaClass*, const DataValueDict&);
+
+    /** Destructor. */
+    virtual ~MetaCategory() {}
+
+    /** Template constructor. */
+    template <class cls> static inline MetaCategory* registerCategory(
+      const string& t, const string& g,
+      readController r = NULL, findController f = NULL
+      )
+    {
+      return new MetaCategory(t, g, sizeof(cls), r, f);
+    }
+
+    /** Type definition for the map of all registered classes. */
+    typedef map < hashtype, const MetaClass*, less<hashtype> > ClassMap;
+
+    /** Type definition for the map of all categories. */
+    typedef map < hashtype, const MetaCategory*, less<hashtype> > CategoryMap;
+
+    /** Looks up a category name in the registry. If the category can't be
+      * located the return value is NULL. */
+    static DECLARE_EXPORT const MetaCategory* findCategoryByTag(const char*);
+
+    /** Looks up a category name in the registry. If the category can't be
+      * located the return value is NULL. */
+    static DECLARE_EXPORT const MetaCategory* findCategoryByTag(const hashtype);
+
+    /** Looks up a category name in the registry. If the category can't be
+      * located the return value is NULL. */
+    static DECLARE_EXPORT const MetaCategory* findCategoryByGroupTag(const char*);
+
+    /** Looks up a category name in the registry. If the category can't be
+      * located the return value is NULL. */
+    static DECLARE_EXPORT const MetaCategory* findCategoryByGroupTag(const hashtype);
+
+    /** Find a class in this category with a specified name.<br>
+      * If the catrgory can't be found the return value is NULL.
+      */
+    DECLARE_EXPORT const MetaClass* findClass(const char*) const;
+
+    /** Find a class in this category with a specified name.<br>
+      * If the catrgory can't be found the return value is NULL.
+      */
+    DECLARE_EXPORT const MetaClass* findClass(const hashtype) const;
+
+    /** Find an object given a dictionary of values. */
+    Object* find(const DataValueDict& key) const
+    {
+      return findFunction ? findFunction(key) : NULL;
+    }
+
+    /** A control function for reading objects of a category.
+      * The controller function manages the creation and destruction of
+      * objects in this category.
+      */
+    readController readFunction;
+
+    /** Compute the hash for "default" once and store it in this variable for
+      * efficiency. */
+    static DECLARE_EXPORT const hashtype defaultHash;
+
+  private:
+    /** Private constructor, called by registerCategory. */
+    DECLARE_EXPORT MetaCategory(const string&, const string&, size_t,
+        readController, findController);
+
+    /** A map of all classes registered for this category. */
+    ClassMap classes;
+
+    /** This is the root for a linked list of all categories.
+      * Categories are chained to the list in the order of their registration.
+      */
+    static DECLARE_EXPORT const MetaCategory* firstCategory;
+
+    /** A pointer to the next category in the singly linked list. */
+    const MetaCategory* nextCategory;
+
+    /** A control function to find an object given its primary key. */
+    findController findFunction;
+
+    /** A map of all categories by their name. */
+    static DECLARE_EXPORT CategoryMap categoriesByTag;
+
+    /** A map of all categories by their group name. */
+    static DECLARE_EXPORT CategoryMap categoriesByGroupTag;
+};
+
+
+/** @brief This class represents a static subscription to a signal.
+  *
+  * When the signal callback is triggered the static method callback() on the
+  * parameter class will be called.
+  */
+template <class T, class U> class FunctorStatic : public Functor
+{
+    friend class MetaClass;
+  public:
+    /** Add a signal subscriber. */
+    static void connect(const Signal a)
+    {
+      T::metadata->connect(new FunctorStatic<T,U>(), a);
+    }
+
+    /** Remove a signal subscriber. */
+    static void disconnect(const Signal a)
+    {
+      MetaClass &t =
+        const_cast<MetaClass&>(static_cast<const MetaClass&>(*T::metadata));
+      // Loop through all subscriptions
+      for (list<Functor*>::iterator i = t.subscribers[a].begin();
+          i != t.subscribers[a].end(); ++i)
+      {
+        // Try casting the functor to the right type
+        FunctorStatic<T,U> *f = dynamic_cast< FunctorStatic<T,U>* >(*i);
+        if (f)
+        {
+          // Casting was successfull. Delete the functor.
+          delete *i;
+          t.subscribers[a].erase(i);
+          return;
+        }
+      }
+      // Not found in the list of subscriptions
+      throw LogicException("Subscription doesn't exist");
+    }
+
+  private:
+    /** This is the callback method. The functor will call the static callback
+      * method of the subscribing class.
+      */
+    virtual bool callback(Object* v, const Signal a) const
+    {
+      return U::callback(static_cast<T*>(v),a);
+    }
+};
+
+
+/** @brief This class represents an object subscribing to a signal.
+  *
+  * When the signal callback is triggered the method callback() on the
+  * instance object will be called.
+  */
+template <class T, class U> class FunctorInstance : public Functor
+{
+  public:
+    /** Connect a new subscriber to a signal.<br>
+      * It is the users' responsibility to call the disconnect method
+      * when the subscriber is being deleted. Otherwise the application
+      * will crash.
+      */
+    static void connect(U* u, const Signal a)
+    {
+      if (u) T::metadata.connect(new FunctorInstance(u), a);
+    }
+
+    /** Disconnect from a signal. */
+    static void disconnect(U *u, const Signal a)
+    {
+      MetaClass &t =
+        const_cast<MetaClass&>(static_cast<const MetaClass&>(T::metadata));
+      // Loop through all subscriptions
+      for (list<Functor*>::iterator i = t.subscribers[a].begin();
+          i != t.subscribers[a].end(); ++i)
+      {
+        // Try casting the functor to the right type
+        FunctorInstance<T,U> *f = dynamic_cast< FunctorInstance<T,U>* >(*i);
+        if (f && f->instance == u)
+        {
+          // Casting was successfull. Delete the functor.
+          delete *i;
+          t.subscribers[a].erase(i);
+          return;
+        }
+      }
+      // Not found in the list of subscriptions
+      throw LogicException("Subscription doesn't exist");
+    }
+
+    /** Constructor. */
+    FunctorInstance(U* u) : instance(u) {}
+
+  private:
+    /** This is the callback method. */
+    virtual bool callback(Object* v, const Signal a) const
+    {
+      return instance ? instance->callback(static_cast<T*>(v),a) : true;
+    }
+
+    /** The object whose callback method will be called. */
+    U* instance;
+};
+
+
+//
+// UTILITY CLASS "TIMER".
+//
+
+/** @brief This class is used to measure the processor time used by the
+  * program.
+  *
+  * The accuracy of the timer is dependent on the implementation of the
+  * ANSI C-function clock() by your compiler and your platform.
+  * You may count on milli-second accuracy. Different platforms provide
+  * more accurate timer functions, which can be used if the accuracy is a
+  * prime objective.<br>
+  * When compiled with Visual C++, the timer is returning the elapsed
+  * time - which is not the expected ANSI behavior!<br>
+  * Other compilers and platforms return the consumed cpu time, as expected.
+  * When the load on a machine is low, the consumed cpu-time and the elapsed
+  * time are close to each other. On a system with a higher load, the
+  * elapsed time deviates a lot from the consumed cpu-time.
+  */
+class Timer
+{
+  public:
+    /** Default constructor. Creating the timer object sets the start point
+      * for the time measurement. */
+    explicit Timer() : start_time(clock()) {}
+
+    /** Reset the time counter to 0. */
+    void restart()
+    {
+      start_time = clock();
+    }
+
+    /** Return the cpu-time in seconds consumed since the creation or the last
+      * reset of the timer. */
+    double elapsed() const
+    {
+      return double(clock()-start_time)/CLOCKS_PER_SEC;
+    }
+
+  private:
+    /** Stores the time when the timer is started. */
+    clock_t start_time;
+};
+
+
+/** Prints a timer to the outputstream. The output is formatted as a double. */
+inline ostream & operator << (ostream& os, const Timer& t)
+{
+  return os << t.elapsed();
+}
+
+
+//
 // UTILITY CLASSES FOR INPUT AND OUTPUT
 //
 
 
-/** This type is used to define different ways of persisting an object. */
-enum mode
-{
-  /** Write the full object or a reference. If the object is nested more
-    * than one level deep a reference is written, otherwise the complete
-    * object is written.<br>
-    * This mode is the one to be used when dumping all objects to be restored
-    * later. The other modes can dump too little or too much data.
-    * Eg: \<MODEL NAME="POL" TYPE="a"\>\<FIELD\>value\</FIELD\>\</MODEL\>
-    */
-  DEFAULT = 0,
-  /** Write only the key fields of the object.<br>
-    * Eg: \<MODEL NAME="POL" TYPE="a"/\>
-    */
-  REFERENCE = 1,
-  /** Write the full object, but without a header line. This method is
-    * typically used when a subclass calls the write method of its parent
-    * class.<br>
-    * Eg: \<FIELD\>value\</FIELD\>\</MODEL\>
-    */
-  NOHEAD = 2,
-  /** Write the full object, with all its fields and a header line.<br>
-    * Eg: \<MODEL NAME="POL" TYPE="a"\>\<FIELD\>value\</FIELD\>\</MODEL\>
-    */
-  FULL = 3,
-  /** Write the full object, but without a closing tag. This method is
-    * typically used when a subclass calls the write method of its parent
-    * class.<br>
-    * Eg: \<MODEL NAME="POL" TYPE="a"\>\<FIELD\>value\</FIELD\>
-    */
-  NOTAIL = 4,
-  /** Write the core fields, but without a starting and closing tag. This
-    * method is typically used when a subclass calls the write method of
-    * its parent class.<br>
-    * Eg: \<FIELD\>value\</FIELD\>
-    */
-  NOHEADTAIL = 5
-};
-
-
-/** @ brief This utility class escapes special characters from a string.
+/** @brief Abstract base class for writing serialized data to an output stream.
   *
-  *  The following characters are replaced:
-  *    - &: replaced with &amp;
-  *    - <: replaced with &lt;
-  *    - >: replaced with &gt;
-  *    - ": replaced with &quot;
-  *    - ': replaced with &apos;
-  *    - all other characters are left unchanged
-  * The reverse process of un-escaping the special character sequences is
-  * taken care of by the Xerces library.
-  *
-  * This class works fine with UTF-8 and single-byte encodings, but will
-  * NOT work with other multibyte encodings (such as UTF-116 or UTF-32).
-  * FrePPLe consistently uses UTF-8 in its internal representation.
+  * Subclasses implement writing different formats and stream types.
   */
-class XMLEscape
-{
-    friend DECLARE_EXPORT ostream& operator << (ostream&, const XMLEscape&);
-  private:
-    const char* data;
-  public:
-    XMLEscape(const char* p) {data = p;}
-    XMLEscape(const string& p) {data = p.c_str();}
-};
-
-
-/** Prints the escaped value of the string to the outputstream. */
-DECLARE_EXPORT ostream & operator << (ostream&, const XMLEscape&);
-
-
-/** @brief Base class for writing XML formatted data to an output stream.
-  *
-  * Subclasses implement writing to specific stream types, such as files
-  * and strings.
-  */
-class XMLOutput
+class Serializer
 {
   protected:
     /** Updating the output stream. */
-    void setOutput(ostream& o) {m_fp = &o;}
+    void setOutput(ostream& o)
+    {
+      m_fp = &o;
+    }
 
   public:
-    /** This type is used to define different types of output.
-      * @see STANDARD
-      * @see PLAN
-      * @see PLANDETAIL
-      */
-    typedef unsigned short content_type;
+    /** Returns which type of export is requested. */
+    FieldCategory getContentType() const
+    {
+      return content;
+    }
 
-    /** Constant used to mark standard export for the export.
-      * The standard export saves just enough information to persist the full
-      * state of the model as brief as possible.
-      * @see PLAN
-      * @see PLANDETAIL
-      */
-    static DECLARE_EXPORT const content_type STANDARD;
+    /** Specify the type of export. */
+    void setContentType(FieldCategory c)
+    {
+      content = c;
+    }
 
-    /** Constant to mark an export of the standard information plus the plan
-      * information. In this format, every entity is saved with the details
-      * on how it is used in the plan.<br>
-      * E.g. a resource will be saved with a reference to all its loadplans.
-      * E.g. an operation will be saved with all its operationplans.
-      * @see STANDARD
-      * @see PLANDETAIL
-      */
-    static DECLARE_EXPORT const content_type PLAN;
-
-    /** Constant to mark an export of the lowest level of plan information.
-      * In addition to the plan information pegging information is now saved.
-      * @see STANDARD
-      * @see PLAN
-      */
-    static DECLARE_EXPORT const content_type PLANDETAIL;
-
-    /** Returns which type of export is requested.
-      * Constants have been defined for each type.
-      * @see STANDARD
-      * @see PLAN
-      * @see PLANDETAIL
-      */
-    content_type getContentType() const {return content;}
-
-    /** Specify the type of export.
-      * @see STANDARD
-      * @see PLAN
-      * @see PLANDETAIL
-      */
-    void setContentType(content_type c) {content = c;}
-
-    /** Updates the string that is printed as the first line of each XML
-      * document.<br>
-      * The default value is:
-      *   <?xml version="1.0" encoding="UTF-8"?>
-      */
-    void setHeaderStart(const string& s) {headerStart = s;}
-
-    /** Returns the string that is printed as the first line of each XML
-      * document. */
-    string getHeaderStart() const {return headerStart;}
-
-    /** Updates the attributes that are written for the root element of each
-      * XML document.<br>
-      * The default value is an empty string.
-      */
-    void setHeaderAtts(const string& s) {headerAtts = s;}
-
-    /** Returns the attributes that are written for the root element of each
-      * XML document. */
-    string getHeaderAtts() const {return headerAtts;}
+    /** Set the content type, by parsing its text description. */
+    DECLARE_EXPORT void setContentType(const string&);
 
     /** Constructor with a given stream. */
-    XMLOutput(ostream& os) : m_nIndent(0), numObjects(0),
-      numParents(0), currentObject(NULL), parentObject(NULL), content(STANDARD),
-      headerStart("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"),
-      headerAtts("xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"")
-    {m_fp = &os; indentstring[0] = '\0';}
+    Serializer(ostream& os) : numObjects(0),
+      numParents(0), currentObject(NULL), parentObject(NULL),
+      content(BASE), skipHeader(false), skipFooter(false)
+    {
+      m_fp = &os;
+    }
 
     /** Default constructor. */
-    XMLOutput() : m_nIndent(0), numObjects(0), numParents(0),
-      currentObject(NULL), parentObject(NULL), content(STANDARD),
-      headerStart("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"),
-      headerAtts("xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"")
-    {m_fp = &logger; indentstring[0] = '\0';}
+    Serializer() : numObjects(0), numParents(0),
+      currentObject(NULL), parentObject(NULL), content(BASE),
+      skipHeader(false), skipFooter(false), writeHidden(false)
+    {
+      m_fp = &logger;
+    }
 
     /** Force writing only references for nested objects. */
-    void setReferencesOnly(bool b) {numParents = b ? 2 : 0;}
+    void setReferencesOnly(bool b)
+    {
+      numParents = b ? 2 : 0;
+    }
 
     /** Returns whether we write only references for nested objects or not. */
-    bool getReferencesOnly() const {return numParents>0;}
-
-    /** Start writing a new object. This method will open a new XML-tag.<br>
-      * Output: \<TAG\> 
-      */
-    void BeginObject(const Keyword& t)
+    bool getReferencesOnly() const
     {
-      *m_fp << indentstring << t.stringElement() << "\n";
-      incIndent();
+      return numParents>0;
     }
 
-    /** Start writing a new object. This method will open a new XML-tag. 
-      * Output: \<TAG attributes\> 
-      */
-    void BeginObject(const Keyword& t, const string& atts)
+    bool getWriteHidden() const
     {
-      *m_fp << indentstring << t.stringStartElement() << " " << atts << ">\n";
-      incIndent();
+      return writeHidden;
     }
 
-    /** Start writing a new object. This method will open a new XML-tag.<br>
-      * The user is responsible to assure string values are escaped correctly with the XMLEscape class.<br>
-      * Output: \<TAG TAG1="val1"\> 
-      * @see XMLEscape
-      */
-    template <class T>
-    void BeginObject(const Keyword& t, const Keyword& attr1, const T& val1)
+    void setWriteHidden(bool b)
     {
-      *m_fp << indentstring << t.stringStartElement()
-          << attr1.stringAttribute() << val1 << "\">\n";
-      incIndent();
+      writeHidden = b;
     }
 
-    /** Start writing a new object. This method will open a new XML-tag.<br>
-      * The user is responsible to assure string values are escaped correctly with the XMLEscape class.<br>
-      * Output: \<TAG TAG1="val1" TAG2="val2"\> 
-      * @see XMLEscape
-      */
-    template <class T, class U>
-    void BeginObject(const Keyword& t, const Keyword& attr1, const T& val1, 
-      const Keyword& attr2, const U& val2)
-    {
-      *m_fp << indentstring << t.stringStartElement()
-          << attr1.stringAttribute() << val1 << "\""
-          << attr2.stringAttribute() << val2 << "\">\n";
-      incIndent();
-    }
+    /** Start writing a new list. */
+    virtual void BeginList(const Keyword&) = 0;
 
-    /** Start writing a new object. This method will open a new XML-tag.<br>
-      * The user is responsible to assure string values are escaped correctly with the XMLEscape class.<br>
-      * Output: \<TAG TAG1="val1" TAG2="val2" TAG3="val3"\>
-      * @see XMLEscape
-      */
-    template <class T, class U, class V>
-    void BeginObject(const Keyword& t, const Keyword& attr1, const T& val1,
-      const Keyword& attr2, const U& val2,
-      const Keyword& attr3, const V& val3)
-    {
-      *m_fp << indentstring << t.stringStartElement()
-          << attr1.stringAttribute() << val1 << "\""
-          << attr2.stringAttribute() << val2 << "\""
-          << attr3.stringAttribute() << val3 << "\">\n";
-      incIndent();
-    }
+    /** Write the closing tag of a list. */
+    virtual void EndList(const Keyword& t) = 0;
 
-    /** Write the closing tag of this object and decrease the indentation
-      * level.<br>
-      * Output: \</TAG_T\>
-      */
-    void EndObject(const Keyword& t)
-    {
-      decIndent();
-      *m_fp << indentstring << t.stringEndElement();
-    }
+    /** Start writing a new object. */
+    virtual void BeginObject(const Keyword&) = 0;
 
-    /** Write the string to the output. No XML-tags are added, so this method
+    /** Write the closing tag of this object. */
+    virtual void EndObject(const Keyword& t) = 0;
+
+    /** Start writing a new object. */
+    virtual void BeginObject(const Keyword&, const string&) = 0;
+    virtual void BeginObject(const Keyword&, const Keyword&, const int) = 0;
+    virtual void BeginObject(const Keyword&, const Keyword&, const Date) = 0;
+    virtual void BeginObject(const Keyword&, const Keyword&, const string&) = 0;
+    virtual void BeginObject(const Keyword&,
+      const Keyword&, const string&, const Keyword&, const string&) = 0;
+    virtual void BeginObject(const Keyword&,
+      const Keyword&, const unsigned long&, const Keyword&, const string&) = 0;
+    virtual void BeginObject(const Keyword&, const Keyword&, const int&,
+      const Keyword&, const Date, const Keyword&, const Date) = 0;
+
+    /** Write the string to the output. No tags are added, so this method
       * is used for passing text straight into the output file. */
-    void writeString(const string& c)
-    {
-      *m_fp << indentstring << c << "\n";
-    }
+    virtual void writeString(const string& c) = 0;
 
-    /** Write an unsigned long value enclosed opening and closing tags.<br>
-      * Output: \<TAG_T\>uint\</TAG_T\> */
-    void writeElement(const Keyword& t, const long unsigned int val)
-    {
-      *m_fp << indentstring << t.stringElement() << val << t.stringEndElement();
-    }
+    /** Write an unsigned long value enclosed opening and closing tags.  */
+    virtual void writeElement(const Keyword& t, const long unsigned int val) = 0;
 
-    /** Write an integer value enclosed opening and closing tags.<br>
-      * Output: \<TAG_T\>integer\</TAG_T\> */
-    void writeElement(const Keyword& t, const int val)
-    {
-      *m_fp << indentstring << t.stringElement() << val << t.stringEndElement();
-    }
+    /** Write an integer value enclosed opening and closing tags. */
+    virtual void writeElement(const Keyword& t, const int val) = 0;
 
-    /** Write a double value enclosed opening and closing tags.<br>
-      * Output: \<TAG_T\>double\</TAG_T\> */
-    void writeElement(const Keyword& t, const double val)
-    {
-      *m_fp << indentstring << t.stringElement() << val << t.stringEndElement();
-    }
+    /** Write a double value enclosed opening and closing tags. */
+    virtual void writeElement(const Keyword& t, const double val) = 0;
 
     /** Write a boolean value enclosed opening and closing tags. The boolean
-      * is written out as the string 'true' or 'false'.<br>
-      * Output: \<TAG_T\>true\</TAG_T\>
+      * is written out as the string 'true' or 'false'.
       */
-    void writeElement(const Keyword& t, const bool val)
-    {
-      *m_fp << indentstring << t.stringElement()
-          << (val ? "true" : "false") << t.stringEndElement();
-    }
+    virtual void writeElement(const Keyword& t, const bool val) = 0;
 
     /** Write a string value enclosed opening and closing tags. Special
-      * characters (i.e. & < > " ' ) are appropriately escaped.<br>
-      * Output: \<TAG_T\>val\</TAG_T\> */
-    void writeElement(const Keyword& t, const string& val)
-    {
-      if (!val.empty())
-        *m_fp << indentstring << t.stringElement()
-            << XMLEscape(val) << t.stringEndElement();
-    }
+      * characters are appropriately escaped. */
+    virtual void writeElement(const Keyword& t, const string& val) = 0;
 
-    /** Writes an element with a string attribute.<br>
-      * Output: \<TAG_U TAG_T="string"/\> */
-    void writeElement(const Keyword& u, const Keyword& t, const string& val)
-    {
-      if (val.empty())
-        *m_fp << indentstring << u.stringStartElement() << "/>\n";
-      else
-        *m_fp << indentstring << u.stringStartElement()
-            << t.stringAttribute() << XMLEscape(val)
-            << "\"/>\n";
-    }
+    /** Writes an element with a string attribute. */
+    virtual void writeElement(const Keyword& u, const Keyword& t, const string& val) = 0;
 
-    /** Writes an element with a long attribute.<br>
-      * Output: \<TAG_U TAG_T="val"/\> */
-    void writeElement(const Keyword& u, const Keyword& t, const long val)
-    {
-      *m_fp << indentstring << u.stringStartElement()
-          << t.stringAttribute() << val << "\"/>\n";
-    }
+    /** Writes an element with a long attribute. */
+    virtual void writeElement(const Keyword& u, const Keyword& t, const long val) = 0;
 
-    /** Writes an element with a date attribute.<br>
-      * Output: \<TAG_U TAG_T="val"/\> */
-    void writeElement(const Keyword& u, const Keyword& t, const Date& val)
-    {
-      *m_fp << indentstring << u.stringStartElement()
-          << t.stringAttribute() << string(val) << "\"/>\n";
-    }
+    /** Writes an element with a date attribute. */
+    virtual void writeElement(const Keyword& u, const Keyword& t, const Date& val) = 0;
 
-    /** Writes an element with 2 string attributes.<br>
-      * Output: \<TAG_U TAG_T1="val1" TAG_T2="val2"/\> */
-    void writeElement(const Keyword& u, const Keyword& t1, const string& val1,
-        const Keyword& t2, const string& val2)
-    {
-      if(val1.empty())
-        *m_fp << indentstring << u.stringStartElement() << "/>\n";
-      else
-        *m_fp << indentstring << u.stringStartElement()
-            << t1.stringAttribute() << XMLEscape(val1.c_str()) << "\""
-            << t2.stringAttribute() << XMLEscape(val2.c_str())
-            << "\"/>\n";
-    }
+    /** Writes an element with 2 string attributes. */
+    virtual void writeElement(const Keyword& u, const Keyword& t1, const string& val1,
+        const Keyword& t2, const string& val2) = 0;
 
-    /** Writes an element with a string and a long attribute.<br>
-      * Output: \<TAG_U TAG_T1="val1" TAG_T2="val2"/\> */
-    void writeElement(const Keyword& u, const Keyword& t1, unsigned long val1,
-        const Keyword& t2, const string& val2)
-    {
-      *m_fp << indentstring << u.stringStartElement()
-          << t1.stringAttribute() << val1 << "\""
-          << t2.stringAttribute() << XMLEscape(val2.c_str())
-          << "\"/>\n";
-    }
+    /** Writes an element with a string and an unsigned long attribute. */
+    virtual void writeElement(const Keyword& u, const Keyword& t1, unsigned long val1,
+        const Keyword& t2, const string& val2) = 0;
 
-    /** Writes a C-type character string.<br>
-      * Output: \<TAG_T\>val\</TAG_T\> */
-    void writeElement(const Keyword& t, const char* val)
-    {
-      if (val)
-        *m_fp << indentstring << t.stringElement()
-            << XMLEscape(val) << t.stringEndElement();
-    }
+    /** Writes an element with a short, an unsigned long and a double attribute. */
+    virtual void writeElement(const Keyword& u, const Keyword& t1, short val1,
+        const Keyword& t2, unsigned long val2, const Keyword& t3, double val3) = 0;
 
-    /** Writes an timeperiod element.<br>
-      * Output: \<TAG_T\>d\</TAG_T\> /> */
-    void writeElement(const Keyword& t, const TimePeriod d)
-    {
-      *m_fp << indentstring << t.stringElement() << d << t.stringEndElement();
-    }
+    /** Writes a C-type character string. */
+    virtual void writeElement(const Keyword& t, const char* val) = 0;
 
-    /** Writes an date element.<br>
-      * Output: \<TAG_T\>d\</TAG_T\> /> */
-    void writeElement(const Keyword& t, const Date d)
-    {
-      *m_fp << indentstring << t.stringElement() << d << t.stringEndElement();
-    }
+    /** Writes an Duration element. /> */
+    virtual void writeElement(const Keyword& t, const Duration d) = 0;
 
-    /** Writes an daterange element.<br>
-      * Output: \<TAG_T\>d\</TAG_T\> */
-    void writeElement(const Keyword& t, const DateRange& d)
-    {
-      *m_fp << indentstring << t.stringElement() << d << t.stringEndElement();
-    }
+    /** Writes an date element. */
+    virtual void writeElement(const Keyword& t, const Date d) = 0;
+
+    /** Writes an daterange element. */
+    virtual void writeElement(const Keyword& t, const DateRange& d) = 0;
 
     /** This method writes a serializable object.<br>
       * If an object is nested more than 2 levels deep only a reference
       * to it is written, rather than the complete object.
-      * You should call this method for all objects in your xml document,
+      * You should call this method for all objects in your XML document,
       * except for the root object.
       * @see writeElementWithHeader(const Keyword&, Object*)
       */
-    DECLARE_EXPORT void writeElement(const Keyword&, const Object*, mode = DEFAULT);
+    DECLARE_EXPORT virtual void writeElement(const Keyword&, const Object*, FieldCategory = BASE);
 
     /** @see writeElement(const Keyword&, const Object*, mode) */
-    void writeElement(const Keyword& t, const Object& o, mode m = DEFAULT)
-    {writeElement(t,&o,m);}
-
-    /** This method writes a serializable object with a complete XML compliant
-      * header.<br>
-      * You should call this method for the root object of your xml document,
-      * and writeElement for all objects nested in it.
-      * @see writeElement(const Keyword&, Object*)
-      * @see writeHeader
-      * @exception RuntimeException Generated when multiple root elements
-      *    are available for the output document.
-      */
-    DECLARE_EXPORT void writeElementWithHeader(const Keyword& tag, const Object* object);
-
-    /** This method writes the opening tag for an XML output.<br>
-      * You should call this method or writeElementWithHeader() when writing
-      * the first element of an xml document.
-      * @see writeElementWithHeader
-      * @exception RuntimeException Generated when multiple root elements
-      *    are available for the output document.
-      */
-    DECLARE_EXPORT void writeHeader(const Keyword& tag);
+    void writeElement(const Keyword& t, const Object& o, FieldCategory m = BASE)
+    {
+      writeElement(t, &o, m);
+    }
 
     /** Returns a pointer to the object that is currently being saved. */
     Object* getCurrentObject() const
-    {return const_cast<Object*>(currentObject);}
+    {
+      return const_cast<Object*>(currentObject);
+    }
+
+    Object* pushCurrentObject(Object *o)
+    {
+      Object *t = const_cast<Object*>(currentObject);
+      currentObject = o;
+      return t;
+    }
 
     /** Returns a pointer to the parent of the object that is being saved. */
     Object* getPreviousObject() const
-    {return const_cast<Object*>(parentObject);}
+    {
+      return const_cast<Object*>(parentObject);
+    }
 
     /** Returns the number of objects that have been serialized. */
-    unsigned long countObjects() const {return numObjects;}
+    unsigned long countObjects() const
+    {
+      return numObjects;
+    }
 
-    /** Get a string suitable for correctly indenting the output. */
-    const char* getIndent() {return indentstring;}
+    inline void skipHead(bool b = true)
+    {
+      skipHeader = b;
+    }
 
-  private:
+    inline void skipTail(bool b = true)
+    {
+      skipFooter = b;
+    }
+
+    inline bool getSkipHead() const
+    {
+      return skipHeader;
+    }
+
+    inline bool getSkipTail() const
+    {
+      return skipFooter;
+    }
+
+    inline void incParents()
+    {
+      ++numParents;
+    }
+
+    inline void decParents()
+    {
+      --numParents;
+    }
+
+  protected:
     /** Output stream. */
     ostream* m_fp;
-
-    /** This variable keeps track of the indentation level.
-      * @see incIndent, decIndent
-      */
-    short int m_nIndent;
-
-    /** This string is a null terminated string containing as many spaces as
-      * indicated by the m_indent.
-      * @see incIndent, decIndent
-      */
-    char indentstring[41];
 
     /** Keep track of the number of objects being stored. */
     unsigned long numObjects;
@@ -2372,88 +2622,29 @@ class XMLOutput
     /** This stores a pointer to the object that has previously been saved. */
     const Object *parentObject;
 
-    /** Increase the indentation level. The indentation level is between
-      * 0 and 40. */
-    DECLARE_EXPORT void incIndent();
-
-    /** Decrease the indentation level. */
-    DECLARE_EXPORT void decIndent();
-
     /** Stores the type of data to be exported. */
-    content_type content;
+    FieldCategory content;
 
-    /** This string defines what will be printed at the start of each XML
-      * document. The default value is:
-      *   \<?xml version="1.0" encoding="UTF-8"?\>
+    /** Flag allowing us to skip writing the head of the XML element.
+      * The flag is reset to 'true'.
       */
-    string headerStart;
+    bool skipHeader;
 
-    /** This string defines what will be attributes are printed for the root
-      * element of each XML document.
-      * The default value is:
-      *    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    /** Flag allowing us to skip writing the tail of the XML element.
+      * The flag is reset to 'true'.
       */
-    string headerAtts;
+    bool skipFooter;
+
+    /** Flag to mark whether hidden objects need to be written as well. */
+    bool writeHidden;
 };
 
 
-/** @brief This class writes XML data to a flat file.
-  *
-  * Note that an object of this class can write only to a single file. If
-  * multiple files are required multiple XMLOutputFile objects will be
-  * required too.
-  * @see XMLOutput
-  */
-class XMLOutputFile : public XMLOutput
-{
-  public:
-    /** Constructor with a filename as argument. An exception will be
-      * thrown if the output file can't be properly initialized. */
-    XMLOutputFile(const string& chFilename)
-    {
-      of.open(chFilename.c_str(), ios::out);
-      if(!of) throw RuntimeException("Could not open output file");
-      setOutput(of);
-    }
-
-    /** Destructor. */
-    ~XMLOutputFile() {of.close();}
-
-  private:
-    ofstream of;
-};
-
-
-/** @brief This class writes XML data to a string.
-  *
-  * The generated output is stored internally in the class, and can be
-  * accessed by converting the XMLOutputString object to a string object.
-  * This class can consume a lot of memory if large sets of objects are
-  * being saved in this way.
-  * @see XMLOutput
-  */
-class XMLOutputString : public XMLOutput
-{
-  public:
-    /** Constructor with a starting string as argument. */
-    XMLOutputString(const string& str) : os(str) {setOutput(os);}
-
-    /** Default constructor. */
-    XMLOutputString() {setOutput(os);}
-
-    /** Return the output string. */
-    const string getData() const {return os.str();}
-
-  private:
-    ostringstream os;
-};
-
-
-/** @brief A class to model keyword instances.
+/** @brief A class to model a string to be interpreted as a keyword.
   *
   * The class uses hashes to do a fast comparison with the set of keywords.
   */
-class Attribute
+class DataKeyword
 {
   private:
     /** This string stores the hash value of the element. */
@@ -2467,35 +2658,29 @@ class Attribute
 
   public:
     /** Default constructor. */
-    explicit Attribute() : hash(0), ch(NULL) {}
+    explicit DataKeyword() : hash(0), ch(NULL) {}
 
     /** Constructor. */
-    explicit Attribute(const string& n)
+    explicit DataKeyword(const string& n)
       : hash(Keyword::hash(n)), ch(n.c_str()) {}
 
     /** Constructor. */
-    explicit Attribute(const char* c) : hash(Keyword::hash(c)), ch(c) {}
+    explicit DataKeyword(const char* c) : hash(Keyword::hash(c)), ch(c) {}
 
     /** Copy constructor. */
-    Attribute(const Attribute& o) : hash(o.hash), ch(o.ch) {}
+    DataKeyword(const DataKeyword& o) : hash(o.hash), ch(o.ch) {}
 
     /** Returns the hash value of this tag. */
-    hashtype getHash() const {return hash;}
+    hashtype getHash() const
+    {
+      return hash;
+    }
 
     /** Returns this tag. */
     void reset(const char *const c)
     {
       hash = Keyword::hash(c);
       ch = c;
-    }
-
-    /** Returns this tag. */
-    void reset(const XMLCh *const c)
-    {
-      hash = Keyword::hash(c);
-      // An XMLCh is normally a wchar, and would need to be transcoded
-      // to a char. We won't bother...
-      ch = NULL;
     }
 
     /** Return the element name. Since this method involves a lookup in a
@@ -2507,130 +2692,259 @@ class Attribute
 
     /** Returns true when this element is an instance of this tag. This method
       * doesn't involve a string comparison and is extremely efficient. */
-    bool isA(const Keyword& t) const {return t.getHash() == hash;}
+    bool isA(const Keyword& t) const
+    {
+      return t.getHash() == hash;
+    }
 
     /** Returns true when this element is an instance of this tag. This method
       * doesn't involve a string comparison and is extremely efficient. */
-    bool isA(const Keyword* t) const {return t->getHash() == hash;}
+    bool isA(const Keyword* t) const
+    {
+      return t->getHash() == hash;
+    }
 
     /** Comparison operator. */
-    bool operator < (const Attribute& o) const {return hash < o.hash;}
+    bool operator < (const DataKeyword& o) const
+    {
+      return hash < o.hash;
+    }
 
     /** String comparison. */
-    bool operator == (const string o) const {return o == ch;}
+    bool operator == (const string o) const
+    {
+      return o == ch;
+    }
 };
 
 
-/** @brief This abstract class represents a attribute and value pair for
-  * updating objects in frePPLe.
+/** @brief This abstract class represents a variant data type.
   *
-  * It is instantiated in the XMLElement and PythonObject classes.
-  * @todo only takes care of transformation from external format to C++. Not the C++ to external format yet.
+  * It can hold a data value of the following types:
+  *   - bool
+  *   - date
+  *   - double
+  *   - duration
+  *   - int
+  *   - long
+  *   - object pointer
+  *   - Python function pointer
+  *   - string
+  *   - unsigned long
   */
-class DataElement
+class DataValue
 {
   public:
     virtual operator bool() const
-    {throw LogicException("DataElement is an abstract class");}
+    {
+      throw LogicException("DataValue is an abstract class");
+    }
 
     /** Destructor. */
-    virtual ~DataElement() {}
+    virtual ~DataValue() {}
 
-    void operator >> (unsigned long int& val) const {val = getUnsignedLong();}
+    void operator >> (unsigned long int& val) const
+    {
+      val = getUnsignedLong();
+    }
 
-    void operator >> (long& val) const {val = getLong();}
+    void operator >> (long& val) const
+    {
+      val = getLong();
+    }
 
-    void operator >> (TimePeriod& val) const {val = getTimeperiod();}
+    void operator >> (Duration& val) const
+    {
+      val = getDuration();
+    }
 
-    void operator >> (bool& v) const {v=getBool();}
+    void operator >> (bool& v) const
+    {
+      v=getBool();
+    }
 
-    void operator >> (int& val) const {val = getInt();}
+    void operator >> (int& val) const
+    {
+      val = getInt();
+    }
 
-    void operator >> (double& val) const {val = getDouble();}
+    void operator >> (double& val) const
+    {
+      val = getDouble();
+    }
 
-    void operator >> (Date& val) const {val = getDate();}
+    void operator >> (Date& val) const
+    {
+      val = getDate();
+    }
 
-    void operator >> (string& val) const {val = getString();}
+    void operator >> (string& val) const
+    {
+      val = getString();
+    }
 
     virtual long getLong() const
-    {throw LogicException("DataElement is an abstract class");}
+    {
+      throw LogicException("DataValue is an abstract class");
+    }
 
     virtual unsigned long getUnsignedLong() const
-    {throw LogicException("DataElement is an abstract class");}
+    {
+      throw LogicException("DataValue is an abstract class");
+    }
 
-    virtual TimePeriod getTimeperiod() const
-    {throw LogicException("DataElement is an abstract class");}
+    virtual Duration getDuration() const
+    {
+      throw LogicException("DataValue is an abstract class");
+    }
 
     virtual int getInt() const
-    {throw LogicException("DataElement is an abstract class");}
+    {
+      throw LogicException("DataValue is an abstract class");
+    }
 
     virtual double getDouble() const
-    {throw LogicException("DataElement is an abstract class");}
+    {
+      throw LogicException("DataValue is an abstract class");
+    }
 
     virtual Date getDate() const
-    {throw LogicException("DataElement is an abstract class");}
+    {
+      throw LogicException("DataValue is an abstract class");
+    }
 
-    virtual string getString() const
-    {throw LogicException("DataElement is an abstract class");}
+    virtual const string& getString() const
+    {
+      throw LogicException("DataValue is an abstract class");
+    }
 
     virtual bool getBool() const
-    {throw LogicException("DataElement is an abstract class");}
+    {
+      throw LogicException("DataValue is an abstract class");
+    }
+
+    virtual Object* getObject() const
+    {
+      throw LogicException("DataValue is an abstract class");
+    }
+
+    virtual void setLong(const long) = 0;
+
+    virtual void setUnsignedLong(const unsigned long) = 0;
+
+    virtual void setDuration(const Duration) = 0;
+
+    virtual void setInt(const int) = 0;
+
+    virtual void setDouble(const double) = 0;
+
+    virtual void setDate(const Date) = 0;
+
+    virtual void setString(const string&) = 0;
+
+    virtual void setBool(const bool) = 0;
+
+    virtual void setObject(Object*) = 0;
 };
 
 
 /** @brief This class represents an XML element being read in from the
   * input file. */
-class XMLElement : public DataElement
+class XMLData : public DataValue
 {
   private:
     /** This string stores the XML input data. */
     string m_strData;
 
+    /** Object pointer. */
+    Object* m_obj;
+
   public:
-    virtual operator bool() const {return !m_strData.empty();}
+    virtual operator bool() const
+    {
+      return !m_strData.empty() && !m_obj;
+    }
 
     /** Default constructor. */
-    XMLElement() {}
+    XMLData() : m_obj(NULL) {}
 
     /** Constructor. */
-    XMLElement(const string& v) : m_strData(v) {}
+    XMLData(const string& v) : m_strData(v), m_obj(NULL) {}
 
     /** Destructor. */
-    virtual ~XMLElement() {}
+    virtual ~XMLData() {}
 
     /** Re-initializes an existing element. Using this method we can avoid
-      * destroying and recreating XMLelement objects too frequently. Instead
+      * destroying and recreating XMLData objects too frequently. Instead
       * we can manage them in a array.
       */
-    void reset() {m_strData.clear();}
+    void reset()
+    {
+      m_strData.clear();
+      m_obj = NULL;
+    }
 
     /** Add some characters to this data field of this element.<br>
       * The second argument is the number of bytes, not the number of
       * characters.
       */
-    void addData(const char *pData, size_t len) {m_strData.append(pData,len);}
+    void appendString(const char *pData)
+    {
+      m_strData.append(pData);
+    }
 
     /** Set the data value of this element. */
-    void setData(const char *pData) {m_strData.assign(pData);}
+    void setData(const char *pData)
+    {
+      m_strData.assign(pData);
+    }
 
     /** Return the data field. */
-    const char *getData() const {return m_strData.c_str();}
+    const char *getData() const
+    {
+      return m_strData.c_str();
+    }
 
-    virtual long getLong() const {return atol(getData());}
+    virtual long getLong() const
+    {
+      return atol(getData());
+    }
 
-    virtual unsigned long getUnsignedLong() const {return atol(getData());}
+    virtual unsigned long getUnsignedLong() const
+    {
+      return atol(getData());
+    }
 
-    virtual TimePeriod getTimeperiod() const {return TimePeriod(getData());}
+    virtual Duration getDuration() const
+    {
+      return Duration(getData());
+    }
 
-    virtual int getInt() const {return atoi(getData());}
+    virtual int getInt() const
+    {
+      return atoi(getData());
+    }
 
-    virtual double getDouble() const {return atof(getData());}
+    // Return the value as a double.
+    // This conversion should be done with the C-locale, where a dot is used
+    // as a decimal separator. Otherwise values in XML data files will be
+    // read incorrectly!
+    virtual double getDouble() const
+    {
+      return atof(getData());
+    }
 
-    virtual Date getDate() const {return Date(getData());}
+    virtual Date getDate() const
+    {
+      return Date(getData());
+    }
 
     /** Returns the string value of the XML data. The xerces library takes care
       * of appropriately unescaping special character sequences. */
-    virtual string getString() const {return m_strData;}
+    virtual const string& getString() const
+    {
+      return m_strData;
+    }
 
     /** Interprets the element as a boolean value.<br>
       * <p>Our implementation is a bit more generous and forgiving than the
@@ -2642,6 +2956,57 @@ class XMLElement : public DataElement
       *   {t.*, T.*, f.*, F.*, 1.*, 0.*}</p>
       */
     DECLARE_EXPORT bool getBool() const;
+
+    Object* getObject() const
+    {
+      return m_obj;
+    }
+
+    virtual void setLong(const long)
+    {
+      throw LogicException("Not implemented on XMLData");
+    }
+
+    virtual void setUnsignedLong(const unsigned long)
+    {
+      throw LogicException("Not implemented on XMLData");
+    }
+
+    virtual void setDuration(const Duration)
+    {
+      throw LogicException("Not implemented on XMLData");
+    }
+
+    virtual void setInt(const int)
+    {
+      throw LogicException("Not implemented on XMLData");
+    }
+
+    virtual void setDouble(const double)
+    {
+      throw LogicException("Not implemented on XMLData");
+    }
+
+    virtual void setDate(const Date)
+    {
+      throw LogicException("Not implemented on XMLData");
+    }
+
+    virtual void setString(const string& v)
+    {
+      m_strData = v;
+      m_obj = NULL;
+    }
+
+    virtual void setBool(const bool)
+    {
+      throw LogicException("Not implemented on XMLData");
+    }
+
+    virtual void setObject(Object* o)
+    {
+      m_obj = o;
+    }
 };
 
 
@@ -2686,7 +3051,10 @@ class Environment
     static DECLARE_EXPORT int getProcessorCores();
 
     /** Returns the name of the logfile. */
-    static const string& getLogFile() {return logfilename;}
+    static const string& getLogFile()
+    {
+      return logfilename;
+    }
 
     /** Updates the filename for logging error messages and warnings.
       * The file is also opened for writing and the standard output and
@@ -2697,7 +3065,7 @@ class Environment
     static DECLARE_EXPORT void setLogFile(const string& x);
 
     /** Type for storing parameters passed to a module that is loaded. */
-    typedef map<string,XMLElement> ParameterList;
+    typedef map<string,XMLData> ParameterList;
 
     /** @brief Function to dynamically load a shared library in frePPLe.
       *
@@ -2710,62 +3078,87 @@ class Environment
       *  - Unix systems supporting the dlopen function in the standard way.
       *    Some unix systems have other or deviating APIs. A pretty messy story :-<
       */
-    static DECLARE_EXPORT void loadModule(string lib, ParameterList& parameters); //@todo replace argument with a AttributeList instead
+    static DECLARE_EXPORT void loadModule(string lib, ParameterList& parameters); //@todo replace argument with a DataValueDict instead
 
     /** Print all modules that have been loaded. */
     static DECLARE_EXPORT void printModules();
+
+    /** Sleep for a number of milliseconds. */
+    static void sleep(unsigned int m)
+    {
+#ifdef WIN32
+      Sleep(m); // milliseconds
+#else
+      usleep(m * 1000); // microseconds
+#endif
+    }
 };
 
 
-/** @brief This class handles two-way translation between the data types
-  * in C++ and Python.
+/** @brief This class instantiates the abstract DataValue class, and is a
+  * wrapper around a standard Python PyObject pointer.
   *
-  * This class is basically a wrapper around a PyObject pointer.
-  *
-  * When creating a PythonObject from a C++ object, make sure to increment
+  * When creating a PythonData from a C++ object, make sure to increment
   * the reference count of the object.<br>
-  * When constructing a PythonObject from an existing Python object, the
+  * When constructing a PythonData from an existing Python object, the
   * code that provided us the PyObject pointer should have incremented the
   * reference count already.
-  *
-  * @todo endelement function should be shared with setattro function.
-  * Unifies the python and xml worlds: shared code base to update objects!
-  * (Code for extracting info is still python specific, and writeElement
-  * is also xml-specific)
-  * xml->prevObject = python->cast value to a different type
-  *
-  * @todo object creator should be common with the XML reader, which uses
-  * the registered factory method.
-  * Also supports add/add_change/remove.
-  * Tricky: flow/load which use an additional validate() method
   */
-class PythonObject : public DataElement
+class PythonData : public DataValue
 {
   private:
     PyObject* obj;
 
+    // Used by the getString method to store a string value
+    string result;
+
   public:
     /** Default constructor. The default value is equal to Py_None. */
-    explicit PythonObject() : obj(Py_None) {Py_INCREF(obj);}
+    explicit PythonData() : obj(Py_None)
+    {
+      Py_INCREF(obj);
+    }
 
-    /** Constructor from an existing Python object.<br>
-      * The reference count isn't increased.
+    /** Copy constructor.<br>
+      * The reference counter isn't increased.
       */
-    PythonObject(const PyObject* o)
-      : obj(o ? const_cast<PyObject*>(o) : Py_None) {Py_INCREF(obj);}
+    PythonData(const PythonData& o) : obj(o) {}
+
+    /** Constructor from an existing Python object. */
+    PythonData(const PyObject* o)
+      : obj(o ? const_cast<PyObject*>(o) : Py_None)
+    {
+      Py_INCREF(obj);
+    }
+
+    /** Set the internal pointer to NULL. */
+    inline void setNull()
+    {
+      if (obj)
+        Py_DECREF(obj);
+      obj = NULL;
+    }
 
     /** This conversion operator casts the object back to a PyObject pointer. */
-    operator PyObject*() const {return obj;}
+    operator PyObject*() const
+    {
+      return obj;
+    }
 
     /** Check for null value. */
-    operator bool() const {return obj != NULL && obj != Py_None;}
+    operator bool() const
+    {
+      return obj != NULL && obj != Py_None;
+    }
 
     /** Assignment operator. */
-    PythonObject& operator = (const PythonObject& o)
+    PythonData& operator = (const PythonData& o)
     {
-      if (obj) {Py_DECREF(obj);}
+      if (obj)
+        Py_DECREF(obj);
       obj = o.obj;
-      if (obj) {Py_INCREF(obj);}
+      if (obj)
+        Py_INCREF(obj);
       return *this;
     }
 
@@ -2790,78 +3183,37 @@ class PythonObject : public DataElement
     }
 
     /** Convert a Python string into a C++ string. */
-    inline string getString() const
+    inline const string& getString() const
     {
       if (obj == Py_None)
-        return string();
-#if PY_MAJOR_VERSION >= 3
+        const_cast<PythonData*>(this)->result = "";
       else if (PyUnicode_Check(obj))
       {
         // It's a Python unicode string
         PyObject* x = PyUnicode_AsEncodedString(obj, "UTF-8", "ignore");
-        string result = PyBytes_AS_STRING(x);
+        const_cast<PythonData*>(this)->result = PyBytes_AS_STRING(x);
         Py_DECREF(x);
-        return result;
       }
       else
       {
         // It's not a Python string object.
         // Call the repr() function on the object, and encode the result in UTF-8.
-        PyObject* x1 = PyObject_Repr(obj);
+        PyObject* x1 = PyObject_Str(obj);
         PyObject* x2 = PyUnicode_AsEncodedString(x1, "UTF-8", "ignore");
-        string result = PyBytes_AS_STRING(x2);
+        const_cast<PythonData*>(this)->result = PyBytes_AS_STRING(x2);
         Py_DECREF(x1);
         Py_DECREF(x2);
-        return result;
       }
-#else
-      else if (PyUnicode_Check(obj))
-      {
-        // It's a Python unicode string
-        PyObject* x = PyUnicode_AsEncodedString(obj, "UTF-8", "ignore");
-        string result = PyString_AsString(x);
-        Py_DECREF(x);
-        return result;
-      }
-      else if (PyString_Check(obj))
-        // It's a Python string. We'll assume UTF-8 encoding...
-        return PyString_AsString(obj);
-      else
-      {
-        // It's not a Python string object.
-        // Call the str() function on the object, and encode the result in UTF-8.
-        PyObject* x1 = PyObject_Str(obj);
-        if (PyUnicode_Check(x1))
-        {
-          PyObject* x2 = PyUnicode_AsEncodedString(x1, "UTF-8", "ignore");
-          string result = PyString_AsString(x2);
-          Py_DECREF(x1);
-          Py_DECREF(x2);
-          return result;
-        }
-        else
-        {
-          string result = PyString_AsString(x1);
-          Py_DECREF(x1);
-          return result;
-        }
-      }
-#endif
+      return result;
     }
 
     /** Extract an unsigned long from the Python object. */
     unsigned long getUnsignedLong() const
     {
       if (obj == Py_None) return 0;
-#if PY_MAJOR_VERSION >= 3
       if (PyUnicode_Check(obj))
       {
         PyObject* t = PyFloat_FromString(obj);
-#else
-      if (PyString_Check(obj))
-      {
-        PyObject* t = PyFloat_FromString(obj, NULL);
-#endif
         if (!t) throw DataException("Invalid number");
         double x = PyFloat_AS_DOUBLE(t);
         Py_DECREF(t);
@@ -2869,7 +3221,10 @@ class PythonObject : public DataElement
           throw DataException("Invalid number");
         return static_cast<unsigned long>(x);
       }
-      return PyLong_AsUnsignedLong(obj);
+      else if (PyLong_Check(obj))
+        return PyLong_AsUnsignedLong(obj);
+      else
+        return getInt();
     }
 
     /** Convert a Python datetime.date or datetime.datetime object into a
@@ -2880,15 +3235,9 @@ class PythonObject : public DataElement
     inline double getDouble() const
     {
       if (obj == Py_None) return 0;
-#if PY_MAJOR_VERSION >= 3
       if (PyUnicode_Check(obj))
       {
         PyObject* t = PyFloat_FromString(obj);
-#else
-      if (PyString_Check(obj))
-      {
-        PyObject* t = PyFloat_FromString(obj, NULL);
-#endif
         if (!t) throw DataException("Invalid number");
         double x = PyFloat_AS_DOUBLE(t);
         Py_DECREF(t);
@@ -2901,15 +3250,9 @@ class PythonObject : public DataElement
     inline int getInt() const
     {
       if (obj == Py_None) return 0;
-#if PY_MAJOR_VERSION >= 3
       if (PyUnicode_Check(obj))
       {
         PyObject* t = PyFloat_FromString(obj);
-#else
-      if (PyString_Check(obj))
-      {
-        PyObject* t = PyFloat_FromString(obj, NULL);
-#endif
         if (!t) throw DataException("Invalid number");
         double x = PyFloat_AS_DOUBLE(t);
         Py_DECREF(t);
@@ -2917,11 +3260,7 @@ class PythonObject : public DataElement
           throw DataException("Invalid number");
         return static_cast<int>(x);
       }
-#if PY_MAJOR_VERSION >= 3
       int result = PyLong_AsLong(obj);
-#else
-      int result = PyInt_AsLong(obj);
-#endif
       if (result == -1 && PyErr_Occurred())
         throw DataException("Invalid number");
       return result;
@@ -2931,15 +3270,9 @@ class PythonObject : public DataElement
     inline long getLong() const
     {
       if (obj == Py_None) return 0;
-#if PY_MAJOR_VERSION >= 3
       if (PyUnicode_Check(obj))
       {
         PyObject* t = PyFloat_FromString(obj);
-#else
-      if (PyString_Check(obj))
-      {
-        PyObject* t = PyFloat_FromString(obj, NULL);
-#endif
         if (!t) throw DataException("Invalid number");
         double x = PyFloat_AS_DOUBLE(t);
         Py_DECREF(t);
@@ -2947,11 +3280,7 @@ class PythonObject : public DataElement
           throw DataException("Invalid number");
         return static_cast<long>(x);
       }
-#if PY_MAJOR_VERSION >= 3
       long result = PyLong_AsLong(obj);
-#else
-      long result = PyInt_AsLong(obj);
-#endif
       if (result == -1 && PyErr_Occurred())
         throw DataException("Invalid number");
       return result;
@@ -2964,48 +3293,127 @@ class PythonObject : public DataElement
     }
 
     /** Convert a Python number as a number of seconds into a frePPLe
-      * TimePeriod.<br>
-      * A TimePeriod is represented as a number of seconds in Python.
+      * Duration.<br>
+      * A Duration is represented as a number of seconds in Python.
       */
-    TimePeriod getTimeperiod() const
+    Duration getDuration() const
     {
-#if PY_MAJOR_VERSION >= 3
       if (PyUnicode_Check(obj))
       {
         // Replace the unicode object with a string encoded in the correct locale
         PyObject * utf8_string = PyUnicode_AsUTF8String(obj);
-        TimePeriod t(PyBytes_AsString(utf8_string));
+        Duration t(PyBytes_AsString(utf8_string));
         Py_DECREF(utf8_string);
         return t;
       }
       long result = PyLong_AsLong(obj);
-#else
-      if (PyString_Check(obj))
-      {
-        if (PyUnicode_Check(obj))
-        {
-          // Replace the unicode object with a string encoded in the correct locale
-          const_cast<PyObject*&>(obj) =
-            PyUnicode_AsEncodedString(obj, "UTF-8", "ignore");
-        }
-        return TimePeriod(PyString_AsString(PyObject_Str(obj)));   // TODO This implementation is leaking python objects?!?!
-      }
-      int result = PyInt_AsLong(obj);
-#endif
       if (result == -1 && PyErr_Occurred())
         throw DataException("Invalid number");
       return result;
     }
 
+    /** Return the frePPle Object referred to by the Python value.
+      * If it points to a non-frePPLe object, the return value is NULL.
+      */
+    DECLARE_EXPORT Object* getObject() const;
+
     /** Constructor from a pointer to an Object.<br>
       * The metadata of the Object instances allow us to create a Python
       * object that works as a proxy for the C++ object.
       */
-    DECLARE_EXPORT PythonObject(Object* p);
+    DECLARE_EXPORT PythonData(Object* p);
 
     /** Convert a C++ string into a Unicode Python string. */
-    inline PythonObject(const string& val)
+    inline PythonData(const string& val) : obj(NULL)
     {
+      setString(val);
+    }
+
+    /** Convert a C++ double into a Python number. */
+    inline PythonData(const double val) : obj(NULL)
+    {
+      setDouble(val);
+    }
+
+    /** Convert a C++ integer into a Python integer. */
+    inline PythonData(const int val) : obj(NULL)
+    {
+      setInt(val);
+    }
+
+    /** Convert a C++ unsigned integer into a Python integer. */
+    inline PythonData(const unsigned int val) : obj(NULL)
+    {
+      setInt(val);
+    }
+
+    /** Convert a C++ long into a Python long. */
+    inline PythonData(const long val) : obj(NULL)
+    {
+      setLong(val);
+    }
+
+    /** Convert a C++ unsigned long into a Python long. */
+    inline PythonData(const unsigned long val) : obj(NULL)
+    {
+      setUnsignedLong(val);
+    }
+
+    /** Convert a C++ boolean into a Python boolean. */
+    inline PythonData(const bool val) : obj(NULL)
+    {
+      setBool(val);
+    }
+
+    /** Convert a frePPLe duration into a Python number representing
+      * the number of seconds. */
+    inline PythonData(const Duration val) : obj(NULL)
+    {
+      setDuration(val);
+    }
+
+    /** Convert a frePPLe date into a Python datetime.datetime object. */
+    PythonData(const Date val) : obj(NULL)
+    {
+      setDate(val);
+    }
+
+    virtual void setLong(const long val)
+    {
+      if (obj) Py_DECREF(obj);
+      obj = PyLong_FromLong(val);
+    }
+
+    virtual void setUnsignedLong(const unsigned long val)
+    {
+      if (obj) Py_DECREF(obj);
+      obj = PyLong_FromUnsignedLong(val);
+    }
+
+    virtual void setDuration(const Duration val)
+    {
+      if (obj) Py_DECREF(obj);
+      // A duration is represented as a number of seconds in Python
+      obj = PyLong_FromLong(val);
+    }
+
+    virtual void setInt(const int val)
+    {
+      if (obj) Py_DECREF(obj);
+      obj = PyLong_FromLong(val);
+    }
+
+    virtual void setDouble(const double val)
+    {
+      if (obj) Py_DECREF(obj);
+      obj = PyFloat_FromDouble(val);
+    }
+
+    virtual DECLARE_EXPORT void setDate(const Date);
+
+    virtual void setString(const string& val)
+    {
+      if (obj) Py_DECREF(obj);
       if (val.empty())
       {
         obj = Py_None;
@@ -3016,58 +3424,21 @@ class PythonObject : public DataElement
         obj = PyUnicode_FromString(val.c_str());
     }
 
-    /** Convert a C++ double into a Python number. */
-    inline PythonObject(const double val)
+    virtual void setBool(const bool val)
     {
-      obj = PyFloat_FromDouble(val);
-    }
-
-    /** Convert a C++ integer into a Python integer. */
-    inline PythonObject(const int val)
-    {
-#if PY_MAJOR_VERSION >= 3
-      obj = PyLong_FromLong(val);
-#else
-      obj = PyInt_FromLong(val);
-#endif
-    }
-
-    /** Convert a C++ long into a Python long. */
-    inline PythonObject(const long val)
-    {
-      obj = PyLong_FromLong(val);
-    }
-
-    /** Convert a C++ unsigned long into a Python long. */
-    inline PythonObject(const unsigned long val)
-    {
-      obj = PyLong_FromUnsignedLong(val);
-    }
-
-    /** Convert a C++ boolean into a Python boolean. */
-    inline PythonObject(const bool val)
-    {
+      if (obj) Py_DECREF(obj);
       obj = val ? Py_True : Py_False;
       Py_INCREF(obj);
     }
 
-    /** Convert a frePPLe TimePeriod into a Python number representing
-      * the number of seconds. */
-    inline PythonObject(const TimePeriod val)
-    {
-      // A TimePeriod is represented as a number of seconds in Python
-      obj = PyLong_FromLong(val);
-    }
-
-    /** Convert a frePPLe date into a Python datetime.datetime object. */
-    DECLARE_EXPORT PythonObject(const Date& val);
+    virtual DECLARE_EXPORT void setObject(Object*);
 };
 
 
 /** @brief This call is a wrapper around a Python function that can be
   * called from the C++ code.
   */
-class PythonFunction : public PythonObject
+class PythonFunction : public PythonData
 {
   public:
     /** Default constructor. */
@@ -3095,25 +3466,37 @@ class PythonFunction : public PythonObject
     }
 
     /** Destructor. */
-    ~PythonFunction() {if (func) {Py_DECREF(func);}}
+    ~PythonFunction()
+    {
+      if (func) {Py_DECREF(func);}
+    }
 
     /** Conversion operator to a Python pointer. */
-    operator const PyObject*() const {return func;}
+    operator const PyObject*() const
+    {
+      return func;
+    }
 
     /** Conversion operator to a string. */
-    operator string() const {return func ? PyEval_GetFuncName(func) : "NULL";}
+    operator string() const
+    {
+      return func ? PyEval_GetFuncName(func) : "NULL";
+    }
 
     /** Conversion operator to bool. */
-    operator bool() const {return func != NULL;}
+    operator bool() const
+    {
+      return func != NULL;
+    }
 
     /** Call the Python function without arguments. */
-    DECLARE_EXPORT PythonObject call() const;
+    DECLARE_EXPORT PythonData call() const;
 
     /** Call the Python function with one argument. */
-    DECLARE_EXPORT PythonObject call(const PyObject*) const;
+    DECLARE_EXPORT PythonData call(const PyObject*) const;
 
     /** Call the Python function with two arguments. */
-    DECLARE_EXPORT PythonObject call(const PyObject*, const PyObject*) const;
+    DECLARE_EXPORT PythonData call(const PyObject*, const PyObject*) const;
 
   private:
     /** A pointer to the Python object. */
@@ -3129,125 +3512,273 @@ class PythonFunction : public PythonObject
   *    &lt;buffer name="a" onhand="10" category="A" /&gt;
   *  - Python:<br>
   *    buffer(name="a", onhand="10", category="A")
+  *
+  * TODO adding an abstract iterator or visitor to this class allows further abstraction and simplification
   */
-class AttributeList
+class DataValueDict
 {
   public:
-    virtual const DataElement* get(const Keyword&) const = 0;
-    // @todo Iterator???
+    /** Lookup function in the dictionary. */
+    virtual const DataValue* get(const Keyword&) const = 0;
 
     /** Destructor. */
-    virtual ~AttributeList() {}
-};
-
-
-/** @brief This class represents a list of XML attributes. */
-class XMLAttributeList : public AttributeList
-{
-  private:
-    const xercesc::Attributes* atts;
-    XMLElement result;
-  public:
-    XMLAttributeList(const xercesc::Attributes* a) : atts(a) {}
-
-    DECLARE_EXPORT const XMLElement* get(const Keyword& key) const;
+    virtual ~DataValueDict() {}
 };
 
 
 /** @brief This class is a wrapper around a Python dictionary. */
-class PythonAttributeList : public AttributeList
+class PythonDataValueDict : public DataValueDict
 {
   private:
     PyObject* kwds;
-    PythonObject result;
+    PythonData result;
 
   public:
-    PythonAttributeList(PyObject* a) : kwds(a) {}
+    PythonDataValueDict(PyObject* a) : kwds(a) {}
 
-    virtual const DataElement* get(const Keyword& k) const
+    virtual const DataValue* get(const Keyword& k) const
     {
       if (!kwds)
       {
-        const_cast<PythonAttributeList*>(this)->result = PythonObject();
+        const_cast<PythonDataValueDict*>(this)->result = PythonData();
         return &result;
       }
-      PyObject* val = PyDict_GetItemString(kwds,k.getName().c_str());
-      const_cast<PythonAttributeList*>(this)->result = PythonObject(val);
+      PyObject* val = PyDict_GetItemString(kwds, k.getName().c_str());
+      if (!val)
+        return NULL;
+      const_cast<PythonDataValueDict*>(this)->result = PythonData(val);
       return &result;
     }
 };
 
 
-/** @brief This is a base class for all Python extension types.
+/** @brief Object is the abstract base class for the main entities.
   *
-  * When creating you own extensions, inherit from the PythonExtension
-  * template class instead of this one.
+  * It handles to following capabilities:
+  * - <b>Metadata:</b> All subclasses publish metadata about their structure.
+  * - <b>Python object:</b> All objects live a double life as a Python object.
+  * - <b>Callbacks:</b> When objects are created or deleted,
+  *   interested classes or objects can get a callback notification.
+  * - <b>Serialization:</b> Objects need to be persisted and later restored.
+  *   Subclasses that don't need to be persisted can skip the implementation
+  *   of the writeElement method.<br>
+  *   Instances can be marked as hidden, which means that they are not
+  *   serialized at all.
   *
   * It inherits from the PyObject C struct, defined in the Python C API.<br>
   * These functions aren't called directly from Python. Python first calls a
   * handler C-function and the handler function will use a virtual call to
   * run the correct C++-method.
-  *
-  * Our extensions don't use the usual Python heap allocator. They are
-  * created and initialized with the regular C++ new and delete. A special
-  * deallocator is called from Python to delete objects when their reference
-  * count reaches zero.
   */
-class PythonExtensionBase : public PyObject
+class Object : public PyObject
 {
+  friend DECLARE_EXPORT PyObject* getattro_handler(PyObject*, PyObject*);
+  friend DECLARE_EXPORT int setattro_handler(PyObject*, PyObject*, PyObject*);
+
   public:
-    /** Default constructor */
-    PythonExtensionBase() {}
+    /** Constructor. */
+    explicit Object() : dict(NULL) {}
 
     /** Destructor. */
-    virtual ~PythonExtensionBase()
+    virtual ~Object()
     {
       if (PyObject::ob_refcnt > 1)
         logger << "Warning: Deleting "
           << (PyObject::ob_type->tp_name && PyObject::ob_type ? PyObject::ob_type->tp_name : "NULL")
             << " object that is still referenced "
             << (PyObject::ob_refcnt-1) << " times" << endl;
+      if (dict) Py_DECREF(dict);
     }
+
+    /** Called while serializing the object. */
+    virtual DECLARE_EXPORT void writeElement(
+      Serializer*, const Keyword&, FieldCategory = BASE
+      ) const;
+
+    /** Mark the object as hidden or not. Hidden objects are not exported
+      * and are used only as dummy constructs. */
+    virtual void setHidden(bool b) {}
+
+    /** Method to set a custom property.
+      * Avaialable types:
+      *   1: bool
+      *   2: date
+      *   3: double
+      *   4: string
+      */
+    DECLARE_EXPORT void setProperty(
+      const string& name, const DataValue& value, short type
+      );
+
+    /** Set a custom property referring to a python object. */
+    DECLARE_EXPORT void setProperty(
+      const string& name, PyObject* value
+      );
+
+    /** Retrieve a boolean property. */
+    DECLARE_EXPORT bool getBoolProperty(const string&, bool=true) const;
+
+    /** Retrieve a date property. */
+    DECLARE_EXPORT Date getDateProperty(const string&, Date=Date::infinitePast) const;
+
+    /** Retrieve a double property. */
+    DECLARE_EXPORT double getDoubleProperty(const string&, double=0.0) const;
+
+    /** Retrieve a double property. */
+    DECLARE_EXPORT PyObject* getPyObjectProperty(const string&) const;
+
+    /** Retrieve a string property.
+      * This method needs to be defined inline. On windows the function
+      * otherwise can allocate and release the string in different modules,
+      * resulting in a nasty crash.
+      */
+    string getStringProperty(const string& name, const string& def = "") const
+    {
+      if (!dict)
+        // Not a single property has been defined
+        return def;
+      PyGILState_STATE pythonstate = PyGILState_Ensure();
+      PyObject* lkp = PyDict_GetItemString(dict, name.c_str());
+      if (!lkp)
+      {
+        // Value not found in the dictionary
+        PyGILState_Release(pythonstate);
+        return def;
+      }
+      PythonData val(lkp);
+      string result = val.getString();
+      PyGILState_Release(pythonstate);
+      return result;
+    }
+
+    /** Method to write custom properties to a serializer. */
+    DECLARE_EXPORT void writeProperties(Serializer&) const;
+
+    /** Returns whether an entity is real or dummy. */
+    virtual bool getHidden() const
+    {
+      return false;
+    }
+
+    /** This returns the type information on the object, a bit similar to
+      * the standard type_info information. */
+    virtual const MetaClass& getType() const
+    {
+      throw LogicException("No type information registered");
+    }
+
+    /** Return the number of bytes this object occupies in memory. */
+    virtual DECLARE_EXPORT size_t getSize() const;
+
+    /** This template function can generate a factory method for objects that
+      * can be constructed with their default constructor.  */
+    template <class T> static Object* create()
+    {
+      return new T();
+    }
+
+    /** Free the memory.<br>
+      * Our extensions don't use the usual Python heap allocator. They are
+      * created and initialized with the regular C++ new and delete. A special
+      * deallocator is called from Python to delete objects when their reference
+      * count reaches zero.
+      */
+    template <class T> static void deallocator(PyObject* o)
+    {
+      delete static_cast<T*>(o);
+    }
+
+    /** Template function that generates a factory method callable
+      * from Python. */
+    template<class T> static PyObject* create(
+      PyTypeObject* pytype, PyObject* args, PyObject* kwds
+      )
+    {
+      try
+      {
+        // Find or create the C++ object
+        PythonDataValueDict atts(kwds);
+        Object* x = T::reader(T::metadata, atts);
+        // Object was deleted
+        if (!x)
+        {
+          Py_INCREF(Py_None);
+          return Py_None;
+        }
+
+        // Iterate over extra keywords, and set attributes.   @todo move this responsability to the readers...
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        while (PyDict_Next(kwds, &pos, &key, &value))
+        {
+          PyObject* key_utf8 = PyUnicode_AsUTF8String(key);
+		      DataKeyword attr(PyBytes_AsString(key_utf8));
+          Py_DECREF(key_utf8);
+          if (!attr.isA(Tags::name) && !attr.isA(Tags::type) && !attr.isA(Tags::action))
+          {
+            PythonData field(value);
+            const MetaFieldBase* fmeta = x->getType().findField(attr.getHash());
+            if (!fmeta && x->getType().category)
+              fmeta = x->getType().category->findField(attr.getHash());
+            if (fmeta)
+              // Update the attribute
+              fmeta->setField(x, field);
+            else
+              x->setProperty(attr.getName(), value);
+          }
+        };
+        Py_INCREF(x);
+        return x;
+      }
+      catch (...)
+      {
+        PythonType::evalException();
+        return NULL;
+      }
+    }
+
+    /** Return an XML representation of the object.<br>
+      * If a file object is passed as argument, the representation is directly
+      * written to it.<br>
+      * If no argument is given the representation is returned as a string.
+      */
+    static DECLARE_EXPORT PyObject* toXML(PyObject*, PyObject*);
 
     /** A function to force an object to be destroyed by the Python garbage
       * collection.<br>
       * Be very careful to use this!
       */
-    void resetReferenceCount() {PyObject::ob_refcnt = 0;}
+    void resetReferenceCount()
+    {
+      PyObject::ob_refcnt = 0;
+    }
 
     /** Returns the current reference count. */
-    Py_ssize_t getReferenceCount() const {return PyObject::ob_refcnt;}
+    Py_ssize_t getReferenceCount() const
+    {
+      return PyObject::ob_refcnt;
+    }
 
     /** Initialize the object to a certain Python type. */
     inline void initType(const MetaClass *t)
     {
-      PyObject_INIT(this,t->pythonClass);
+      PyObject_INIT(this, t->pythonClass);
     }
 
     /** Initialize the object to a certain Python type. */
     inline void initType(PyTypeObject *t)
     {
-      PyObject_INIT(this,t);
+      PyObject_INIT(this, t);
     }
 
     /** Default getattro method. <br>
       * Subclasses are expected to implement an override if the type supports
       * gettattro.
       */
-    virtual PyObject* getattro(const Attribute& attr)
+    virtual PyObject* getattro(const DataKeyword& attr)
     {
       PyErr_SetString(PythonLogicException, "Missing method 'getattro'");
       return NULL;
-    }
-
-    /** Default setattro method. <br>
-      * Subclasses are expected to implement an override if the type supports
-      * settattro.
-      */
-    virtual int setattro(const Attribute& attr, const PythonObject& field)
-    {
-      PyErr_SetString(PythonLogicException, "Missing method 'setattro'");
-      return -1;
     }
 
     /** Default compare method. <br>
@@ -3273,7 +3804,7 @@ class PythonExtensionBase : public PyObject
       * Subclasses are expected to implement an override if the type supports
       * calls.
       */
-    virtual PyObject* call(const PythonObject& args, const PythonObject& kwds)
+    virtual PyObject* call(const PythonData& args, const PythonData& kwds)
     {
       PyErr_SetString(PythonLogicException, "Missing method 'call'");
       return NULL;
@@ -3289,11 +3820,16 @@ class PythonExtensionBase : public PyObject
       return NULL;
     }
 
-  protected:
-    static vector<PythonType*> table;
+    // TODO Only required to keep pointerfield to Object valid, used in problem.getOwner()
+    static DECLARE_EXPORT const MetaCategory* metadata;
 
     DECLARE_EXPORT static PythonType* registerPythonType(int, const type_info*);
 
+  protected:
+    static vector<PythonType*> table;
+
+  private:
+    PyObject* dict;
 };
 
 
@@ -3306,24 +3842,26 @@ class PythonExtensionBase : public PyObject
   * The structure of the C++ wrappers around the C Python API is heavily
   * inspired on the design of PyCXX.<br>
   * More information can be found on http://cxx.sourceforge.net
+  *
+  * TODO This class has become somewhat redundant, and we can do without.
   */
 template<class T>
-class PythonExtension: public PythonExtensionBase, public NonCopyable
+class PythonExtension: public Object, public NonCopyable
 {
   public:
-    /** Constructor.<br> 
+    /** Constructor.<br>
       * The Python metadata fields always need to be set correctly.
       */
     explicit PythonExtension()
     {
-      PyObject_Init(this, getType().type_object());
+      PyObject_Init(this, getPythonType().type_object());
     }
 
     /** Destructor. */
     virtual ~PythonExtension() {}
 
     /** This method keeps the type information object for your extension. */
-    static PythonType& getType()
+    static PythonType& getPythonType()
     {
       static PythonType* cachedTypePtr = NULL;
       if (cachedTypePtr) return *cachedTypePtr;
@@ -3338,150 +3876,107 @@ class PythonExtension: public PythonExtensionBase, public NonCopyable
     }
 
     /** Free the memory.<br>
-      * See the note on the memory management in the class documentation
-      * for PythonExtensionBase.
+      * Our extensions don't use the usual Python heap allocator. They are
+      * created and initialized with the regular C++ new and delete. A special
+      * deallocator is called from Python to delete objects when their reference
+      * count reaches zero.
       */
-    static void deallocator(PyObject* o) {delete static_cast<T*>(o);}
+    static void deallocator(PyObject* o)
+    {
+      delete static_cast<T*>(o);
+    }
 };
 
 
-/** @brief Object is the abstract base class for the main entities.
+/** Wrapper class to expose frePPLe iterators to Python.
   *
-  * It handles to following capabilities:
-  * - <b>Metadata:</b> All subclasses publish metadata about their structure.
-  * - <b>Python object:</b> All objects live a double life as a Python object.
-  * - <b>Callbacks:</b> When objects are created or deleted,
-  *   interested classes or objects can get a callback notification.
-  * - <b>Serialization:</b> Objects need to be persisted and later restored.
-  *   Subclasses that don't need to be persisted can skip the implementation
-  *   of the writeElement method.<br>
-  *   Instances can be marked as hidden, which means that they are not
-  *   serialized at all.
+  * The requirements for the argument classes are as follows:
+  *  - ITERCLASS must implement a method:
+  *         DATACLASS* next()
+  *    This returns the current value of the iterator, and then
+  *    advances it.
+  *  - If the iteration ends, the above method should return NULL.
+  *  - DATACLASS must be a subclass of Object, implementing the
+  *    type member to point to a MetaClass.
   */
-class Object : public PythonExtensionBase
+template <class ITERCLASS, class DATACLASS>
+class PythonIterator : public Object
 {
+  typedef PythonIterator<ITERCLASS, DATACLASS> MYCLASS;
   public:
-    /** Constructor. */
-    explicit Object() {}
-
-    /** Destructor. */
-    virtual ~Object() {}
-
-    /** Called while writing the model into an XML-file.
-      * The user class should write itself out, using the IOutStream
-      * members for its "simple" members and calling writeElement
-      * recursively for any contained objects.
-      * Not all classes are expected to implement this method. In instances
-      * of such a class can be created but can't be persisted.
-      * E.g. Command
-      */
-    virtual void writeElement(XMLOutput *, const Keyword &, mode=DEFAULT) const
-    {throw LogicException("Class can't be persisted");}
-
-    /** Called while restoring the model from an XML-file.<br>
-      * This is called for each element within the "this" element,
-      * for which the "this" element is immediate parent.<br>
-      * It is called when the open element tag is encountered.
-      */
-    virtual void beginElement(XMLInput&, const Attribute&) {}
-
-    /** Called while restoring the model from an XML-file.<br>
-      * This is called when the corresponding close element tag
-      * is encountered, and the Data() member of pElement is valid.
-      */
-    virtual void endElement(XMLInput&, const Attribute&, const DataElement&) = 0;
-
-    /** Mark the object as hidden or not. Hidden objects are not exported
-      * and are used only as dummy constructs. */
-    virtual void setHidden(bool b) {}
-
-    /** Returns whether an entity is real or dummy. */
-    virtual bool getHidden() const {return false;}
-
-    /** This returns the type information on the object, a bit similar to
-      * the standard type_info information. */
-    virtual const MetaClass& getType() const = 0;
-
-    /** Return the memory size of the object in bytes. */
-    virtual size_t getSize() const = 0;
-
-    /** This template function can generate a factory method for objects that
-      * can be constructed with their default constructor.  */
-    template <class T>
-    static Object* createDefault()
+    /** This method keeps the type information object for your extension. */
+    static PythonType& getPythonType()
     {
-      return new T();
+      static PythonType* cachedTypePtr = NULL;
+      if (cachedTypePtr) return *cachedTypePtr;
+
+      // Register a new type
+      cachedTypePtr = registerPythonType(
+        sizeof(MYCLASS),
+        &typeid(MYCLASS)
+        );
+
+      // Using our own memory deallocator
+      cachedTypePtr->supportdealloc( deallocator<MYCLASS> );
+
+      return *cachedTypePtr;
     }
 
-    /** This template function can generate a factory method for objects that
-      * need a string argument in their constructor. */
-    template <class T>
-    static Object* createString(const string& n)
+    static int initialize()
     {
-      return new T(n);
+      // Initialize the type
+      PythonType& x = getPythonType();
+      if (!DATACLASS::metadata)
+        throw LogicException(
+          "Iterator for " + string(typeid(DATACLASS).name()) +
+          " initialized before its data class"
+          );
+      x.setName(DATACLASS::metadata->type + "Iterator");
+      x.setDoc("frePPLe iterator for " + DATACLASS::metadata->type);
+      x.supportiter();
+      return x.typeReady();
     }
 
-    /** Template function that generates a factory method callable
-      * from Python. */
-    template<class T>
-    static PyObject* create
-    (PyTypeObject* pytype, PyObject* args, PyObject* kwds)
+    /** Constructor from a pointer.
+      * The underlying iterator must have a matching constructor.
+      */
+    template <class OTHER> PythonIterator(const OTHER *o) : iter(o)
     {
-      try
-      {
-        // Find or create the C++ object
-        PythonAttributeList atts(kwds);
-        Object* x = T::reader(T::metadata, atts);
-        // Object was deleted
-        if (!x)
-        {
-          Py_INCREF(Py_None);
-          return Py_None;
-        }
+      this->initType(getPythonType().type_object());
+    }
 
-        // Iterate over extra keywords, and set attributes.   @todo move this responsability to the readers...
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        while (PyDict_Next(kwds, &pos, &key, &value))
-        {
-          PythonObject field(value);
-#if PY_MAJOR_VERSION >= 3
-          PyObject* key_utf8 = PyUnicode_AsUTF8String(key);
-		      Attribute attr(PyBytes_AsString(key_utf8));
-          Py_DECREF(key_utf8);
-#else
-          Attribute attr(PyString_AsString(key));
-#endif
-          if (!attr.isA(Tags::tag_name) && !attr.isA(Tags::tag_type) && !attr.isA(Tags::tag_action))
-          {
-            int result = x->setattro(attr, field);
-            if (result && !PyErr_Occurred())
-              PyErr_Format(PyExc_AttributeError,
-#if PY_MAJOR_VERSION >= 3
-                  "attribute '%S' on '%s' can't be updated",
-                  key, Py_TYPE(x)->tp_name);
-#else
-                  "attribute '%s' on '%s' can't be updated",
-                  PyString_AsString(key), Py_TYPE(x)->tp_name);
-#endif
-          }
-        };
-        Py_INCREF(x);
-        return x;
-      }
-      catch (...)
-      {
-        PythonType::evalException();
+    /** Default constructor.
+      * The underlying iterator must have a matching constructor.
+      */
+    PythonIterator()
+    {
+      this->initType(getPythonType().type_object());
+    }
+
+    /** Constructor from a reference.
+      * The underlying iterator must have a matching constructor.
+      */
+    template <class OTHER> PythonIterator(const OTHER &o) : iter(o)
+    {
+      this->initType(getPythonType().type_object());
+    }
+
+    static PyObject* create(PyObject* self, PyObject* args)
+    {
+      return new MYCLASS();
+    }
+
+  private:
+    ITERCLASS iter;
+
+    virtual PyObject* iternext()
+    {
+      PyObject *result = iter.next();
+      if (!result)
         return NULL;
-      }
+      Py_INCREF(result);
+      return result;
     }
-
-    /** Return an XML representation of the object.<br>
-      * If a file object is passed as argument, the representation is directly
-      * written to it.<br>
-      * If no argument is given the representation is returned as a string.
-      */
-    static DECLARE_EXPORT PyObject* toXML(PyObject*, PyObject*);
 };
 
 
@@ -3494,26 +3989,50 @@ class Object : public PythonExtensionBase
 class Mutex: public NonCopyable
 {
   public:
-#ifndef MT
-    // No threading support, empty class
-    Mutex() {}
-    ~Mutex()  {}
-    void lock() {}
-    void unlock() {}
-#elif defined(HAVE_PTHREAD_H)
+#if defined(HAVE_PTHREAD_H)
     // Pthreads
-    Mutex()         {pthread_mutex_init(&mtx, 0);}
-    ~Mutex()        {pthread_mutex_destroy(&mtx);}
-    void lock()     {pthread_mutex_lock(&mtx);}
-    void unlock()   {pthread_mutex_unlock(&mtx);}
+    Mutex()
+    {
+      pthread_mutex_init(&mtx, 0);
+    }
+
+    ~Mutex()
+    {
+      pthread_mutex_destroy(&mtx);
+    }
+
+    void lock()
+    {
+      pthread_mutex_lock(&mtx);
+    }
+
+    void unlock()
+    {
+      pthread_mutex_unlock(&mtx);
+    }
   private:
     pthread_mutex_t mtx;
 #else
     // Windows critical section
-    Mutex() {InitializeCriticalSection(&critsec);}
-    ~Mutex()  {DeleteCriticalSection(&critsec);}
-    void lock() {EnterCriticalSection(&critsec);}
-    void unlock() {LeaveCriticalSection(&critsec);}
+    Mutex()
+    {
+      InitializeCriticalSection(&critsec);
+    }
+
+    ~Mutex()
+    {
+      DeleteCriticalSection(&critsec);
+    }
+
+    void lock()
+    {
+      EnterCriticalSection(&critsec);
+    }
+
+    void unlock()
+    {
+      LeaveCriticalSection(&critsec);
+    }
   private:
     CRITICAL_SECTION critsec;
 #endif
@@ -3527,9 +4046,17 @@ class ScopeMutexLock: public NonCopyable
 {
   protected:
     Mutex& mtx;
+
   public:
-    ScopeMutexLock(Mutex& imtx): mtx(imtx) {mtx.lock ();}
-    ~ScopeMutexLock() {mtx.unlock();}
+    ScopeMutexLock(Mutex& imtx): mtx(imtx)
+    {
+      mtx.lock ();
+    }
+
+    ~ScopeMutexLock()
+    {
+      mtx.unlock();
+    }
 };
 
 
@@ -3537,6 +4064,7 @@ class ScopeMutexLock: public NonCopyable
   *
   * Currently Pthreads and Windows threads are supported as the implementation
   * of the multithreading.
+  * TODO Replace with C++11 threads when these are available in mainstream gcc
   */
 class ThreadGroup : public NonCopyable
 {
@@ -3572,18 +4100,17 @@ class ThreadGroup : public NonCopyable
       * By default we activate as many worker threads as there are cores on
       * the machine.
       */
-    int getMaxParallel() const {return maxParallel;}
+    int getMaxParallel() const
+    {
+      return maxParallel;
+    }
 
     /** Updates the number of parallel workers that is activated. */
     void setMaxParallel(int b)
     {
       if (b<1)
         throw DataException("Invalid number of parallel execution threads");
-#ifndef MT
-      maxParallel = (b>1 ? 1 : b);
-#else
       maxParallel = b;
-#endif
     }
 
   private:
@@ -3613,7 +4140,7 @@ class ThreadGroup : public NonCopyable
     /** This functions runs a single command execution thread. It is used as
       * a holder for the main routines of a trheaded routine.
       */
-#if defined(HAVE_PTHREAD_H) || !defined(MT)
+#if defined(HAVE_PTHREAD_H)
     static void* wrapper(void *arg);
 #else
     static unsigned __stdcall wrapper(void *);
@@ -3645,7 +4172,7 @@ class Tree : public NonCopyable
       * A node with color 'none' is a node that hasn't been inserted yet in
       * the tree.
       */
-    enum NodeColor {red, black, none };
+    enum NodeColor {red, black, none, head};
 
     /** @brief This class represents a node in the tree.
       *
@@ -3662,17 +4189,27 @@ class Tree : public NonCopyable
 
         /** Returns the name of this node. This name is used to sort the
           * nodes. */
-        const string& getName() const {return nm;}
+        string getName() const
+        {
+          return nm;
+        }
+
+        /** Return the color of this node: "red" or "black" for actual nodes,
+          * and "none" for the root node and nodes not yet inserted.
+          */
+        NodeColor getColor() const
+        {
+          return color;
+        }
 
         /** Comparison operator. */
-        bool operator < (const TreeNode& o) {return nm < o.nm;}
-
-        /** Constructor. */
-        TreeNode(const string& n) : nm(n), color(none)
+        bool operator < (const TreeNode& o)
         {
-          if (n.empty())
-            throw DataException("Can't create entity without name");
+          return nm < o.nm;
         }
+
+        /** Default constructor. */
+        TreeNode() : color(none), parent(NULL), left(NULL), right(NULL) {}
 
         /** Return a pointer to the node following this one. */
         TreeNode* increment() const
@@ -3722,9 +4259,6 @@ class Tree : public NonCopyable
         }
 
       private:
-        /** Constructor. */
-        TreeNode() {}
-
         /** Name. */
         string nm;
 
@@ -3744,8 +4278,7 @@ class Tree : public NonCopyable
     /** Default constructor. */
     Tree(bool b = false) : count(0), clearOnDestruct(b)
     {
-      // Color is used to distinguish header from root, in iterator.operator++
-      header.color = red;
+      header.color = head; // Mark as special head
       header.parent = NULL;
       header.left = &header;
       header.right = &header;
@@ -3756,43 +4289,62 @@ class Tree : public NonCopyable
       * is deleted. This is done for performance reasons: the program can shut
       * down faster.
       */
-    ~Tree() {if(clearOnDestruct) clear();}
+    ~Tree()
+    {
+      if(clearOnDestruct) clear();
+    }
 
     /** Returns an iterator to the start of the list.<br>
       * The user will need to take care of properly acquiring a read lock on
       * on the tree object.
       */
-    TreeNode* begin() const {return const_cast<TreeNode*>(header.left);}
+    TreeNode* begin() const
+    {
+      return const_cast<TreeNode*>(header.left);
+    }
 
     /** Returns an iterator pointing beyond the last element in the list.<br>
       * The user will need to take care of properly acquiring a read lock on
       * on the tree object.
       */
-    TreeNode* end() const {return const_cast<TreeNode*>(&header);}
+    TreeNode* end() const
+    {
+      return const_cast<TreeNode*>(&header);
+    }
 
     /** Returns true if the list is empty.<br>
       * Its complexity is O(1). */
-    bool empty() const {return header.parent == NULL;}
+    bool empty() const
+    {
+      return header.parent == NULL;
+    }
 
     /** Renames an existing node, and adjusts its position in the tree. */
-    void rename(TreeNode* obj, string newname)
+    DECLARE_EXPORT void rename(TreeNode* obj, const string& newname, TreeNode* hint = NULL)
     {
-      bool found;
-      findLowerBound(newname, &found);
-      if (found)
-        throw DataException("Can't rename '" + obj->nm + "' to '"
-            + newname + "': name already in use");
-      erase(obj);
-      // @todo: there is a small risk for multithreading trouble when the tree is unlocked between the delete and re-insert
+      if (obj->nm == newname)
+        return;
+      if (!obj->nm.empty())
+      {
+        bool found;
+        findLowerBound(newname, &found);
+        if (found)
+          throw DataException("Can't rename '" + obj->nm + "' to '"
+              + newname + "': name already in use");
+        erase(obj);
+      }
       obj->nm = newname;
-      insert(obj);
+      insert(obj, hint);
     };
 
     /** This method returns the number of nodes inserted in this tree.<br>
       * Its complexity is O(1), so it can be called on large trees without any
       * performance impact.
       */
-    size_t size() const {return count;}
+    size_t size() const
+    {
+      return count;
+    }
 
     /** Verifies the integrity of the tree and returns true if everything
       * is correct.<br>
@@ -3848,7 +4400,10 @@ class Tree : public NonCopyable
     }
 
     /** Insert a new node in the tree. */
-    TreeNode* insert(TreeNode* v) {return insert(v, NULL);}
+    TreeNode* insert(TreeNode* v)
+    {
+      return insert(v, NULL);
+    }
 
     /** Insert a new node in the tree. The second argument is a hint on
       * the proper location in the tree.<br>
@@ -3940,7 +4495,7 @@ class Command
 {
     friend class CommandList;
     friend class CommandManager;
-    friend class frepple::CommandMoveOperationPlan;
+    friend class frepple::CommandMoveOperationPlan; // TODO update api to avoid this friend
   public:
     /** Default constructor. The creation of a command should NOT execute the
       * command yet. The execute() method needs to be called explicitly to
@@ -4026,13 +4581,22 @@ class CommandList : public Command
         iterator(Command* x) : cur(x) {}
 
         /** Copy constructor. */
-        iterator(const iterator& it) {cur = it.cur;}
+        iterator(const iterator& it)
+        {
+          cur = it.cur;
+        }
 
         /** Return the content of the current node. */
-        Command& operator*() const {return *cur;}
+        Command& operator*() const
+        {
+          return *cur;
+        }
 
         /** Return the content of the current node. */
-        Command* operator->() const {return cur;}
+        Command* operator->() const
+        {
+          return cur;
+        }
 
         /** Pre-increment operator which moves the pointer to the next
           * element. */
@@ -4052,20 +4616,32 @@ class CommandList : public Command
         }
 
         /** Comparison operator. */
-        bool operator==(const iterator& y) const {return cur==y.cur;}
+        bool operator==(const iterator& y) const
+        {
+          return cur==y.cur;
+        }
 
         /** Inequality operator. */
-        bool operator!=(const iterator& y) const {return cur!=y.cur;}
+        bool operator!=(const iterator& y) const
+        {
+          return cur!=y.cur;
+        }
 
       private:
         Command* cur;
     };
 
     /** Returns an iterator over all commands in the list. */
-    iterator begin() const {return iterator(firstCommand);}
+    iterator begin() const
+    {
+      return iterator(firstCommand);
+    }
 
     /** Returns an iterator beyond the last command. */
-    iterator end() const {return iterator(NULL);}
+    iterator end() const
+    {
+      return iterator(NULL);
+    }
 
     /** Append an additional command to the end of the list. */
     DECLARE_EXPORT void add(Command* c);
@@ -4091,7 +4667,10 @@ class CommandList : public Command
     DECLARE_EXPORT void redo();
 
     /** Returns true if no commands have been added yet to the list. */
-    bool empty() const {return firstCommand==NULL;}
+    bool empty() const
+    {
+      return firstCommand==NULL;
+    }
 
     /** Default constructor. */
     explicit CommandList() : firstCommand(NULL), lastCommand(NULL) {}
@@ -4124,7 +4703,10 @@ class CommandManager
           nextBookmark(NULL), prevBookmark(NULL), parent(p) {}
       public:
         /** Returns true if the bookmark commands are active. */
-        bool isActive() const {return active;}
+        bool isActive() const
+        {
+          return active;
+        }
 
         /** Returns true if the bookmark is a child, grand-child or
           * grand-grand-child of the argument bookmark.
@@ -4145,13 +4727,22 @@ class CommandManager
         iterator(Bookmark* x) : cur(x) {}
 
         /** Copy constructor. */
-        iterator(const iterator& it) {cur = it.cur;}
+        iterator(const iterator& it)
+        {
+          cur = it.cur;
+        }
 
         /** Return the content of the current node. */
-        Bookmark& operator*() const {return *cur;}
+        Bookmark& operator*() const
+        {
+          return *cur;
+        }
 
         /** Return the content of the current node. */
-        Bookmark* operator->() const {return cur;}
+        Bookmark* operator->() const
+        {
+          return cur;
+        }
 
         /** Pre-increment operator which moves the pointer to the next
           * element. */
@@ -4171,10 +4762,16 @@ class CommandManager
         }
 
         /** Comparison operator. */
-        bool operator==(const iterator& y) const {return cur==y.cur;}
+        bool operator==(const iterator& y) const
+        {
+          return cur==y.cur;
+        }
 
         /** Inequality operator. */
-        bool operator!=(const iterator& y) const {return cur!=y.cur;}
+        bool operator!=(const iterator& y) const
+        {
+          return cur!=y.cur;
+        }
 
       private:
         Bookmark* cur;
@@ -4188,13 +4785,22 @@ class CommandManager
         reverse_iterator(Bookmark* x) : cur(x) {}
 
         /** Copy constructor. */
-        reverse_iterator(const reverse_iterator& it) {cur = it.cur;}
+        reverse_iterator(const reverse_iterator& it)
+        {
+          cur = it.cur;
+        }
 
         /** Return the content of the current node. */
-        Bookmark& operator*() const {return *cur;}
+        Bookmark& operator*() const
+        {
+          return *cur;
+        }
 
         /** Return the content of the current node. */
-        Bookmark* operator->() const {return cur;}
+        Bookmark* operator->() const
+        {
+          return cur;
+        }
 
         /** Pre-increment operator which moves the pointer to the next
           * element. */
@@ -4214,10 +4820,16 @@ class CommandManager
         }
 
         /** Comparison operator. */
-        bool operator==(const reverse_iterator& y) const {return cur==y.cur;}
+        bool operator==(const reverse_iterator& y) const
+        {
+          return cur==y.cur;
+        }
 
         /** Inequality operator. */
-        bool operator!=(const reverse_iterator& y) const {return cur!=y.cur;}
+        bool operator!=(const reverse_iterator& y) const
+        {
+          return cur!=y.cur;
+        }
 
       private:
         Bookmark* cur;
@@ -4258,19 +4870,34 @@ class CommandManager
     }
 
     /** Returns an iterator over all bookmarks in forward direction. */
-    iterator begin() {return iterator(&firstBookmark);}
+    iterator begin()
+    {
+      return iterator(&firstBookmark);
+    }
 
     /** Returns an iterator beyond the last bookmark in forward direction. */
-    iterator end() {return iterator(NULL);}
+    iterator end()
+    {
+      return iterator(NULL);
+    }
 
     /** Returns an iterator over all bookmarks in reverse direction. */
-    reverse_iterator rbegin() {return reverse_iterator(lastBookmark);}
+    reverse_iterator rbegin()
+    {
+      return reverse_iterator(lastBookmark);
+    }
 
     /** Returns an iterator beyond the last bookmark in reverse direction. */
-    reverse_iterator rend() {return reverse_iterator(NULL);}
+    reverse_iterator rend()
+    {
+      return reverse_iterator(NULL);
+    }
 
     /** Add a command to the active bookmark. */
-    void add(Command* c) {currentBookmark->add(c);}
+    void add(Command* c)
+    {
+      currentBookmark->add(c);
+    }
 
     /** Create a new bookmark. */
     DECLARE_EXPORT Bookmark* setBookmark();
@@ -4305,380 +4932,71 @@ class CommandManager
 // INPUT PROCESSING CLASSES
 //
 
-
-/** @brief This class will read in an XML-file and call the appropriate
-  * handler functions of the Object classes and objects.
-  *
-  * This class is implemented based on the Xerces SAX XML parser.
-  * For debugging purposes a flag is defined at the start of the file
-  * "xmlparser.cpp". Uncomment the line and recompile to use it.
-  *
-  * FrePPLe creates a new parser and loads the XML schema every time
-  * XML data need to be parsed. When this happens only a few times during a
-  * run this is good enough.<br>
-  * However, when the libary has to parse plenty of small XML messages this
-  * will create a significant overhead. The code would need to be enhanced
-  * to maintain a pool of parsers and cache their grammars.
+/** @brief An abstract class that is instantiated for data input streams
+  * in various formats.
   */
-class XMLInput : public NonCopyable,  private xercesc::DefaultHandler
+class DataInput
 {
   public:
-    typedef pair<Attribute,XMLElement> datapair;
+    /** Default constructor. */
+    explicit DataInput() : user_exit_cpp(NULL) {}
+
+    /** Return the source field that will be populated on each object created
+      * or updated from the XML data.
+      */
+    string getSource() const
+    {
+      return source;
+    }
+
+    /** Update the source field that will be populated on each object created
+      * or updated from the XML data.
+      */
+    void setSource(string s)
+    {
+      source = s;
+    }
+
+    /** Specify a Python callback function that is for every object read
+      * from the input stream.
+      */
+    void setUserExit(PyObject* p)
+    {
+      userexit = p;
+    }
+
+    /** Return the Python callback function. */
+    const PythonFunction& getUserExit() const
+    {
+      return userexit;
+    }
+
+    /** Type definition for callback functions defined in C++. */
+    typedef void (*callback)(Object*);
+
+    void setUserExitCpp(callback f)
+    {
+      user_exit_cpp = f;
+    }
+
+    callback getUserExitCpp() const
+    {
+      return user_exit_cpp;
+    }
 
   private:
-    /** A transcoder to encoding to UTF-8. */
-    static xercesc::XMLTranscoder* utf8_encoder;
-
-    /** A pointer to an XML parser for processing the input. */
-    xercesc::SAX2XMLReader* parser;
-
-    /** This type defines the different states the parser can have. */
-    enum state
-    {
-      /** The parser is sending input to an object handler. */
-      READOBJECT,
-      /** The parser has been instructed to ignore a tag. */
-      IGNOREINPUT,
-      /** The parser is shutting down, and will ignore all further data. */
-      SHUTDOWN,
-      /** This state is only used when the parser starts processing its first
-        * tag. */
-      INIT
-    };
-
-    /** This variable defines the maximum depth of the object creation stack.
-      * This maximum is intended to protect us from malicious malformed
-      * xml-documents, and also for allocating efficient data structures for
-      * the parser.
+    /** A value to populate on the source field of all entities being created
+      * or updated from the input data.
       */
-    const unsigned short maxdepth;
-
-    /** Stack of states. */
-    stack <state> states;
-
-    /** Previous object in stack. */
-    Object* prev;
-
-    /** Stack of pairs. The pairs contain:
-      *  - A pointer to an event handler object. The beginElement and
-      *    endElement methods of this object will be called.
-      *  - A user definable pointer. The purpose of this pointer is to store
-      *    status information between calls to the handler.
-      */
-    vector< pair<Object*,void*> > m_EHStack;
-
-    /** Stack of elements.<br>
-      * The expression m_EStack[numElements+1] returns the current element.<br>
-      * The expression m_EStack[numElements] returns the parent element.
-      * @see numElements
-      */
-    vector<datapair> m_EStack;
-
-    /** A variable to keep track of the size of the element stack. It is used
-      * together with the variable m_EStack.
-      * @see m_EStack
-      */
-    short numElements;
-
-    /** This field counts how deep we are in a nested series of ignored input.
-      * It is represented as a counter since the ignored element could contain
-      * itself.
-      */
-    unsigned short ignore;
-
-    /** Hash value of the current element. */
-    stack<hashtype> endingHashes;
-
-    /** This variable is normally false. It is switched to true only a) in
-      * the method endElement() of Object objects and b) when an object
-      * is processing its closing tag.
-      */
-    bool objectEnded;
-
-    /** This field controls whether we continue processing after data errors
-      * or whether we abort processing the remaining XML data.<br>
-      * Selecting the right mode is important:
-      *  - Setting the flag to false is appropriate for processing large
-      *    amounts of a bulk-load operation. In this mode a single, potentially
-      *    minor, data problem won't abort the complete process.
-      *  - Setting the flag to true is most appropriate to process small and
-      *    frequent messages from client applications. In this mode client
-      *    applications are notified about data problems.
-      *  - The default setting is true, in order to provide a maximum level of
-      *    security for the application.
-      */
-    bool abortOnDataException;
-
-    /** This is a pointer to the attributes.
-      * See the xerces API documentation for further information on the usage
-      * of the attribute list.
-      */
-    XMLAttributeList attributes;
-
-    /** A buffer used for transcoding XML data. */
-    static char encodingbuffer[];
+    string source;
 
     /** A Python callback function that is called once an object has been read
       * from the XML input. The return value is not used.
       */
     PythonFunction userexit;
 
-    /** Handler called when a new element tag is encountered.
-      * It pushes a new element on the stack and calls the current handler.
-      */
-    DECLARE_EXPORT void startElement (const XMLCh* const, const XMLCh* const,
-        const XMLCh* const, const xercesc::Attributes&);
-
-    /** Handler called when closing element tag is encountered.
-      * If this is the closing tag for the current event handler, pop it
-      * off the handler stack. If this empties the stack, shut down parser.
-      * Otherwise, just feed the element with the already completed
-      * data section to the current handler, then pop it off the element
-      * stack.
-      */
-    DECLARE_EXPORT void endElement
-    (const XMLCh* const, const XMLCh* const, const XMLCh* const);
-
-    /** Handler called when character data are read in.
-      * The data string is add it to the current element data.
-      */
-#if XERCES_VERSION_MAJOR==2
-    DECLARE_EXPORT void characters(const XMLCh *const, const unsigned int);
-#else
-    DECLARE_EXPORT void characters(const XMLCh *const, const XMLSize_t);
-#endif
-
-    /** Handler called by Xerces in fatal error conditions. It throws an
-      * exception to abort the parsing procedure. */
-    DECLARE_EXPORT void fatalError (const xercesc::SAXParseException&);
-
-    /** Handler called by Xercess when reading a processing instruction. The
-      * handler looks up the target in the repository and will call the
-      * registered XMLinstruction.
-      * @see XMLinstruction
-      */
-    DECLARE_EXPORT void processingInstruction (const XMLCh *const, const XMLCh *const);
-
-    /** Handler called by Xerces in error conditions. It throws an exception
-      * to abort the parsing procedure. */
-    DECLARE_EXPORT void error (const xercesc::SAXParseException&);
-
-    /** Handler called by Xerces for warnings. */
-    DECLARE_EXPORT void warning (const xercesc::SAXParseException&);
-
-    /** This method cleans up the parser state to get it ready for processing
-      * a new document. */
-    DECLARE_EXPORT void reset();
-
-    /** Return a pointer to the current object being read in.  */
-    inline Object* getCurrentObject() const {return m_EHStack[m_EHStack.size()-1].first;}
-
-  public:
-    /** Constructor.
-      * @param maxNestedElmnts Defines the maximum depth of elements an XML
-      * document is allowed to have. The default is 20.
-      */
-    DECLARE_EXPORT XMLInput(unsigned short maxNestedElmnts = 20);
-
-    /** Destructor. */
-    virtual ~XMLInput() {reset();}
-
-    /** Return a pointer to an array of character pointer which point
-      * to the attributes. See the xerces documentation if this description
-      * doesn't satisfy you...
-      */
-    const AttributeList& getAttributes() const {return attributes;}
-
-    /** Redirect event stream into a new Object.<br>
-      * It is also possible to pass a NULL pointer to the function. In
-      * that situation, we simple ignore the content of that element.<br>
-      * Important: The user is reponsible of making sure the argument
-      * object has a proper write-lock. The release of that lock is handled
-      * by the parser.
-      */
-    DECLARE_EXPORT void readto(Object*);
-
-    /** Abort the parsing.
-      * The actual shutdown cannot be called inside a SAX handler function,
-      * so actual shutdown is deferred until the next iteration of the feed
-      * loop.
-      */
-    void shutdown();
-
-    /** Ignore an element. */
-    void IgnoreElement() {readto(NULL);}
-
-    /** Returns true if the current object is finishing with the current
-      * tag. This method should only be used in the endElement() method. */
-    bool isObjectEnd() {return objectEnded;}
-
-    /** Invalidates the current object.<br>
-      * This method is useful when, for instance, the object being parsed
-      * is being deleted.
-      */
-    void invalidateCurrentObject()
-    {
-      if (!m_EHStack.empty())
-        m_EHStack[m_EHStack.size()-1].first = NULL;
-    }
-
-    /** Return a pointer to the previous object being read in.<br>
-      * In a typical use the returned pointer will require a dynamic_cast
-      * to a subclass type.<br>
-      * The typical usage is as follows:
-      * <pre>
-      *   Operation *o = dynamic_cast<Operation*>(pIn.getPreviousObject());
-      *   if (o) doSomeThing(o);
-      *   else throw LogicException("Incorrect object type");
-      * </pre>
-      */
-    Object* getPreviousObject() const {return prev;}
-
-    /** Clears the previously read object. */
-    Object* getParentObject() const
-    {
-      int x = m_EHStack.size();
-      return x>1 ? m_EHStack[x-2].first : NULL;
-    }
-
-    /** Returns a reference to the parent element. */
-    const datapair& getParentElement() const
-    {return m_EStack[numElements>0 ? numElements : 0];}
-
-    /** Returns a reference to the current element. */
-    const datapair& getCurrentElement() const
-    {return m_EStack[numElements>-1 ? numElements+1 : 0];}
-
-    /** This is the core parsing function, which triggers the XML parser to
-      * start processing the input. It is normally called from the method
-      * parse(Object*) once a proper stream has been created.
-      * @see parse(Object*)
-      */
-    void parse(xercesc::InputSource&, Object*, bool=false);
-
-    /** Updates the user definable pointer. This pointer is used to store
-      * status information between handler calls. */
-    void setUserArea(void* v)
-    {if (!m_EHStack.empty()) m_EHStack[m_EHStack.size()-1].second = v;}
-
-    /** Returns the user definable pointer. */
-    void* getUserArea() const
-    {return m_EHStack.empty() ? NULL : m_EHStack[m_EHStack.size()-1].second;}
-
-    /** Updates whether we ignore data exceptions or whether we abort the
-      * processing of the XML data stream. */
-    void setAbortOnDataError(bool i) {abortOnDataException = i;}
-
-    /** Returns the behavior of the parser in case of data errors.<br>
-      * When true is returned, the processing of the XML stream continues
-      * after a DataException. Other, more critical, exceptions types will
-      * still abort the parsing process.<br>
-      * False indicates that the processing of the XML stream is aborted.
-      */
-    bool getAbortOnDataError() const {return abortOnDataException;}
-
-    /** Specify a Python callback function that is for every object read 
-      * from the input stream. 
-      */
-    void setUserExit(PyObject* p) {userexit = p;}
-
-    /** Return the Python callback function. */
-    PythonFunction getUserExit() const {return userexit;}
-
-    /** Transcode the Xerces XML characters to our UTF8 encoded buffer.
-      * This method uses a statically allocated buffer, and subsequent 
-      * calls to this method will overwrite the previous results.
-      */
-    static char* transcodeUTF8(const XMLCh*);
-
-  protected:
-    /** The real parsing job is delegated to subclasses.
-      * Subclass can then define the specifics for parsing a flat file,
-      * a string, a SOAP message, etc...
-      * @exception RuntimeException Thrown in the following situations:
-      *    - the XML-document is incorrectly formatted
-      *    - the XML-parser librabry can't be initialized
-      *    - no memory can be allocated to the xml-parser
-      * @exception DataException Thrown when the data can't be processed
-      *   normally by the objects being created or updated.
-      */
-    virtual void parse(Object* s, bool b=false)
-    {
-      throw LogicException("Unreachable code reached");
-    }
-};
-
-
-/** @brief This class reads XML data from a string. */
-class XMLInputString : public XMLInput
-{
-  public:
-    /** Default constructor. */
-    XMLInputString(const string& s) : data(s) {};
-
-    /** Parse the specified string. */
-    void parse(Object* pRoot, bool v = false)
-    {
-      /* The MemBufInputSource expects the number of bytes as second parameter.
-       * In our case this is the same as the number of characters, but this
-       * will not apply any more for character sets with multi-byte
-       * characters.
-       */
-      xercesc::MemBufInputSource a(
-        reinterpret_cast<const XMLByte*>(data.c_str()),
-        static_cast<const unsigned int>(data.size()),
-        "memory data",
-        false);
-      XMLInput::parse(a,pRoot,v);
-    }
-
-  private:
-    /** String containing the data to be parsed. Note that NO local copy of the
-      * data is made, only a reference is stored. The class relies on the code
-      * calling the command to correctly create and destroy the string being
-      * used.
-      */
-    const string data;
-};
-
-
-/** @brief This class reads XML data from a file system.
-  *
-  * The filename argument can be the name of a file or a directory.
-  * If a directory is passed, all files with the extension ".xml"
-  * will be read from it. Subdirectories are not recursed.
-  */
-class XMLInputFile : public XMLInput
-{
-  public:
-    /** Constructor. The argument passed is the name of a
-      * file or a directory. */
-    XMLInputFile(const string& s) : filename(s) {};
-
-    /** Default constructor. */
-    XMLInputFile() {};
-
-    /** Update the name of the file to be processed. */
-    void setFileName(const string& s) {filename = s;}
-
-    /** Returns the name of the file or directory to process. */
-    string getFileName() {return filename;}
-
-    /** Parse the specified file.
-      * When a directory was passed as the argument a failure is
-      * flagged as soon as a single file returned a failure. All
-      * files in an directory are processed however, regardless of
-      * failure with one of the files.
-      * @exception RuntimeException Generated in the following conditions:
-      *    - no input file or directory has been specified.
-      *    - read access to the input file is not available
-      *    - the program doesn't support reading directories on your platform
-      */
-    DECLARE_EXPORT void parse(Object*, bool=false);
-
-  private:
-    /** Name of the file to be opened. */
-    string filename;
+    /** A second type of callback function. This time called from C++. */
+    callback user_exit_cpp;
 };
 
 
@@ -4715,17 +5033,40 @@ template <class T> class HasName : public NonCopyable, public Tree::TreeNode, pu
         iterator(Tree::TreeNode* x) : node(x) {}
 
         /** Copy constructor. */
-        iterator(const iterator& it) {node = it.node;}
+        iterator(const iterator& it)
+        {
+          node = it.node;
+        }
 
         /** Return the content of the current node. */
-        T& operator*() const {return *static_cast<T*>(node);}
+        T& operator*() const
+        {
+          return *static_cast<T*>(node);
+        }
 
         /** Return the content of the current node. */
-        T* operator->() const {return static_cast<T*>(node);}
+        T* operator->() const
+        {
+          return static_cast<T*>(node);
+        }
+
+        /** Return current value and advance the iterator. */
+        T* next()
+        {
+          if (node->getColor() == Tree::head)
+            return NULL;
+          T* tmp = static_cast<T*>(node);
+          node = node->increment();
+          return tmp;
+        }
 
         /** Pre-increment operator which moves the pointer to the next
           * element. */
-        iterator& operator++() {node = node->increment(); return *this;}
+        iterator& operator++()
+        {
+          node = node->increment();
+          return *this;
+        }
 
         /** Post-increment operator which moves the pointer to the next
           * element. */
@@ -4738,7 +5079,11 @@ template <class T> class HasName : public NonCopyable, public Tree::TreeNode, pu
 
         /** Pre-decrement operator which moves the pointer to the previous
           * element. */
-        iterator& operator--() {node = node->decrement(); return *this;}
+        iterator& operator--()
+        {
+          node = node->decrement();
+          return *this;
+        }
 
         /** Post-decrement operator which moves the pointer to the previous
           * element. */
@@ -4750,48 +5095,93 @@ template <class T> class HasName : public NonCopyable, public Tree::TreeNode, pu
         }
 
         /** Comparison operator. */
-        bool operator==(const iterator& y) const {return node==y.node;}
+        bool operator==(const iterator& y) const
+        {
+          return node==y.node;
+        }
 
         /** Inequality operator. */
-        bool operator!=(const iterator& y) const {return node!=y.node;}
+        bool operator!=(const iterator& y) const
+        {
+          return node!=y.node;
+        }
 
       private:
         Tree::TreeNode* node;
     };
 
     /** Returns a STL-like iterator to the end of the entity list. */
-    static iterator end() {return st.end();}
+    static iterator end()
+    {
+      return st.end();
+    }
 
     /** Returns a STL-like iterator to the start of the entity list. */
-    static iterator begin() {return st.begin();}
+    static iterator begin()
+    {
+      return st.begin();
+    }
+
+    static PyObject* createIterator(PyObject* self, PyObject* args)
+    {
+      return new PythonIterator<iterator, T>(st.begin());
+    }
 
     /** Returns false if no named entities have been defined yet. */
-    static bool empty() {return st.empty();}
+    static bool empty()
+    {
+      return st.empty();
+    }
 
     /** Returns the number of defined entities. */
-    static size_t size() {return st.size();}
+    static size_t size()
+    {
+      return st.size();
+    }
 
     /** Debugging method to verify the validity of the tree.
       * An exception is thrown when the tree is corrupted. */
-    static void verify() {st.verify();}
+    static void verify()
+    {
+      st.verify();
+    }
 
     /** Deletes all elements from the list. */
-    static void clear() {st.clear();}
+    static void clear()
+    {
+      st.clear();
+    }
 
-    /** Constructor. */
-    explicit HasName(const string& n) : Tree::TreeNode(n) {}
-
-    /** Constructor. */
-    explicit HasName(const char* n) : Tree::TreeNode(n) {}
+    /** Default constructor. */
+    explicit HasName() {}
 
     /** Rename the entity. */
-    void setName(const string& newname) {st.rename(this, newname);}
+    void setName(const string& newname)
+    {
+      st.rename(this, newname);
+    }
+
+    /** Rename the entity.
+      * The second argument is a hint: when passing an entity with
+      * a name close to the new one, the insertion will be sped up
+      * considerably.
+      */
+    void setName(const string& newname, TreeNode* hint)
+    {
+      st.rename(this, newname, hint);
+    }
 
     /** Destructor. */
-    ~HasName() {st.erase(this);}
+    DECLARE_EXPORT ~HasName()
+    {
+      st.erase(this);
+    }
 
     /** Return the name as the string representation in Python. */
-    virtual PyObject* str() const {return PythonObject(getName());}
+    virtual PyObject* str() const
+    {
+      return PythonData(getName());
+    }
 
     /** Comparison operator for Python. */
     int compare(const PyObject* other) const
@@ -4818,30 +5208,6 @@ template <class T> class HasName : public NonCopyable, public Tree::TreeNode, pu
       return (i!=st.end() ? static_cast<T*>(i) : NULL);
     }
 
-    /** Creates a new entity. */
-    static T* add(const string& k, const MetaClass& cls)
-    {
-      Tree::TreeNode *i = st.find(k);
-      if (i!=st.end()) return static_cast<T*>(i); // Exists already
-      if (*(cls.category) != T::metadata)
-        throw LogicException("Invalid type " + cls.type +
-            " for creating an object of category " + T::metadata.type);
-      T *t = dynamic_cast<T*>(cls.factoryMethodString(k));
-      st.insert(t);
-      return t;
-    }
-
-    /** Registers an entity created by the default constructor. */
-    static T* add(T* t) {return static_cast<T*>(st.insert(t));}
-
-    /** Registers an entity created by the default constructor. The second
-      * argument is a hint: when passing an entity with a name close to
-      * the new one, the insertion will be sped up considerably.
-      */
-    static T* add(T* t, T* hint) {return static_cast<T*>(st.insert(t,hint));}
-
-    void endElement(XMLInput& pIn, const Attribute& pAttr, const DataElement& pElement) {};
-
     /** This method is available as a object creation factory for
       * classes that are using a string as a key identifier, in particular
       * classes derived from the HasName base class.
@@ -4859,14 +5225,15 @@ template <class T> class HasName : public NonCopyable, public Tree::TreeNode, pu
       *   'add_change' is the default value.
       * @see HasName
       */
-    static Object* reader (const MetaClass* cat, const AttributeList& in)
+    static Object* reader (const MetaClass* cat, const DataValueDict& in)
     {
       // Pick up the action attribute
       Action act = MetaClass::decodeAction(in);
 
       // Pick up the name attribute. An error is reported if it's missing.
-      const DataElement* nameElement = in.get(Tags::tag_name);
-      if (!*nameElement) throw DataException("Missing name attribute");
+      const DataValue* nameElement = in.get(Tags::name);
+      if (!nameElement)
+        throw DataException("Missing name field");
       string name = nameElement->getString();
 
       // Check if it exists already
@@ -4922,19 +5289,22 @@ template <class T> class HasName : public NonCopyable, public Tree::TreeNode, pu
       else
       {
         // Category metadata passed: we need to look up the type
-        const DataElement* type = in.get(Tags::tag_type);
+        const DataValue* type = in.get(Tags::type);
         j = static_cast<const MetaCategory&>(*cat).findClass(
-            *type ? Keyword::hash(type->getString()) : MetaCategory::defaultHash
+            type ? Keyword::hash(type->getString()) : MetaCategory::defaultHash
             );
         if (!j)
         {
-          string t(*type ? type->getString() : "default");
+          string t(type ? type->getString() : "default");
           throw DataException("No type " + t + " registered for category " + cat->type);
         }
       }
 
       // Create a new instance
-      T* x = dynamic_cast<T*>(j->factoryMethodString(name));
+      T* x = static_cast<T*>(j->factoryMethod());
+
+      // Insert into the tree
+      x->setName(name);
 
       // Run creation callbacks
       // During the callback there is no write lock set yet, since we can
@@ -4948,19 +5318,43 @@ template <class T> class HasName : public NonCopyable, public Tree::TreeNode, pu
         throw DataException("Can't create object " + name);
       }
 
-      // Insert in the tree
-      T::add(x, i);
       return x;
     }
 
-    /** A handler that is used to persist the tree. */
-    static void writer(const MetaCategory* c, XMLOutput* o)
+    /** Find an entity given its name. In case it can't be found, a NULL
+      * pointer is returned. */
+    static Object* finder(const DataValueDict& k)
     {
-      if (empty()) return;
-      o->BeginObject(*(c->grouptag));
-      for (iterator i = begin(); i != end(); ++i)
-        o->writeElement(*(c->typetag), *i);
-      o->EndObject(*(c->grouptag));
+      const DataValue* val = k.get(Tags::name);
+      if (!val)
+        return NULL;
+      Tree::TreeNode *i = st.find(val->getString());
+      return (i!=st.end() ? static_cast<Object*>(static_cast<T*>(i)) : NULL);
+    }
+};
+
+
+/** @brief This is a decorator class for all objects having a source field. */
+class HasSource
+{
+  private:
+    string source;
+  public:
+    /** Returns the source field. */
+    string getSource() const
+    {
+      return source;
+    }
+
+    /** Sets the source field. */
+    DECLARE_EXPORT void setSource(const string& c)
+    {
+      source = c;
+    }
+
+    template<class Cls> static inline void registerFields(MetaClass* m)
+    {
+      m->addStringField<Cls>(Tags::source, &Cls::getSource, &Cls::setSource);
     }
 };
 
@@ -4969,33 +5363,52 @@ template <class T> class HasName : public NonCopyable, public Tree::TreeNode, pu
   *
   * Instances of this class have a description, category and sub_category.
   */
-class HasDescription
+class HasDescription : public HasSource
 {
   public:
     /** Returns the category. */
-    string getCategory() const {return cat;}
+    string getCategory() const
+    {
+      return cat;
+    }
 
     /** Returns the sub_category. */
-    string getSubCategory() const {return subcat;}
+    DECLARE_EXPORT string getSubCategory() const
+    {
+      return subcat;
+    }
 
     /** Returns the getDescription. */
-    string getDescription() const {return descr;}
+    DECLARE_EXPORT string getDescription() const
+    {
+      return descr;
+    }
 
     /** Sets the category field. */
-    void setCategory(const string& f) {cat = f;}
+    DECLARE_EXPORT void setCategory(const string& f)
+    {
+      cat = f;
+    }
 
     /** Sets the sub_category field. */
-    void setSubCategory(const string& f) {subcat = f;}
+    DECLARE_EXPORT void setSubCategory(const string& f)
+    {
+      subcat = f;
+    }
 
     /** Sets the description field. */
-    void setDescription(const string& f) {descr = f;}
+    void setDescription(const string& f)
+    {
+      descr = f;
+    }
 
-    void writeElement(XMLOutput*, const Keyword&, mode=DEFAULT) const;
-    void endElement(XMLInput&, const Attribute&, const DataElement&);
-
-  protected:
-    /** Returns the memory size in bytes. */
-    size_t extrasize() const {return cat.size() + subcat.size() + descr.size();}
+    template<class Cls> static inline void registerFields(MetaClass* m)
+    {
+      m->addStringField<Cls>(Tags::category, &Cls::getCategory, &Cls::setCategory);
+      m->addStringField<Cls>(Tags::subcategory, &Cls::getSubCategory, &Cls::setSubCategory);
+      m->addStringField<Cls>(Tags::description, &Cls::getDescription, &Cls::setDescription);
+      HasSource::registerFields<Cls>(m);
+    }
 
   private:
     string cat;
@@ -5023,20 +5436,23 @@ template <class T> class HasHierarchy : public HasName<T>
     /** @brief This class models an STL-like iterator that allows us to
       * iterate over the members.
       *
-      * Objects of this class are created by the beginMember() method.
+      * Objects of this class are created by the getMembers() method.
       */
     class memberIterator
     {
       public:
         /** Constructor to iterate over member entities. */
         memberIterator(const HasHierarchy<T>* x) : member_iter(true)
-        {curmember = const_cast<HasHierarchy<T>*>(x)->first_child;}
+        {
+          curmember = x ? const_cast<HasHierarchy<T>*>(x)->first_child : NULL;
+        }
 
         /** Constructor to iterate over all entities. */
         memberIterator() : curmember(&*T::begin()), member_iter(false) {}
 
         /** Constructor. */
-        memberIterator(const typename HasName<T>::iterator& it) : curmember(&*it), member_iter(false) {}
+        memberIterator(const typename HasName<T>::iterator& it)
+          : curmember(&*it), member_iter(false) {}
 
         /** Copy constructor. */
         memberIterator(const memberIterator& it)
@@ -5046,10 +5462,16 @@ template <class T> class HasHierarchy : public HasName<T>
         }
 
         /** Return the content of the current node. */
-        T& operator*() const {return *static_cast<T*>(curmember);}
+        T& operator*() const
+        {
+          return *static_cast<T*>(curmember);
+        }
 
         /** Return the content of the current node. */
-        T* operator->() const {return static_cast<T*>(curmember);}
+        T* operator->() const
+        {
+          return static_cast<T*>(curmember);
+        }
 
         /** Pre-increment operator which moves the pointer to the next member. */
         memberIterator& operator++()
@@ -5072,21 +5494,48 @@ template <class T> class HasHierarchy : public HasName<T>
           return tmp;
         }
 
+        /** Return current member and advance the iterator. */
+        T* next()
+        {
+          if (!curmember)
+            return NULL;
+          T *tmp = static_cast<T*>(curmember);
+          if (member_iter)
+            curmember = curmember->next_brother;
+          else
+            curmember = static_cast<T*>(curmember->increment());
+          return tmp;
+        }
+
         /** Comparison operator. */
         bool operator==(const memberIterator& y) const
-        {return curmember == y.curmember;}
+        {
+          return curmember == y.curmember;
+        }
 
         /** Inequality operator. */
         bool operator!=(const memberIterator& y) const
-        {return curmember != y.curmember;}
+        {
+          return curmember != y.curmember;
+        }
 
         /** Comparison operator. */
         bool operator==(const typename HasName<T>::iterator& y) const
-        {return curmember ? (curmember == &*y) : (y == T::end());}
+        {
+          return curmember ? (curmember == &*y) : (y == T::end());
+        }
 
         /** Inequality operator. */
         bool operator!=(const typename HasName<T>::iterator& y) const
-        {return curmember ? (curmember != &*y) : (y != T::end());}
+        {
+          return curmember ? (curmember != &*y) : (y != T::end());
+        }
+
+        /** End iterator. */
+        static memberIterator end()
+        {
+          return NULL;
+        }
 
       private:
         /** Points to a member. */
@@ -5094,8 +5543,8 @@ template <class T> class HasHierarchy : public HasName<T>
         bool member_iter;
     };
 
-    /** The one and only constructor. */
-    HasHierarchy(const string& n) : HasName<T>(n), parent(NULL),
+    /** Default constructor. */
+    HasHierarchy() : parent(NULL),
       first_child(NULL), next_brother(NULL) {}
 
     /** Destructor.
@@ -5107,17 +5556,36 @@ template <class T> class HasHierarchy : public HasName<T>
     ~HasHierarchy();
 
     /** Return a member iterator. */
-    memberIterator beginMember() const {return this;}
+    memberIterator getMembers() const
+    {
+      return this;
+    }
+
+    /** Return true if an object is part of the children of a second object. */
+    bool isMemberOf(T* p) const
+    {
+      for (const HasHierarchy* tmp = this; tmp; tmp = tmp->getOwner())
+        if (tmp == p)
+          // Yes, we find the argument in the parent hierarchy
+          return true;
+      return false;
+    }
 
     /** Returns true if this entity belongs to a higher hierarchical level.<br>
       * An entity can have only a single owner, and can't belong to multiple
       * hierarchies.
       */
-    bool hasOwner() const {return parent!=NULL;}
+    bool hasOwner() const
+    {
+      return parent != NULL;
+    }
 
     /** Returns true if this entity has lower level entities belonging to
       * it. */
-    bool isGroup() const {return first_child!=NULL;}
+    bool isGroup() const
+    {
+      return first_child != NULL;
+    }
 
     /** Changes the owner of the entity.<br>
       * The argument must be a valid pointer to an entity of the same type.<br>
@@ -5126,7 +5594,10 @@ template <class T> class HasHierarchy : public HasName<T>
     void setOwner(T* f);
 
     /** Returns the owning entity. */
-    T* getOwner() const {return parent;}
+    inline T* getOwner() const
+    {
+      return parent;
+    }
 
     /** Returns the level in the hierarchy.<br>
       * Level 0 means the entity doesn't have any parent.<br>
@@ -5135,9 +5606,12 @@ template <class T> class HasHierarchy : public HasName<T>
       */
     unsigned short getHierarchyLevel() const;
 
-    void beginElement(XMLInput&, const Attribute&);
-    void writeElement(XMLOutput*, const Keyword&, mode=DEFAULT) const;
-    void endElement(XMLInput&, const Attribute&, const DataElement&);
+    template<class Cls> static inline void registerFields(MetaClass* m)
+    {
+      m->addStringField<Cls>(Tags::name, &Cls::getName, &Cls::setName, "", MANDATORY);
+      m->addPointerField<Cls, Cls>(Tags::owner, &Cls::getOwner, &Cls::setOwner, BASE + PARENT);
+      m->addIteratorField<Cls, typename Cls::memberIterator, Cls>(Tags::members, *(Cls::metadata->typetag), &Cls::getMembers, DETAIL);
+    }
 
   private:
     /** A pointer to the parent object. */
@@ -5189,9 +5663,14 @@ template <class A, class B, class C> class Association
         friend class Node;
       public:
         C* first;
+
       public:
         List() : first(NULL) {};
-        bool empty() const {return first==NULL;}
+
+        bool empty() const
+        {
+          return first==NULL;
+        }
     };
 
   public:
@@ -5199,29 +5678,60 @@ template <class A, class B, class C> class Association
     class ListA : public List
     {
       public:
+        /** Constructor. */
         ListA() {};
+
         /** @brief An iterator over the associated objects. */
         class iterator
         {
           protected:
             C* nodeptr;
+
           public:
             iterator(C* n) : nodeptr(n) {};
-            C& operator*() const {return *nodeptr;}
-            C* operator->() const {return nodeptr;}
+
+            C& operator*() const
+            {
+              return *nodeptr;
+            }
+
+            C* operator->() const
+            {
+              return nodeptr;
+            }
+
             bool operator==(const iterator& x) const
-            {return nodeptr == x.nodeptr;}
+            {
+              return nodeptr == x.nodeptr;
+            }
+
             bool operator!=(const iterator& x) const
-            {return nodeptr != x.nodeptr;}
+            {
+              return nodeptr != x.nodeptr;
+            }
+
             iterator& operator++()
-            {nodeptr = nodeptr->nextA; return *this;}
+            {
+              nodeptr = nodeptr->nextA;
+              return *this;
+            }
+
             iterator operator++(int i)
             {
               iterator j = *this;
               nodeptr = nodeptr->nextA;
               return j;
             }
+
+            C* next()
+            {
+              C* tmp = nodeptr;
+              if (nodeptr)
+                nodeptr = nodeptr->nextA;
+              return tmp;
+            }
         };
+
         /** @brief An iterator over the associated objects. */
         class const_iterator
         {
@@ -5229,25 +5739,67 @@ template <class A, class B, class C> class Association
             C* nodeptr;
           public:
             const_iterator(C* n) : nodeptr(n) {};
-            const C& operator*() const {return *nodeptr;}
-            const C* operator->() const {return nodeptr;}
+
+            const C& operator*() const
+            {
+              return *nodeptr;
+            }
+
+            const C* operator->() const
+            {
+              return nodeptr;
+            }
+
             bool operator==(const const_iterator& x) const
-            {return nodeptr == x.nodeptr;}
+            {
+              return nodeptr == x.nodeptr;
+            }
+
             bool operator!=(const const_iterator& x) const
-            {return nodeptr != x.nodeptr;}
+            {
+              return nodeptr != x.nodeptr;
+            }
+
             const_iterator& operator++()
-            {nodeptr = nodeptr->nextA; return *this;}
+            {
+              nodeptr = nodeptr->nextA; return *this;
+            }
+
             const_iterator operator++(int i)
             {
               const_iterator j = *this;
               nodeptr = nodeptr->nextA;
               return j;
             }
+
+            C* next()
+            {
+              C* tmp = nodeptr;
+              if (nodeptr)
+                nodeptr = nodeptr->nextA;
+              return tmp;
+            }
         };
-        iterator begin() {return iterator(this->first);}
-        const_iterator begin() const {return const_iterator(this->first);}
-        iterator end() {return iterator(NULL);}
-        const_iterator end() const {return const_iterator(NULL);}
+
+        iterator begin()
+        {
+          return iterator(this->first);
+        }
+
+        const_iterator begin() const
+        {
+          return const_iterator(this->first);
+        }
+
+        iterator end()
+        {
+          return iterator(NULL);
+        }
+
+        const_iterator end() const
+        {
+          return const_iterator(NULL);
+        }
 
         /** Destructor. */
         ~ListA()
@@ -5329,7 +5881,11 @@ template <class A, class B, class C> class Association
     class ListB : public List
     {
       public:
+        /** Constructor. */
         ListB() {};
+
+        // TODO Add a copy constructor as well?
+
         /** @brief An iterator over the associated objects. */
         class iterator
         {
@@ -5337,21 +5893,49 @@ template <class A, class B, class C> class Association
             C* nodeptr;
           public:
             iterator(C* n) : nodeptr(n) {};
-            C& operator*() const {return *nodeptr;}
-            C* operator->() const {return nodeptr;}
+
+            C& operator*() const
+            {
+              return *nodeptr;
+            }
+
+            C* operator->() const
+            {
+              return nodeptr;
+            }
+
             bool operator==(const iterator& x) const
-            {return nodeptr == x.nodeptr;}
+            {
+              return nodeptr == x.nodeptr;
+            }
+
             bool operator!=(const iterator& x) const
-            {return nodeptr != x.nodeptr;}
+            {
+              return nodeptr != x.nodeptr;
+            }
+
             iterator& operator++()
-            {nodeptr = nodeptr->nextB; return *this;}
+            {
+              nodeptr = nodeptr->nextB;
+              return *this;
+            }
+
             iterator operator++(int i)
             {
               iterator j = *this;
-              nodeptr = nodeptr->nextA;
+              nodeptr = nodeptr->nextB;
               return j;
             }
+
+            C* next()
+            {
+              C* tmp = nodeptr;
+              if (nodeptr)
+                nodeptr = nodeptr->nextB;
+              return tmp;
+            }
         };
+
         /** @brief An iterator over the associated objects. */
         class const_iterator
         {
@@ -5359,19 +5943,46 @@ template <class A, class B, class C> class Association
             C* nodeptr;
           public:
             const_iterator(C* n) : nodeptr(n) {};
-            const C& operator*() const {return *nodeptr;}
-            const C* operator->() const {return nodeptr;}
+
+            const C& operator*() const
+            {
+              return *nodeptr;
+            }
+
+            const C* operator->() const
+            {
+              return nodeptr;
+            }
+
             bool operator==(const const_iterator& x) const
-            {return nodeptr == x.nodeptr;}
+            {
+              return nodeptr == x.nodeptr;
+            }
+
             bool operator!=(const const_iterator& x) const
-            {return nodeptr != x.nodeptr;}
+            {
+              return nodeptr != x.nodeptr;
+            }
+
             const_iterator& operator++()
-            {nodeptr = nodeptr->nextB; return *this;}
+            {
+              nodeptr = nodeptr->nextB;
+              return *this;
+            }
+
             const_iterator operator++(int i)
             {
               const_iterator j = *this;
-              nodeptr = nodeptr->nextA;
+              nodeptr = nodeptr->nextB;
               return j;
+            }
+
+            C* next()
+            {
+              C* tmp = nodeptr;
+              if (nodeptr)
+                nodeptr = nodeptr->nextB;
+              return tmp;
             }
         };
 
@@ -5385,10 +5996,26 @@ template <class A, class B, class C> class Association
             delete p;
           }
         }
-        iterator begin() {return iterator(this->first);}
-        const_iterator begin() const {return const_iterator(this->first);}
-        iterator end() {return iterator(NULL);}
-        const_iterator end() const {return const_iterator(NULL);}
+
+        iterator begin()
+        {
+          return iterator(this->first);
+        }
+
+        const_iterator begin() const
+        {
+          return const_iterator(this->first);
+        }
+
+        iterator end()
+        {
+          return iterator(NULL);
+        }
+
+        const_iterator end() const
+        {
+          return const_iterator(NULL);
+        }
 
         /** Remove an association. */
         void erase(const C* n)
@@ -5416,7 +6043,7 @@ template <class A, class B, class C> class Association
         /** Search for the association effective at a certain date. */
         C* find(const A* b, Date d = Date::infinitePast) const
         {
-          for (C* p=this->first; p; p=p->nextB)
+          for (C* p = this->first; p; p = p->nextB)
             if (p->ptrA == b && p->effectivity.within(d)) return p;
           return NULL;
         }
@@ -5424,7 +6051,7 @@ template <class A, class B, class C> class Association
         /** Search for the association with a certain name. */
         C* find(const string& n) const
         {
-          for (C* p=this->first; p; p=p->nextB)
+          for (C* p = this->first; p; p = p->nextB)
             if (p->name == n) return p;
           return NULL;
         }
@@ -5538,42 +6165,946 @@ template <class A, class B, class C> class Association
           setPtrB(b, bl);
         }
 
-        A* getPtrA() const {return ptrA;}
+        A* getPtrA() const
+        {
+          return ptrA;
+        }
 
-        B* getPtrB() const {return ptrB;}
+        B* getPtrB() const
+        {
+          return ptrB;
+        }
 
         /** Update the start date of the effectivity range. */
-        void setEffectiveStart(Date d) {effectivity.setStart(d);}
+        void setEffectiveStart(Date d)
+        {
+          effectivity.setStart(d);
+        }
 
         /** Update the end date of the effectivity range. */
-        void setEffectiveEnd(Date d) {effectivity.setEnd(d);}
+        void setEffectiveEnd(Date d)
+        {
+          effectivity.setEnd(d);
+        }
 
         /** Update the effectivity range. */
-        void setEffective(DateRange dr) {effectivity = dr;}
+        void setEffective(DateRange dr)
+        {
+          effectivity = dr;
+        }
+
+        /** Get the start date of the effectivity range. */
+        Date getEffectiveStart() const
+        {
+          return effectivity.getStart();
+        }
+
+        /** Get the end date of the effectivity range. */
+        Date getEffectiveEnd() const
+        {
+          return effectivity.getEnd();
+        }
 
         /** Return the effectivity daterange.<br>
           * The default covers the complete time horizon.
           */
-        DateRange getEffective() const {return effectivity;}
+        DateRange getEffective() const
+        {
+          return effectivity;
+        }
 
-        /** Sets an optional name for the association.<br>
-          * There is no garantuee of the uniqueness of this name.
+        /** Sets an optional, non-unique name for the association.<br>
+          * All associations with the same name are considered alternates
+          * of each other.
           */
-        void setName(const string x) {name = x;}
+        void setName(const string& x)
+        {
+          name = x;
+        }
 
         /** Return the optional name of the association. */
-        const string& getName() const {return name;}
-        
+        string getName() const
+        {
+          return name;
+        }
+
         /** Update the priority. */
-        void setPriority(int i) {priority = i;}
+        void setPriority(int i)
+        {
+          priority = i;
+        }
 
         /** Return the priority. */
-        int getPriority() const {return priority;}
+        int getPriority() const
+        {
+          return priority;
+        }
     };
+
+    static Object* reader(const MetaClass* cat, const DataValueDict& in)
+    {
+      // Pick up the action attribute
+      Action act = MetaClass::decodeAction(in);
+      Object* obj = C::finder(in);
+
+      switch (act)
+      {
+        case REMOVE:
+          if (!obj)
+            throw DataException("Can't find object for removal");
+          delete obj;
+          return NULL;
+        case CHANGE:
+          if (!obj)
+            throw DataException("Object doesn't exist");
+          return obj;
+        case ADD:
+          if (obj)
+            throw DataException("Object already exists");
+        default:
+          /* Lookup the class in the map of registered classes. */
+          const MetaClass* j;
+          if (cat->category)
+            // Class metadata passed: we already know what type to create
+            j = cat;
+          else
+          {
+            // Category metadata passed: we need to look up the type
+            const DataValue* type = in.get(Tags::type);
+            j = static_cast<const MetaCategory&>(*cat).findClass(
+              type ? Keyword::hash(type->getString()) : MetaCategory::defaultHash
+              );
+            if (!j)
+            {
+              string t(type ? type->getString() : "default");
+              throw LogicException("No type " + t + " registered for category " + cat->type);
+            }
+          }
+
+          // Call the factory method
+          assert(j->factoryMethod);
+          Object* result = j->factoryMethod();
+
+          // Run the callback methods
+          if (!result->getType().raiseEvent(result, SIG_ADD))
+          {
+            // Creation denied
+            delete result;
+            throw DataException("Can't create object");
+          }
+
+          // Creation accepted
+          return result;
+      }
+      throw LogicException("Unreachable code reached");
+      return NULL;
+    }
 };
 
 
 #include "frepple/entity.h"
+
+
+//
+// META FIELD DEFINITIONS
+//
+
+
+template <class Cls> class MetaFieldString : public MetaFieldBase
+{
+  public:
+    typedef void (Cls::*setFunction)(const string&);
+
+    typedef string (Cls::*getFunction)(void) const;
+
+    MetaFieldString(const Keyword& n,
+        getFunction getfunc,
+        setFunction setfunc = NULL,
+        string dflt = "",
+        unsigned int c = BASE
+        ) : MetaFieldBase(n, c), getf(getfunc), setf(setfunc), def(dflt)
+    {
+      if (getfunc == NULL)
+        throw DataException("Getter function can't be NULL");
+    };
+
+    virtual void setField(Object* me, const DataValue& el) const
+    {
+      if (setf == NULL)
+      {
+        ostringstream o;
+        o << "Can't set field " << getName().getName() << " on class " << me->getType().type;
+        throw DataException(o.str());
+      }
+      (static_cast<Cls*>(me)->*setf)(el.getString());
+    }
+
+    virtual void getField(Object* me, DataValue& el) const
+    {
+      el.setString((static_cast<Cls*>(me)->*getf)());
+    }
+
+    virtual void writeField(Serializer& output) const
+    {
+      if (getFlag(DONT_SERIALIZE))
+        return;
+      string tmp = (static_cast<Cls*>(output.getCurrentObject())->*getf)();
+      if (tmp != def)
+        output.writeElement(getName(), tmp);
+    }
+
+    virtual size_t getSize(const Object* o) const
+    {
+      return (static_cast<const Cls*>(o)->*getf)().size();
+    }
+
+  protected:
+    /** Get function. */
+    getFunction getf;
+
+    /** Set function. */
+    setFunction setf;
+
+    /** Default value */
+    string def;
+};
+
+
+template <class Cls> class MetaFieldBool : public MetaFieldBase
+{
+  public:
+    typedef void (Cls::*setFunction)(bool);
+
+    typedef bool (Cls::*getFunction)(void) const;
+
+    MetaFieldBool(const Keyword& n,
+        getFunction getfunc,
+        setFunction setfunc = NULL,
+        tribool d = BOOL_UNSET,
+        unsigned int c = BASE
+        ) : MetaFieldBase(n, c), getf(getfunc), setf(setfunc), def(d)
+    {
+      if (getfunc == NULL)
+        throw DataException("Getter function can't be NULL");
+    };
+
+    virtual void setField(Object* me, const DataValue& el) const
+    {
+      if (setf == NULL)
+      {
+        ostringstream o;
+        o << "Can't set field " << getName().getName() << " on class " << me->getType().type;
+        throw DataException(o.str());
+      }
+      (static_cast<Cls*>(me)->*setf)(el.getBool());
+    }
+
+    virtual void getField(Object* me, DataValue& el) const
+    {
+      el.setBool((static_cast<Cls*>(me)->*getf)());
+    }
+
+    virtual void writeField(Serializer& output) const
+    {
+      if (getFlag(DONT_SERIALIZE))
+        return;
+      bool tmp = (static_cast<Cls*>(output.getCurrentObject())->*getf)();
+      if (def == BOOL_UNSET || (def == BOOL_TRUE && !tmp) || (def == BOOL_FALSE && tmp))
+        output.writeElement(getName(), tmp);
+    }
+
+  protected:
+    /** Get function. */
+    getFunction getf;
+
+    /** Set function. */
+    setFunction setf;
+
+    /** Default value */
+    tribool def;
+};
+
+
+template <class Cls> class MetaFieldDouble : public MetaFieldBase
+{
+  public:
+    typedef void (Cls::*setFunction)(double);
+
+    typedef double (Cls::*getFunction)(void) const;
+
+    MetaFieldDouble(const Keyword& n,
+        getFunction getfunc,
+        setFunction setfunc = NULL,
+        double d = 0.0,
+        unsigned int c = BASE
+        ) : MetaFieldBase(n, c), getf(getfunc), setf(setfunc), def(d)
+    {
+      if (getfunc == NULL)
+        throw DataException("Getter function can't be NULL");
+    };
+
+    virtual void setField(Object* me, const DataValue& el) const
+    {
+      if (setf == NULL)
+      {
+        ostringstream o;
+        o << "Can't set field " << getName().getName() << " on class " << me->getType().type;
+        throw DataException(o.str());
+      }
+      (static_cast<Cls*>(me)->*setf)(el.getDouble());
+    }
+
+    virtual void getField(Object* me, DataValue& el) const
+    {
+      el.setDouble((static_cast<Cls*>(me)->*getf)());
+    }
+
+    virtual void writeField(Serializer& output) const
+    {
+      if (getFlag(DONT_SERIALIZE))
+        return;
+      double tmp = (static_cast<Cls*>(output.getCurrentObject())->*getf)();
+      if (tmp != def)
+        output.writeElement(getName(), tmp);
+    }
+
+  protected:
+    /** Get function. */
+    getFunction getf;
+
+    /** Set function. */
+    setFunction setf;
+
+    /** Defaut value. */
+    double def;
+};
+
+
+template <class Cls> class MetaFieldInt : public MetaFieldBase
+{
+  public:
+    typedef void (Cls::*setFunction)(int);
+
+    typedef int (Cls::*getFunction)(void) const;
+
+    MetaFieldInt(const Keyword& n,
+        getFunction getfunc,
+        setFunction setfunc = NULL,
+        int d = 0,
+        unsigned int c = BASE
+        ) : MetaFieldBase(n, c), getf(getfunc), setf(setfunc), def(d)
+    {
+      if (getfunc == NULL)
+        throw DataException("Getter function can't be NULL");
+    };
+
+    virtual void setField(Object* me, const DataValue& el) const
+    {
+      if (setf == NULL)
+      {
+        ostringstream o;
+        o << "Can't set field " << getName().getName() << " on class " << me->getType().type;
+        throw DataException(o.str());
+      }
+      (static_cast<Cls*>(me)->*setf)(el.getInt());
+    }
+
+    virtual void getField(Object* me, DataValue& el) const
+    {
+      el.setInt((static_cast<Cls*>(me)->*getf)());
+    }
+
+    virtual void writeField(Serializer& output) const
+    {
+      if (getFlag(DONT_SERIALIZE))
+        return;
+      int tmp = (static_cast<Cls*>(output.getCurrentObject())->*getf)();
+      if (tmp != def)
+        output.writeElement(getName(), tmp);
+    }
+
+  protected:
+    /** Get function. */
+    getFunction getf;
+
+    /** Set function. */
+    setFunction setf;
+
+    /** Defaut value. */
+    int def;
+};
+
+
+template <class Cls, class Enum> class MetaFieldEnum : public MetaFieldBase
+{
+  public:
+    typedef void (Cls::*setFunction)(string);
+
+    typedef Enum (Cls::*getFunction)(void) const;
+
+    MetaFieldEnum(const Keyword& n,
+        getFunction getfunc,
+        setFunction setfunc,
+        Enum d,
+        unsigned int c = BASE
+        ) : MetaFieldBase(n, c), getf(getfunc), setf(setfunc), def(d)
+    {
+      if (getfunc == NULL)
+        throw DataException("Getter function can't be NULL");
+    };
+
+    virtual void setField(Object* me, const DataValue& el) const
+    {
+      if (setf == NULL)
+      {
+        ostringstream o;
+        o << "Can't set field " << getName().getName() << " on class " << me->getType().type;
+        throw DataException(o.str());
+      }
+      (static_cast<Cls*>(me)->*setf)(el.getString());
+    }
+
+    virtual void getField(Object* me, DataValue& el) const
+    {
+      el.setInt((static_cast<Cls*>(me)->*getf)());
+    }
+
+    virtual void writeField(Serializer& output) const
+    {
+      if (getFlag(DONT_SERIALIZE))
+        return;
+      Enum tmp = (static_cast<Cls*>(output.getCurrentObject())->*getf)();
+      if (tmp != def)
+        output.writeElement(getName(), tmp);
+    }
+
+  protected:
+    /** Get function. */
+    getFunction getf;
+
+    /** Set function. */
+    setFunction setf;
+
+    /** Defaut value. */
+    Enum def;
+};
+
+
+template <class Cls> class MetaFieldShort : public MetaFieldBase
+{
+  public:
+    typedef void (Cls::*setFunction)(short);
+
+    typedef short (Cls::*getFunction)(void) const;
+
+    MetaFieldShort(const Keyword& n,
+        getFunction getfunc,
+        setFunction setfunc = NULL,
+        short d = 0,
+        unsigned int c = BASE
+        ) : MetaFieldBase(n, c), getf(getfunc), setf(setfunc), def(d)
+    {
+      if (getfunc == NULL)
+        throw DataException("Getter function can't be NULL");
+    };
+
+    virtual void setField(Object* me, const DataValue& el) const
+    {
+      if (setf == NULL)
+      {
+        ostringstream o;
+        o << "Can't set field " << getName().getName() << " on class " << me->getType().type;
+        throw DataException(o.str());
+      }
+      (static_cast<Cls*>(me)->*setf)(el.getInt());
+    }
+
+    virtual void getField(Object* me, DataValue& el) const
+    {
+      el.setInt((static_cast<Cls*>(me)->*getf)());
+    }
+
+    virtual void writeField(Serializer& output) const
+    {
+      if (getFlag(DONT_SERIALIZE))
+        return;
+      int tmp = (static_cast<Cls*>(output.getCurrentObject())->*getf)();
+      if (tmp != def)
+        output.writeElement(getName(), tmp);
+    }
+
+  protected:
+    /** Get function. */
+    getFunction getf;
+
+    /** Set function. */
+    setFunction setf;
+
+    /** Defaut value. */
+    short def;
+};
+
+
+template <class Cls> class MetaFieldUnsignedLong : public MetaFieldBase
+{
+  public:
+    typedef void (Cls::*setFunction)(unsigned long);
+
+    typedef unsigned long (Cls::*getFunction)(void) const;
+
+    MetaFieldUnsignedLong(const Keyword& n,
+        getFunction getfunc,
+        setFunction setfunc = NULL,
+        unsigned long d = 0,
+        unsigned int c = BASE
+        ) : MetaFieldBase(n, c), getf(getfunc), setf(setfunc), def(d)
+    {
+      if (getfunc == NULL)
+        throw DataException("Getter function can't be NULL");
+    };
+
+    virtual void setField(Object* me, const DataValue& el) const
+    {
+      if (setf == NULL)
+      {
+        ostringstream o;
+        o << "Can't set field " << getName().getName() << " on class " << me->getType().type;
+        throw DataException(o.str());
+      }
+      (static_cast<Cls*>(me)->*setf)(el.getUnsignedLong());
+    }
+
+    virtual void getField(Object* me, DataValue& el) const
+    {
+      el.setUnsignedLong((static_cast<Cls*>(me)->*getf)());
+    }
+
+    virtual void writeField(Serializer& output) const
+    {
+      if (getFlag(DONT_SERIALIZE))
+        return;
+      unsigned long tmp = (static_cast<Cls*>(output.getCurrentObject())->*getf)();
+      if (tmp != def)
+        output.writeElement(getName(), tmp);
+    }
+
+  protected:
+    /** Get function. */
+    getFunction getf;
+
+    /** Set function. */
+    setFunction setf;
+
+    /** Defaut value. */
+    unsigned long def;
+};
+
+
+template <class Cls> class MetaFieldDuration : public MetaFieldBase
+{
+  public:
+    typedef void (Cls::*setFunction)(Duration);
+
+    typedef Duration (Cls::*getFunction)(void) const;
+
+    MetaFieldDuration(const Keyword& n,
+        getFunction getfunc,
+        setFunction setfunc = NULL,
+        Duration d = 0,
+        unsigned int c = BASE
+        ) : MetaFieldBase(n, c), getf(getfunc), setf(setfunc), def(d)
+    {
+      if (getfunc == NULL)
+        throw DataException("Getter function can't be NULL");
+    };
+
+    virtual void setField(Object* me, const DataValue& el) const
+    {
+      if (setf == NULL)
+      {
+        ostringstream o;
+        o << "Can't set field " << getName().getName() << " on class " << me->getType().type;
+        throw DataException(o.str());
+      }
+      (static_cast<Cls*>(me)->*setf)(el.getDuration());
+    }
+
+    virtual void getField(Object* me, DataValue& el) const
+    {
+      el.setDuration((static_cast<Cls*>(me)->*getf)());
+    }
+
+    virtual void writeField(Serializer& output) const
+    {
+      if (getFlag(DONT_SERIALIZE))
+        return;
+      Duration tmp = (static_cast<Cls*>(output.getCurrentObject())->*getf)();
+      if (tmp != def)
+        output.writeElement(getName(), tmp);
+    }
+
+  protected:
+    /** Get function. */
+    getFunction getf;
+
+    /** Set function. */
+    setFunction setf;
+
+    /** Default value. */
+    Duration def;
+};
+
+
+template <class Cls> class MetaFieldDurationDouble : public MetaFieldBase
+{
+  public:
+    typedef void (Cls::*setFunction)(double);
+
+    typedef double (Cls::*getFunction)(void) const;
+
+    MetaFieldDurationDouble(const Keyword& n,
+        getFunction getfunc,
+        setFunction setfunc = NULL,
+        double d = 0,
+        unsigned int c = BASE
+        ) : MetaFieldBase(n, c), getf(getfunc), setf(setfunc), def(d)
+    {
+      if (getfunc == NULL)
+        throw DataException("Getter function can't be NULL");
+    };
+
+    virtual void setField(Object* me, const DataValue& el) const
+    {
+      if (setf == NULL)
+      {
+        ostringstream o;
+        o << "Can't set field " << getName().getName() << " on class " << me->getType().type;
+        throw DataException(o.str());
+      }
+      (static_cast<Cls*>(me)->*setf)(Duration::parse2double(el.getString().c_str()));
+    }
+
+    virtual void getField(Object* me, DataValue& el) const
+    {
+      el.setDouble((static_cast<Cls*>(me)->*getf)());
+    }
+
+    virtual void writeField(Serializer& output) const
+    {
+      if (getFlag(DONT_SERIALIZE))
+        return;
+      double tmp = (static_cast<Cls*>(output.getCurrentObject())->*getf)();
+      if (tmp != def)
+      {
+        char t[65];
+        Duration::double2CharBuffer(tmp, t);
+        output.writeElement(getName(), t);
+      }
+    }
+
+  protected:
+    /** Get function. */
+    getFunction getf;
+
+    /** Set function. */
+    setFunction setf;
+
+    /** Default value. */
+    double def;
+};
+
+
+template <class Cls> class MetaFieldDate : public MetaFieldBase
+{
+  public:
+    typedef void (Cls::*setFunction)(Date);
+
+    typedef Date (Cls::*getFunction)(void) const;
+
+    MetaFieldDate(const Keyword& n,
+        getFunction getfunc,
+        setFunction setfunc = NULL,
+        Date d = Date::infinitePast,
+        unsigned int c = BASE
+        ) : MetaFieldBase(n, c), getf(getfunc), setf(setfunc), def(d)
+    {
+      if (getfunc == NULL)
+        throw DataException("Getter function can't be NULL");
+    };
+
+    virtual void setField(Object* me, const DataValue& el) const
+    {
+      if (setf == NULL)
+      {
+        ostringstream o;
+        o << "Can't set field " << getName().getName() << " on class " << me->getType().type;
+        throw DataException(o.str());
+      }
+      (static_cast<Cls*>(me)->*setf)(el.getDate());
+    }
+
+    virtual void getField(Object* me, DataValue& el) const
+    {
+      el.setDate((static_cast<Cls*>(me)->*getf)());
+    }
+
+    virtual void writeField(Serializer& output) const
+    {
+      if (getFlag(DONT_SERIALIZE))
+        return;
+      Date tmp = (static_cast<Cls*>(output.getCurrentObject())->*getf)();
+      if (tmp != def)
+        output.writeElement(getName(), tmp);
+    }
+
+  protected:
+    /** Get function. */
+    getFunction getf;
+
+    /** Set function. */
+    setFunction setf;
+
+    /** Default value. */
+    Date def;
+};
+
+
+template <class Cls, class Ptr> class MetaFieldPointer : public MetaFieldBase
+{
+  public:
+    typedef void (Cls::*setFunction)(Ptr*);
+
+    typedef Ptr* (Cls::*getFunction)(void) const;
+
+    MetaFieldPointer(const Keyword& n,
+        getFunction getfunc,
+        setFunction setfunc = NULL,
+        unsigned int c = BASE
+        ) : MetaFieldBase(n, c), getf(getfunc), setf(setfunc)
+    {
+      if (getfunc == NULL)
+        throw DataException("Getter function can't be NULL");
+    };
+
+    virtual void setField(Object* me, const DataValue& el) const
+    {
+      if (setf == NULL)
+      {
+        ostringstream o;
+        o << "Can't set field " << getName().getName() << " on class " << me->getType().type;
+        throw DataException(o.str());
+      }
+      Ptr *obj = static_cast<Ptr*>(el.getObject());
+      if (!obj || (obj && (
+        (obj->getType().category && *(obj->getType().category) == *(Ptr::metadata))
+        || obj->getType() == *(Ptr::metadata)))
+        )
+        (static_cast<Cls*>(me)->*setf)(obj);
+      else
+      {
+        ostringstream o;
+        o << "Expecting value of type " << Ptr::metadata->type
+          << " for field " << getName().getName()
+          << " on class " << me->getType().type;
+        throw DataException(o.str());
+      }
+    }
+
+    virtual void getField(Object* me, DataValue& el) const
+    {
+      el.setObject((static_cast<Cls*>(me)->*getf)());
+    }
+
+    virtual void writeField(Serializer& output) const
+    {
+      if (getFlag(DONT_SERIALIZE))
+        return;
+      if (getFlag(WRITE_FULL))
+        output.decParents();
+      // Imagine object A refers to object B. Both objects have fields
+      // referring the other. When serializing object A, we also serialize
+      // object B but we skip saving the reference back to A.
+      Ptr* c = (static_cast<Cls*>(output.getCurrentObject())->*getf)();
+      if (c && output.getPreviousObject() != c)
+        output.writeElement(getName(), c);
+      if (getFlag(WRITE_FULL))
+        output.incParents();
+    }
+
+    virtual bool isPointer() const
+    {
+      return true;
+    }
+
+    virtual const MetaClass* getClass() const
+    {
+      return Ptr::metadata;
+    }
+
+  protected:
+    /** Get function. */
+    getFunction getf;
+
+    /** Set function. */
+    setFunction setf;
+};
+
+
+template <class Cls, class Iter, class PyIter, class Ptr> class MetaFieldIterator : public MetaFieldBase
+{
+  public:
+    typedef Iter (Cls::*getFunction)(void) const;
+
+    MetaFieldIterator(const Keyword& g,
+        const Keyword& n,
+        getFunction getfunc = NULL,
+        unsigned int c = BASE
+        ) : MetaFieldBase(g, c), getf(getfunc), singleKeyword(n) {};
+
+    virtual void setField(Object* me, const DataValue& el) const {}
+
+    virtual void getField(Object* me, DataValue& el) const
+    {
+      // This code is Python-specific. Only from Python can we call
+      // this method. Not generic, but good enough...
+      // TODO avoid calling the copy constructor here to improve performance!
+      PyIter *o = new PyIter((static_cast<Cls*>(me)->*getf)());
+      el.setObject(o);
+    }
+
+    virtual void writeField(Serializer& output) const
+    {
+      switch (output.getContentType())
+      {
+        case MANDATORY:
+          if (!getFlag(MANDATORY))
+            return;
+          break;
+        case BASE:
+          if (getFlag(DETAIL) || getFlag(PLAN))
+            return;
+          break;
+        case DETAIL:
+          if (!getFlag(DETAIL))
+            return;
+          break;
+        case PLAN:
+          if (!getFlag(PLAN))
+            return;
+          break;
+        default:
+          break;
+      }
+      if (getFlag(DONT_SERIALIZE) || !getf)
+        return;
+      if (getFlag(WRITE_FULL))
+        output.decParents();
+      if (getFlag(WRITE_HIDDEN))
+        output.setWriteHidden(true);
+      bool first = true;
+      Iter it = (static_cast<Cls*>(output.getCurrentObject())->*getf)();
+      while (Ptr* ob = static_cast<Ptr*>(it.next()))
+      {
+        if (first && (getFlag(WRITE_HIDDEN) || !ob->getHidden()))
+        {
+          output.BeginList(getName());
+          first = false;
+        }
+        output.writeElement(singleKeyword, ob, output.getContentType());
+      }
+      if (getFlag(WRITE_HIDDEN))
+        output.setWriteHidden(false);
+      if (getFlag(WRITE_FULL))
+        output.incParents();
+      if (!first)
+        output.EndList(getName());
+    }
+
+    virtual bool isGroup() const
+    {
+      return true;
+    }
+
+    virtual const MetaClass* getClass() const
+    {
+      return Ptr::metadata;
+    }
+
+    virtual const Keyword* getKeyword() const
+    {
+      return &singleKeyword;
+    }
+
+  protected:
+    /** Get function. */
+    getFunction getf;
+
+    const Keyword& singleKeyword;
+};
+
+
+template <class Cls, class Ptr, class Ptr2> class MetaFieldList : public MetaFieldBase
+{
+  public:
+    typedef const Ptr& (Cls::*getFunction)(void) const;
+
+    MetaFieldList(const Keyword& g,
+        const Keyword& n,
+        getFunction getfunc,
+        unsigned int c = BASE
+        ) : MetaFieldBase(g, c), getf(getfunc), singleKeyword(n)
+    {
+      if (getfunc == NULL)
+        throw DataException("Getter function can't be NULL");
+    };
+
+    virtual void setField(Object* me, const DataValue& el) const {}
+
+    virtual void getField(Object* me, DataValue& el) const
+    {
+      throw LogicException("GetField not implemented for list fields");
+    }
+
+    virtual void writeField(Serializer& output) const
+    {
+      if (getFlag(DONT_SERIALIZE))
+        return;
+      bool first = true;
+      Ptr lst = (static_cast<Cls*>(output.getCurrentObject())->*getf)();
+      for (typename Ptr::iterator i = lst.begin(); i != lst.end(); ++i)
+      {
+        if (first)
+        {
+          output.BeginList(getName());
+          first = false;
+        }
+        output.writeElement(singleKeyword, *i);
+      }
+      if (!first)
+        output.EndList(getName());
+    }
+
+    virtual bool isGroup() const
+    {
+      return true;
+    }
+
+    virtual const MetaClass* getClass() const
+    {
+      return Ptr2::metadata;
+    }
+
+    virtual const Keyword* getKeyword() const
+    {
+      return &singleKeyword;
+    }
+
+  protected:
+    /** Get function. */
+    getFunction getf;
+
+    const Keyword& singleKeyword;
+};
 
 
 //
@@ -5593,53 +7124,59 @@ class LibraryUtils
     static void initialize();
 };
 
-/** @brief A template class to expose iterators to Python. */
-template <class ME, class ITERCLASS, class DATACLASS>
-class FreppleIterator : public PythonExtension<ME>
-{
-  public:
-    static int initialize()
-    {
-      // Initialize the type
-      PythonType& x = PythonExtension<ME>::getType();
-      x.setName(DATACLASS::metadata->type + "Iterator");
-      x.setDoc("frePPLe iterator for " + DATACLASS::metadata->type);
-      x.supportiter();
-      return x.typeReady();
-    }
-
-    FreppleIterator() : i(DATACLASS::begin())
-    {this->initType(PythonExtension<ME>::getType().type_object());}
-
-    template <class OTHER> FreppleIterator(const OTHER *o) : i(o)
-    {this->initType(PythonExtension<ME>::getType().type_object());}
-
-    template <class OTHER> FreppleIterator(const OTHER &o) : i(o)
-    {this->initType(PythonExtension<ME>::getType().type_object());}
-
-    static PyObject* create(PyObject* self, PyObject* args)
-    {return new ME();}
-
-  private:
-    ITERCLASS i;
-
-    virtual PyObject* iternext()
-    {
-      if (i == DATACLASS::end()) return NULL;
-      PyObject* result = &*i;
-      ++i;
-      Py_INCREF(result);
-      return result;
-    }
-};
 
 /** @brief This Python function loads a frepple extension module in memory. */
 DECLARE_EXPORT PyObject* loadModule(PyObject*, PyObject*, PyObject*);
 
 
-} // end namespace
-} // end namespace
+/** @brief A template class to expose category classes which use a string
+  * as the key to Python. */
+template <class T>
+class FreppleCategory : public PythonExtension< FreppleCategory<T> >
+{
+  public:
+    /** Initialization method. */
+    static int initialize()
+    {
+      // Initialize the type
+      PythonType& x = PythonExtension< FreppleCategory<T> >::getPythonType();
+      x.setName(T::metadata->type);
+      x.setDoc("frePPLe " + T::metadata->type);
+      x.supportgetattro();
+      x.supportsetattro();
+      x.supportstr();
+      x.supportcompare();
+      x.supportcreate(Object::create<T>);
+      const_cast<MetaCategory*>(T::metadata)->pythonClass = x.type_object();
+      return x.typeReady();
+    }
+};
 
-#include "pythonutils.h"
+
+/** @brief A template class to expose classes to Python. */
+template <class ME, class BASE>
+class FreppleClass  : public PythonExtension< FreppleClass<ME,BASE> >
+{
+  public:
+    static int initialize()
+    {
+      // Initialize the type
+      PythonType& x = PythonExtension< FreppleClass<ME,BASE> >::getPythonType();
+      x.setName(ME::metadata->type);
+      x.setDoc("frePPLe " + ME::metadata->type);
+      x.supportgetattro();
+      x.supportsetattro();
+      x.supportstr();
+      x.supportcompare();
+      x.supportcreate(Object::create<ME>);
+      x.setBase(BASE::metadata->pythonClass);
+      x.addMethod("toXML", ME::toXML, METH_VARARGS, "return a XML representation");
+      const_cast<MetaClass*>(ME::metadata)->pythonClass = x.type_object();
+      return x.typeReady();
+    }
+};
+
+} // end namespace
+} // end namespace
 
 #endif  // End of FREPPLE_UTILS_H

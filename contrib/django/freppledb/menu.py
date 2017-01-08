@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 by Johan De Taeye, frePPLe bvba
+# Copyright (C) 2013 by frePPLe bvba
 #
 # This library is free software; you can redistribute it and/or modify it
 # under the terms of the GNU Affero General Public License as published
@@ -15,8 +15,9 @@
 # License along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 
+from importlib import import_module
+
 from django.conf import settings
-from django.utils.importlib import import_module
 from django.utils.translation import ugettext_lazy as _
 
 from freppledb.common.menus import Menu
@@ -26,11 +27,21 @@ from freppledb.common.menus import Menu
 menu = Menu()
 
 # Add our default topics.
-menu.addGroup("input", label=_("Input"), index=100)
-menu.addGroup("reports", label=_("Reports"), index=200)
-menu.addGroup("admin", label=_("Admin"), index=300)
-menu.addGroup("user", label=_("User"), index=400)
-menu.addGroup("help", label="?", index=500)
+menu.addGroup("sales", label=_("Sales"), index=100)
+menu.addGroup("inventory", label=_("Inventory"), index=200)
+menu.addGroup("capacity", label=_("Capacity"), index=300)
+menu.addGroup("purchasing", label=_("Purchasing"), index=400)
+menu.addGroup("distribution", label=_("Distribution"), index=500)
+menu.addGroup("manufacturing", label=_("Manufacturing"), index=600)
+menu.addGroup("admin", label=_("Admin"), index=700)
+menu.addGroup("help", label=_("Help"), index=800)
+menu.addItem("sales", "data", separator=True, index=1000)
+menu.addItem("inventory", "data", separator=True, index=1000)
+menu.addItem("capacity", "data", separator=True, index=1000)
+menu.addItem("purchasing", "data", separator=True, index=1000)
+menu.addItem("distribution", "data", separator=True, index=1000)
+menu.addItem("manufacturing", "data", separator=True, index=1000)
+menu.addItem("admin", "data", separator=True, index=1000)
 
 # Adding the menu modules of each installed application.
 # Note that the menus of the apps are processed in reverse order.
@@ -41,4 +52,5 @@ for app in reversed(settings.INSTALLED_APPS):
     mod = import_module('%s.menu' % app)
   except ImportError as e:
     # Silently ignore if it's the menu module which isn't found
-    if str(e) != 'No module named menu': raise e
+    if str(e) not in ("No module named %s.menu" % app, "No module named '%s.menu'" % app):
+      raise e

@@ -1,4 +1,3 @@
-;(function($){
 /**
  * jqGrid Greek (el) Translation
  * Alex Cicovic
@@ -7,20 +6,34 @@
  * http://www.opensource.org/licenses/mit-license.php
  * http://www.gnu.org/licenses/gpl.html
 **/
-$.jgrid = $.jgrid || {};
-$.extend($.jgrid,{
+
+/*jslint white: true */
+/*global jQuery */
+(function($){
+"use strict";
+var locInfo = {
+	isRTL: false,
 	defaults : {
 		recordtext: "View {0} - {1} of {2}",
 	    emptyrecords: "No records to view",
 		loadtext: "Φόρτωση...",
-		pgtext : "Page {0} of {1}"
+		pgtext : "Page {0} of {1}",
+		pgfirst : "First Page",
+		pglast : "Last Page",
+		pgnext : "Next Page",
+		pgprev : "Previous Page",
+		pgrecs : "Records per Page",
+		showhide: "Toggle Expand Collapse Grid",
+		savetext: "Αποθήκευση..."
 	},
 	search : {
 	    caption: "Αναζήτηση...",
 	    Find: "Εύρεση",
 	    Reset: "Επαναφορά",
-	    odata: [{ oper:'eq', text:'equal'},{ oper:'ne', text:'not equal'},{ oper:'lt', text:'less'},{ oper:'le', text:'less or equal'},{ oper:'gt', text:'greater'},{ oper:'ge', text:'greater or equal'},{ oper:'bw', text:'begins with'},{ oper:'bn', text:'does not begin with'},{ oper:'in', text:'is in'},{ oper:'ni', text:'is not in'},{ oper:'ew', text:'ends with'},{ oper:'en', text:'does not end with'},{ oper:'cn', text:'contains'},{ oper:'nc', text:'does not contain'}],
-	    groupOps: [	{ op: "AND", text: "all" },	{ op: "OR",  text: "any" }	]
+	    odata: [{ oper:'eq', text:'equal'},{ oper:'ne', text:'not equal'},{ oper:'lt', text:'less'},{ oper:'le', text:'less or equal'},{ oper:'gt', text:'greater'},{ oper:'ge', text:'greater or equal'},{ oper:'bw', text:'begins with'},{ oper:'bn', text:'does not begin with'},{ oper:'in', text:'is in'},{ oper:'ni', text:'is not in'},{ oper:'ew', text:'ends with'},{ oper:'en', text:'does not end with'},{ oper:'cn', text:'contains'},{ oper:'nc', text:'does not contain'},{ oper:'nu', text:'is null'},{ oper:'nn', text:'is not null'}],
+	    groupOps: [	{ op: "AND", text: "all" },	{ op: "OR",  text: "any" }	],
+		operandTitle : "Click to select search operation.",
+		resetTitle : "Reset Search Value"
 	},
 	edit : {
 	    addCaption: "Εισαγωγή Εγγραφής",
@@ -57,13 +70,13 @@ $.extend($.jgrid,{
 	    bCancel: "Άκυρο"
 	},
 	nav : {
-		edittext: " ",
+		edittext: "",
 	    edittitle: "Επεξεργασία επιλεγμένης εγγραφής",
-		addtext:" ",
+		addtext: "",
 	    addtitle: "Εισαγωγή νέας εγγραφής",
-	    deltext: " ",
+	    deltext: "",
 	    deltitle: "Διαγραφή επιλεγμένης εγγραφής",
-	    searchtext: " ",
+	    searchtext: "",
 	    searchtitle: "Εύρεση Εγγραφών",
 	    refreshtext: "",
 	    refreshtitle: "Ανανέωση Πίνακα",
@@ -97,30 +110,34 @@ $.extend($.jgrid,{
 				"Ιανουάριος", "Φεβρουάριος", "Μάρτιος", "Απρίλιος", "Μάιος", "Ιούνιος", "Ιούλιος", "Αύγουστος", "Σεπτέμβριος", "Οκτώβριος", "Νοέμβριος", "Δεκέμβριος"
 			],
 			AmPm : ["πμ","μμ","ΠΜ","ΜΜ"],
-			S: function (j) {return j == 1 || j > 1 ? ['η'][Math.min((j - 1) % 10, 3)] : ''},
+			S: function (j) {return j === 1 || j > 1 ? ['η'][Math.min((j - 1) % 10, 3)] : '';},
 			srcformat: 'Y-m-d',
 			newformat: 'd/m/Y',
-			parseRe : /[Tt\\\/:_;.,\t\s-]/,
 			masks : {
-	            ISO8601Long:"Y-m-d H:i:s",
-	            ISO8601Short:"Y-m-d",
 	            ShortDate: "n/j/Y",
 	            LongDate: "l, F d, Y",
 	            FullDateTime: "l, F d, Y g:i:s A",
 	            MonthDay: "F d",
 	            ShortTime: "g:i A",
 	            LongTime: "g:i:s A",
-	            SortableDateTime: "Y-m-d\\TH:i:s",
-	            UniversalSortableDateTime: "Y-m-d H:i:sO",
 	            YearMonth: "F, Y"
-	        },
-	        reformatAfterEdit : false
-		},
-		baseLinkUrl: '',
-		showAction: '',
-	    target: '',
-	    checkbox : {disabled:true},
-		idName : 'id'
+	        }
+		}
+	}
+};
+$.jgrid = $.jgrid || {};
+$.extend(true, $.jgrid, {
+	defaults: {
+		locale: "el"
+	},
+	locales: {
+		// In general the property name is free, but it's recommended to use the names based on
+		// http://www.iana.org/assignments/language-subtag-registry/language-subtag-registry
+		// http://rishida.net/utils/subtags/ and RFC 5646. See Appendix A of RFC 5646 for examples.
+		// One can use the lang attribute to specify language tags in HTML, and the xml:lang attribute for XML
+		// if it exists. See http://www.w3.org/International/articles/language-tags/#extlang
+		el: $.extend({}, locInfo, { name: "Ελληνικά", nameEnglish: "Greek" }),
+		"el-GR": $.extend({}, locInfo, { name: "Ελληνικά (Ελλάδα)", nameEnglish: "Greek (Greece)" })
 	}
 });
-})(jQuery);
+}(jQuery));

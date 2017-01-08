@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba
+# Copyright (C) 2007-2013 by frePPLe bvba
 #
 # This library is free software; you can redistribute it and/or modify it
 # under the terms of the GNU Affero General Public License as published
@@ -18,12 +18,12 @@
 from django.db import connections
 from django.utils.translation import ugettext_lazy as _
 from django.utils.text import capfirst
-from django.utils.encoding import force_unicode
+from django.utils.encoding import force_text
 
 from freppledb.input.models import Item
 from freppledb.output.models import Demand
 from freppledb.common.db import python_date
-from freppledb.common.report import GridReport, GridPivot, GridFieldText, GridFieldNumber, GridFieldDateTime, GridFieldInteger, GridFieldGraph
+from freppledb.common.report import GridReport, GridPivot, GridFieldText, GridFieldNumber, GridFieldDateTime, GridFieldInteger
 
 
 class OverviewReport(GridPivot):
@@ -36,28 +36,28 @@ class OverviewReport(GridPivot):
   model = Item
   permissions = (("view_demand_report", "Can view demand report"),)
   rows = (
-    GridFieldText('item', title=_('item'), key=True, field_name='name', formatter='item', editable=False),
-    GridFieldGraph('graph', title=_('graph'), width="(5*numbuckets<200 ? 5*numbuckets : 200)"),
+    GridFieldText('item', title=_('item'), key=True, editable=False, field_name='name', formatter='detail', extra="role:'input/item'"),
     )
   crosses = (
-    ('demand',{'title': _('demand')}),
-    ('supply',{'title': _('supply')}),
-    ('backlog',{'title': _('backlog')}),
+    ('demand', {'title': _('demand')}),
+    ('supply', {'title': _('supply')}),
+    ('backlog', {'title': _('backlog')}),
     )
 
   @classmethod
   def extra_context(reportclass, request, *args, **kwargs):
     if args and args[0]:
+      request.session['lasttab'] = 'plan'
       return {
-        'title': capfirst(force_unicode(Item._meta.verbose_name) + " " + args[0]),
-        'post_title': ': ' + capfirst(force_unicode(_('plan'))),
+        'title': capfirst(force_text(Item._meta.verbose_name) + " " + args[0]),
+        'post_title': ': ' + capfirst(force_text(_('plan'))),
         }
     else:
       return {}
 
   @staticmethod
   def query(request, basequery, sortsql='1 asc'):
-    basesql, baseparams = basequery.query.get_compiler(basequery.db).as_sql(with_col_aliases=True)
+    basesql, baseparams = basequery.query.get_compiler(basequery.db).as_sql(with_col_aliases=False)
     cursor = connections[request.database].cursor()
 
     # Assure the item hierarchy is up to date
@@ -78,7 +78,8 @@ class OverviewReport(GridPivot):
       ''' % (basesql, request.report_startdate, request.report_startdate)
     cursor.execute(query, baseparams)
     for row in cursor.fetchall():
-      if row[0]: startbacklogdict[row[0]] = float(row[1])
+      if row[0]:
+        startbacklogdict[row[0]] = float(row[1])
 
     # Execute the query
     query = '''
@@ -124,6 +125,7 @@ class OverviewReport(GridPivot):
         and x.enddate > demand.due
         and demand.due >= '%s'
         and demand.due < '%s'
+        and demand.status = 'open'
         -- Grouping
         group by x.name, x.lft, x.rght, x.bucket, x.startdate, x.enddate
         ) y
@@ -134,14 +136,13 @@ class OverviewReport(GridPivot):
               request.report_enddate, request.report_startdate,
               request.report_enddate, request.report_startdate,
               request.report_enddate, sortsql)
-    cursor.execute(query,baseparams)
+    cursor.execute(query, baseparams)
 
     # Build the python result
     previtem = None
     for row in cursor.fetchall():
       if row[0] != previtem:
-        try: backlog =  startbacklogdict[row[0]]
-        except: backlog = 0
+        backlog = startbacklogdict.get(row[0], 0)
         previtem = row[0]
       backlog += float(row[4]) - float(row[5])
       yield {
@@ -149,9 +150,9 @@ class OverviewReport(GridPivot):
         'bucket': row[1],
         'startdate': python_date(row[2]),
         'enddate': python_date(row[3]),
-        'demand': round(row[4],1),
-        'supply': round(row[5],1),
-        'backlog': round(backlog,1),
+        'demand': round(row[4], 1),
+        'supply': round(row[5], 1),
+        'backlog': round(backlog, 1)
         }
 
 
@@ -166,25 +167,19 @@ class DetailReport(GridReport):
   frozenColumns = 0
   editable = False
   multiselect = False
-
-  @ classmethod
-  def basequeryset(reportclass, request, args, kwargs):
-    if args and args[0]:
-      return Demand.objects.filter(item__exact=args[0])
-    else:
-      return Demand.objects.all()
-
-  @classmethod
-  def extra_context(reportclass, request, *args, **kwargs):
-    return {'active_tab': 'plandetail'}
-
   rows = (
-    GridFieldText('demand', title=_('demand'), key=True, editable=False, formatter='demand'),
-    GridFieldText('item', title=_('item'), formatter='item', editable=False),
-    GridFieldText('customer', title=_('customer'), formatter='customer', editable=False),
+    GridFieldText('demand', title=_('demand'), key=True, editable=False, formatter='detail', extra="role:'input/demand'"),
+    GridFieldText('item', title=_('item'), editable=False, formatter='detail', extra="role:'input/item'"),
+    GridFieldText('customer', title=_('customer'), editable=False, formatter='detail', extra="role:'input/customer'"),
     GridFieldNumber('quantity', title=_('quantity'), editable=False),
     GridFieldNumber('planquantity', title=_('planned quantity'), editable=False),
     GridFieldDateTime('due', title=_('due date'), editable=False),
     GridFieldDateTime('plandate', title=_('planned date'), editable=False),
     GridFieldInteger('operationplan', title=_('operationplan'), editable=False),
     )
+
+  @classmethod
+  def extra_context(reportclass, request, *args, **kwargs):
+    if args and args[0]:
+      request.session['lasttab'] = 'plandetail'
+    return {'active_tab': 'plandetail'}

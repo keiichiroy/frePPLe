@@ -173,17 +173,19 @@
 	  </demand>
 	</demands>
 	<operationplans>
-	  <operationplan id="1001" operation="supply 1">
+	  <operationplan id="1001">
+      <operation name="supply 1"/>
 	    <start>2009-01-10T00:00:00</start>
 	    <end>2009-01-10T00:00:00</end>
 	    <quantity>100</quantity>
-	    <locked>true</locked>
+	    <status>confirmed</status>
 	  </operationplan>
-	  <operationplan id="1002" operation="supply 1">
+	  <operationplan id="1002">
+      <operation name="supply 1"/>
 	    <start>2009-01-17T00:00:00</start>
 	    <end>2009-01-17T00:00:00</end>
 	    <quantity>200</quantity>
-	    <locked>true</locked>
+	    <status>confirmed</status>
 	  </operationplan>
 	</operationplans>
 	<!-- DYNAMIC data CASE 2 -->
@@ -195,17 +197,19 @@
 	  </demand>
 	</demands>
 	<operationplans>
-	  <operationplan id="2001" operation="supply 2">
+	  <operationplan id="2001">
+      <operation name="supply 2"/>
 	    <start>2009-01-10T00:00:00</start>
 	    <end>2009-01-10T00:00:00</end>
 	    <quantity>100</quantity>
-	    <locked>true</locked>
+	    <status>confirmed</status>
 	  </operationplan>
-	  <operationplan id="2002" operation="supply 2">
+	  <operationplan id="2002">
+      <operation name="supply 2"/>
 	    <start>2009-01-17T00:00:00</start>
 	    <end>2009-01-17T00:00:00</end>
 	    <quantity>50</quantity>
-	    <locked>true</locked>
+	    <status>confirmed</status>
 	  </operationplan>
 	</operationplans>
 	<!-- DYNAMIC data CASE 3 -->
@@ -217,11 +221,12 @@
 	  </demand>
 	</demands>
 	<operationplans>
-	  <operationplan id="3001" operation="supply 3">
+	  <operationplan id="3001">
+      <operation name="supply 3"/>
 	    <start>2009-01-15T00:00:00</start>
 	    <end>2009-01-15T00:00:00</end>
 	    <quantity>1000</quantity>
-	    <locked>true</locked>
+	    <status>confirmed</status>
 	  </operationplan>
 	</operationplans>
 	<!-- DYNAMIC data CASE 4 -->
@@ -233,21 +238,21 @@
 	  </demand>
 	</demands>
 	<operationplans>
-	  <operationplan id="4001" operation="supply 4">
+	  <operationplan id="4001">
+      <operation name="supply 4"/>
 	    <start>2009-01-15T00:00:00</start>
 	    <end>2009-01-15T00:00:00</end>
 	    <quantity>1000</quantity>
-	    <locked>true</locked>
+	    <status>confirmed</status>
 	  </operationplan>
 	</operationplans>
 
 <?python
-from __future__ import print_function
 print("CREATING CONSTRAINED PLAN")
-frepple.solver_mrp(name="MRP", plantype=1, constraints=15, loglevel=2).solve()
+frepple.solver_mrp(plantype=1, constraints=15, loglevel=2).solve()
 frepple.saveplan("output.1.xml")
 print("CREATING UNCONSTRAINED PLAN")
-frepple.solver_mrp(name="MRP", plantype=2, constraints=15, loglevel=2).solve()
+frepple.solver_mrp(plantype=2, constraints=15, loglevel=2).solve()
 frepple.saveplan("output.2.xml")
 ?>
 

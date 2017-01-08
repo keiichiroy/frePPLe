@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba                 *
+ * Copyright (C) 2007-2015 by frePPLe bvba                                 *
  *                                                                         *
  * This library is free software; you can redistribute it and/or modify it *
  * under the terms of the GNU Affero General Public License as published   *
@@ -50,7 +50,7 @@ DECLARE_EXPORT void Demand::updateProblems()
   else
   {
     // Loop through the deliveries
-    for (OperationPlan_list::iterator i = deli.begin(); i!=deli.end(); ++i)
+    for (OperationPlanList::iterator i = deli.begin(); i!=deli.end(); ++i)
     {
       // Check for ProblemLate problem
       long d(getDue() - (*i)->getDates().getEnd());
@@ -68,7 +68,7 @@ DECLARE_EXPORT void Demand::updateProblems()
   }
 
   // Loop through the existing problems
-  for (Problem::const_iterator j = Problem::begin(this, false);
+  for (Problem::iterator j = Problem::begin(this, false);
       j!=Problem::end(); )
   {
     // Need to increment now and define a pointer to the problem, since the
@@ -122,7 +122,7 @@ DECLARE_EXPORT void Demand::updateProblems()
 DECLARE_EXPORT string ProblemLate::getDescription() const
 {
   assert(getDemand() && !getDemand()->getDelivery().empty());
-  TimePeriod t(getDemand()->getLatestDelivery()->getDates().getEnd()
+  Duration t(getDemand()->getLatestDelivery()->getDates().getEnd()
       - getDemand()->getDue());
   return string("Demand '") + getDemand()->getName() + "' planned "
       + string(t) + " after its due date";
@@ -132,7 +132,7 @@ DECLARE_EXPORT string ProblemLate::getDescription() const
 DECLARE_EXPORT string ProblemEarly::getDescription() const
 {
   assert(getDemand() && !getDemand()->getDelivery().empty());
-  TimePeriod t(getDemand()->getDue()
+  Duration t(getDemand()->getDue()
       - getDemand()->getEarliestDelivery()->getDates().getEnd());
   return string("Demand '") + getDemand()->getName() + "' planned "
       + string(t) + " before its due date";

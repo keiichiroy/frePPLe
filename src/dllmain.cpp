@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba                 *
+ * Copyright (C) 2007-2015 by frePPLe bvba                                 *
  *                                                                         *
  * This library is free software; you can redistribute it and/or modify it *
  * under the terms of the GNU Affero General Public License as published   *
@@ -31,7 +31,7 @@ DECLARE_EXPORT(const char*) FreppleVersion()
 }
 
 
-DECLARE_EXPORT(void) FreppleInitialize()
+DECLARE_EXPORT(void) FreppleInitialize(bool procesInitializationFiles)
 {
   // Initialize only once
   static bool initialized = false;
@@ -42,6 +42,9 @@ DECLARE_EXPORT(void) FreppleInitialize()
   LibraryUtils::initialize();
   LibraryModel::initialize();
   LibrarySolver::initialize();
+
+  if (!procesInitializationFiles)
+    return;
 
   // Search for the initialization PY file
   string init = Environment::searchFile("init.py");
@@ -101,7 +104,7 @@ DECLARE_EXPORT(void) FreppleReadXMLFile (const char* filename, bool validate, bo
     XMLInputFile(filename).parse(NULL, true);
   else
     // Read, execute and optionally validate a file
-    XMLInputFile(filename).parse(&Plan::instance(),validate);
+    XMLInputFile(filename).parse(&Plan::instance(), validate);
 }
 
 
@@ -115,8 +118,8 @@ DECLARE_EXPORT(void) FreppleReadPythonFile(const char* filename)
 
 DECLARE_EXPORT(void) FreppleSaveFile(const char* x)
 {
-  XMLOutputFile o(x);
-  o.writeElementWithHeader(Tags::tag_plan, &Plan::instance());
+  XMLSerializerFile o(x);
+  o.writeElementWithHeader(Tags::plan, &Plan::instance());
 }
 
 
@@ -193,31 +196,23 @@ extern "C" DECLARE_EXPORT(int) FreppleWrapperExit()
 
 
 /** Used to initialize frePPLe as a Python extension module. */
-#if PY_MAJOR_VERSION >= 3
 PyMODINIT_FUNC PyInit_frepple(void)
-#else
-PyMODINIT_FUNC initfrepple(void)
-#endif
 {
   try
   {
-    FreppleInitialize();
-#if PY_MAJOR_VERSION >= 3
+    // Initialize frePPLe, without reading the configuration
+    // files init.xml or init.py
+    FreppleInitialize(false);
     return PythonInterpreter::getModule();
-#endif
   }
   catch(const exception& e)
   {
-    logger << "Initialization failed: " << e.what() << endl;
-#if PY_MAJOR_VERSION >= 3
+    PyErr_SetString(PyExc_SystemError, e.what());
     return NULL;
-#endif
   }
   catch (...)
   {
-    logger << "Initialization failed: reason unknown" << endl;
-#if PY_MAJOR_VERSION >= 3
+    PyErr_SetString(PyExc_SystemError, "Initialization failed");
     return NULL;
-#endif
   }
 }

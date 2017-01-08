@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba                 *
+ * Copyright (C) 2007-2015 by frePPLe bvba                                 *
  *                                                                         *
  * This library is free software; you can redistribute it and/or modify it *
  * under the terms of the GNU Affero General Public License as published   *
@@ -30,10 +30,11 @@ DECLARE_EXPORT const MetaCategory* LoadPlan::metadata;
 int LoadPlan::initialize()
 {
   // Initialize the metadata
-  metadata = new MetaCategory("loadplan", "loadplans");
+  metadata = MetaCategory::registerCategory<LoadPlan>("loadplan", "loadplans");
+  registerFields<LoadPlan>(const_cast<MetaCategory*>(metadata));
 
   // Initialize the Python type
-  PythonType& x = FreppleCategory<LoadPlan>::getType();
+  PythonType& x = FreppleCategory<LoadPlan>::getPythonType();
   x.setName("loadplan");
   x.setDoc("frePPLe loadplan");
   x.supportgetattro();
@@ -76,8 +77,10 @@ DECLARE_EXPORT LoadPlan::LoadPlan(OperationPlan *o, const Load *r)
   // Initialize the Python type
   initType(metadata);
 
-  // Create a loadplan to mark the end of the operationplan.
-  new LoadPlan(o, r, this);
+  // For continuous resources, create a loadplan to mark
+  // the end of the operationplan.
+  if (getResource()->getType() != *ResourceBuckets::metadata)
+    new LoadPlan(o, r, this);
 
   // Mark the operation and resource as being changed. This will trigger
   // the recomputation of their problems
@@ -140,9 +143,13 @@ DECLARE_EXPORT void LoadPlan::setResource(Resource* newres, bool check)
     if (getLoad()->getSkill())
     {
       ok = false;
-      for(Resource::skilllist::const_iterator s = newres->getSkills().begin();
-        s != newres->getSkills().end() && !ok; s++)
-        if (s->getSkill() == getLoad()->getSkill()) ok = true;
+      Resource::skilllist::const_iterator s = newres->getSkills();
+      while(ResourceSkill *rs = s.next())
+        if (rs->getSkill() == getLoad()->getSkill())
+        {
+          ok = true;
+          break;
+        }
       if (!ok)
         throw DataException("Resource misses the skill specified on the load");
     }
@@ -301,7 +308,7 @@ DECLARE_EXPORT void LoadPlan::update()
 }
 
 
-DECLARE_EXPORT const string& LoadPlan::getSetup(bool current) const
+DECLARE_EXPORT string LoadPlan::getSetup(bool current) const
 {
   // This resource has no setupmatrix
   static string nosetup;
@@ -364,7 +371,7 @@ DECLARE_EXPORT LoadPlan::~LoadPlan()
 }
 
 
-DECLARE_EXPORT void LoadPlan::setLoad(const Load* newld)
+DECLARE_EXPORT void LoadPlan::setLoad(Load* newld)
 {
   // No change
   if (newld == ld) return;
@@ -382,62 +389,10 @@ DECLARE_EXPORT void LoadPlan::setLoad(const Load* newld)
 }
 
 
-PyObject* LoadPlan::getattro(const Attribute& attr)
-{
-  if (attr.isA(Tags::tag_operationplan))
-    return PythonObject(getOperationPlan());
-  if (attr.isA(Tags::tag_quantity))
-    return PythonObject(getQuantity());
-  if (attr.isA(Tags::tag_startdate))
-    return PythonObject(getDate());
-  if (attr.isA(Tags::tag_enddate))
-    return PythonObject(getOtherLoadPlan()->getDate());
-  if (attr.isA(Tags::tag_resource))
-    return PythonObject(getResource());
-  if (attr.isA(Tags::tag_operation)) // Convenient shortcut
-    return PythonObject(getLoad()->getOperation());
-  if (attr.isA(Tags::tag_load))
-    return PythonObject(getLoad());
-  if (attr.isA(Tags::tag_onhand))
-    return PythonObject(getOnhand());
-  if (attr.isA(Tags::tag_setup))
-    return PythonObject(getSetup());
-  return NULL;
-}
-
-
-DECLARE_EXPORT int LoadPlan::setattro(const Attribute& attr, const PythonObject& field)
-{
-  if (attr.isA(Tags::tag_resource))
-  {
-    if (!field.check(Resource::metadata))
-    {
-      PyErr_SetString(PythonDataException, "loadplan resource must be of type resource");
-      return -1;
-    }
-    Resource* y = static_cast<Resource*>(static_cast<PyObject*>(field));
-    setResource(y, true);
-  }
-  else if (attr.isA(Tags::tag_load))
-  {
-    if (!field.check(Load::metadata))
-    {
-      PyErr_SetString(PythonDataException, "loadplan load must be of type load");
-      return -1;
-    }
-    Load* y = static_cast<Load*>(static_cast<PyObject*>(field));
-    setLoad(y);
-  }
-  else
-    return -1;
-  return 0;
-}
-
-
 int LoadPlanIterator::initialize()
 {
   // Initialize the type
-  PythonType& x = PythonExtension<LoadPlanIterator>::getType();
+  PythonType& x = PythonExtension<LoadPlanIterator>::getPythonType();
   x.setName("loadplanIterator");
   x.setDoc("frePPLe iterator for loadplan");
   x.supportiter();

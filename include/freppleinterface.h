@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba                                    *
+ * Copyright (C) 2007-2015 by frePPLe bvba                                 *
  *                                                                         *
  * This library is free software; you can redistribute it and/or modify it *
  * under the terms of the GNU Affero General Public License as published   *
@@ -31,6 +31,7 @@
   * It provides a more detailed API to interface with frePPLe.
   */
 
+#pragma once
 #ifndef FREPPLE_INTERFACE_H
 #define FREPPLE_INTERFACE_H
 
@@ -70,7 +71,7 @@ DECLARE_EXPORT(const char*) FreppleVersion();
   * processing is finished. The method can throw exceptions, and the client
   * is responsible for defining the correct handlers for these.
   */
-DECLARE_EXPORT(void) FreppleInitialize();
+DECLARE_EXPORT(void) FreppleInitialize(bool=true);
 
 /** The character buffer pointed to by the first parameter contains data in
   * XML format that is passed on to frePPLe for processing.<br>

@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2009 by Johan De Taeye, frePPLe bvba                                    *
+ * Copyright (C) 2009 by frePPLe bvba                                                    *
  *                                                                         *
  * This library is free software; you can redistribute it and/or modify it *
  * under the terms of the GNU Affero General Public License as published   *
@@ -31,59 +31,18 @@ DECLARE_EXPORT const MetaCategory* Solver::metadata;
 int Solver::initialize()
 {
   // Initialize the metadata
-  metadata = new MetaCategory("solver", "solvers", reader, writer);
+  metadata = MetaCategory::registerCategory<Solver>("solver", "solvers", MetaCategory::ControllerDefault);
+  registerFields<Solver>(const_cast<MetaCategory*>(metadata));
 
   // Initialize the Python class
-  FreppleCategory<Solver>::getType().addMethod("solve", solve, METH_NOARGS, "run the solver");
-  return FreppleCategory<Solver>::initialize();
-}
-
-
-DECLARE_EXPORT void Solver::writeElement
-(XMLOutput *o, const Keyword &tag, mode m) const
-{
-  // The subclass should have written its own header
-  assert(m == NOHEAD || m == NOHEADTAIL);
-
-  // Fields
-  if (loglevel) o->writeElement(Tags::tag_loglevel, loglevel);
-
-  // Write the tail
-  if (m != NOHEADTAIL) o->EndObject(tag);
-}
-
-
-DECLARE_EXPORT void Solver::endElement(XMLInput& pIn, const Attribute& pAttr, const DataElement& pElement)
-{
-  if (pAttr.isA(Tags::tag_loglevel))
-  {
-    int i = pElement.getInt();
-    if (i<0 || i>USHRT_MAX)
-      throw DataException("Invalid log level" + pElement.getString());
-    setLogLevel(i);
-  }
-}
-
-
-DECLARE_EXPORT PyObject* Solver::getattro(const Attribute& attr)
-{
-  if (attr.isA(Tags::tag_name))
-    return PythonObject(getName());
-  if (attr.isA(Tags::tag_loglevel))
-    return PythonObject(getLogLevel());
-  return NULL;
-}
-
-
-DECLARE_EXPORT int Solver::setattro(const Attribute& attr, const PythonObject& field)
-{
-  if (attr.isA(Tags::tag_name))
-    setName(field.getString());
-  else if (attr.isA(Tags::tag_loglevel))
-    setLogLevel(field.getInt());
-  else
-    return -1;  // Error
-  return 0;  // OK
+  PythonType& x = FreppleCategory<Solver>::getPythonType();
+  x.setName("solver");
+  x.setDoc("frePPLe solver");
+  x.supportgetattro();
+  x.supportsetattro();
+  x.addMethod("solve", solve, METH_NOARGS, "run the solver");
+  const_cast<MetaCategory*>(metadata)->pythonClass = x.type_object();
+  return x.typeReady();
 }
 
 

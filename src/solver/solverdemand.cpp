@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba                 *
+ * Copyright (C) 2007-2015 by frePPLe bvba                                 *
  *                                                                         *
  * This library is free software; you can redistribute it and/or modify it *
  * under the terms of the GNU Affero General Public License as published   *
@@ -39,8 +39,8 @@ DECLARE_EXPORT void SolverMRP::solve(const Demand* l, void* v)
   try
   {
     // Call the user exit
-    if (userexit_demand) userexit_demand.call(l, PythonObject(data->constrainedPlanning));
-    unsigned int loglevel = data->getSolver()->getLogLevel();
+    if (userexit_demand) userexit_demand.call(l, PythonData(data->constrainedPlanning));
+    short loglevel = data->getSolver()->getLogLevel();
 
     // Note: This solver method does not push/pop states on the stack.
     // We continue to work on the top element of the stack.
@@ -55,28 +55,30 @@ DECLARE_EXPORT void SolverMRP::solve(const Demand* l, void* v)
       logger << endl;
     }
 
-    // Unattach previous delivery operationplans.
-    // Locked operationplans will NOT be deleted, and a part of the demand can
-    // still remain planned.
-    const_cast<Demand*>(l)->deleteOperationPlans(false, data);
+    // Unattach previous delivery operationplans, if required.
+    if (data->getSolver()->getErasePreviousFirst())
+    {
+      // Locked operationplans will NOT be deleted, and a part of the demand can
+      // still remain planned.
+      const_cast<Demand*>(l)->deleteOperationPlans(false, data);
 
-    // Empty constraint list
-    const_cast<Demand*>(l)->getConstraints().clear();
+      // Empty constraint list
+      const_cast<Demand*>(l)->getConstraints().clear();
+    }
 
     // Track constraints or not
     data->logConstraints = (getPlanType() == 1);
 
     // Determine the quantity to be planned and the date for the planning loop
     double plan_qty = l->getQuantity() - l->getPlannedQuantity();
-    if (plan_qty < l->getMinShipment()) plan_qty = l->getMinShipment();
     Date plan_date = l->getDue();
-
-    // Nothing to be planned any more (e.g. all deliveries are locked...)
-    if (plan_qty < ROUNDING_ERROR)
+    if (plan_qty < ROUNDING_ERROR || plan_date == Date::infiniteFuture)
     {
       if (loglevel>0) logger << "  Nothing to be planned." << endl;
+      data->pop();
       return;
     }
+    if (plan_qty < l->getMinShipment()) plan_qty = l->getMinShipment();
 
     // Temporary values to store the 'best-reply' so far
     double best_q_qty = 0.0, best_a_qty = 0.0;
@@ -86,9 +88,10 @@ DECLARE_EXPORT void SolverMRP::solve(const Demand* l, void* v)
     Operation* deliveryoper = l->getDeliveryOperation();
 
     // Handle invalid or missing delivery operations
+    {
     string problemtext = string("Demand '") + l->getName() + "' has no delivery operation";
-    Problem::const_iterator j = Problem::begin(const_cast<Demand*>(l), false);
-    while (j!=Problem::end())
+    Problem::iterator j = Problem::begin(const_cast<Demand*>(l), false);
+    while (j != Problem::end())
     {
       if (&(j->getType()) == ProblemInvalidData::metadata
           && j->getDescription() == problemtext)
@@ -107,6 +110,7 @@ DECLARE_EXPORT void SolverMRP::solve(const Demand* l, void* v)
     else
       // Remove problem that may already exist
       delete &*j;
+    }
 
     // Planning loop
     do
@@ -127,7 +131,6 @@ DECLARE_EXPORT void SolverMRP::solve(const Demand* l, void* v)
       data->state->q_date = plan_date;
       data->planningDemand = const_cast<Demand*>(l);
       data->state->curDemand = const_cast<Demand*>(l);
-      data->state->motive = const_cast<Demand*>(l);
       data->state->curOwnerOpplan = NULL;
       deliveryoper->solve(*this,v);
       Date next_date = data->state->a_date;
@@ -141,7 +144,7 @@ DECLARE_EXPORT void SolverMRP::solve(const Demand* l, void* v)
         {
           // The full asked quantity is not possible.
           // Try with the minimum shipment quantity.
-          if (loglevel>0)
+          if (loglevel>1)
             logger << "Demand '" << l << "' tries planning minimum quantity " << l->getMinShipment() << endl;
           data->rollback(topcommand);
           data->state->curBuffer = NULL;
@@ -161,7 +164,14 @@ DECLARE_EXPORT void SolverMRP::solve(const Demand* l, void* v)
             while (delta > data->getSolver()->getIterationAccuracy() * l->getQuantity()
                 && delta > data->getSolver()->getIterationThreshold())
             {
-              double new_qty = floor((min_qty + max_qty) / 2); // @TODO not generic to round down to an integer here
+              // Note: we're kind of assuming that the demand is an integer value here.
+              double new_qty = floor((min_qty + max_qty) / 2);
+              if (new_qty == min_qty)
+              {
+                // Required to avoid an infinite loop on the same value...
+                new_qty += 1;
+                if (new_qty > max_qty) break;
+              }
               if (loglevel>0)
                 logger << "Demand '" << l << "' tries planning a different quantity " << new_qty << endl;
               data->rollback(topcommand);
@@ -220,10 +230,10 @@ DECLARE_EXPORT void SolverMRP::solve(const Demand* l, void* v)
       //    the minimum quantity.
       if (data->state->a_qty < ROUNDING_ERROR
           || data->state->a_qty + ROUNDING_ERROR < l->getMinShipment()
-          || (q_qty - data->state->a_qty < l->getMinShipment()
-              && q_qty - data->state->a_qty > ROUNDING_ERROR))
+          || (plan_qty - data->state->a_qty < l->getMinShipment()
+              && fabs(plan_qty - data->state->a_qty) > ROUNDING_ERROR))
       {
-        if (q_qty - data->state->a_qty < l->getMinShipment()
+        if (plan_qty - data->state->a_qty < l->getMinShipment()
             && data->state->a_qty + ROUNDING_ERROR >= l->getMinShipment()
             && data->state->a_qty > best_a_qty )
         {
@@ -239,7 +249,10 @@ DECLARE_EXPORT void SolverMRP::solve(const Demand* l, void* v)
         data->rollback(topcommand);
 
         // Set the ask date for the next pass through the loop
-        if (next_date <= copy_plan_date)
+        if (next_date <= copy_plan_date
+          || (!data->getSolver()->getAllowSplits() && data->state->a_qty > ROUNDING_ERROR)
+          || (data->state->a_qty > ROUNDING_ERROR && plan_qty - data->state->a_qty < l->getMinShipment()
+              && plan_qty - data->state->a_qty > ROUNDING_ERROR))
         {
           // Oops, we didn't get a proper answer we can use for the next loop.
           // Print a warning and simply try one day later.
@@ -266,7 +279,7 @@ DECLARE_EXPORT void SolverMRP::solve(const Demand* l, void* v)
           if (loglevel>=2)
             logger << "Demand '" << l << "' plans coordination." << endl;
           data->getSolver()->setLogLevel(0);
-          double tmpresult = data->state->a_qty;
+          double tmpresult = 0;
           try
           {
             for(double remainder = data->state->a_qty;
@@ -282,6 +295,7 @@ DECLARE_EXPORT void SolverMRP::solve(const Demand* l, void* v)
                 logger << "Warning: Demand '" << l << "': Failing coordination" << endl;
                 break;
               }
+              tmpresult += data->state->a_qty;
             }
           }
           catch (...)
@@ -291,6 +305,7 @@ DECLARE_EXPORT void SolverMRP::solve(const Demand* l, void* v)
           }
           data->getSolver()->setLogLevel(loglevel);
           data->state->a_qty = tmpresult;
+          if (tmpresult == 0) break;
         }
 
         // Register the new operationplans. We need to make sure that the
@@ -323,8 +338,9 @@ DECLARE_EXPORT void SolverMRP::solve(const Demand* l, void* v)
       data->getSolver()->setLogLevel(0);
       try
       {
-        for(double remainder = best_q_qty;
-            remainder > ROUNDING_ERROR; remainder -= data->state->a_qty)
+        for (double remainder = best_q_qty;
+          remainder > ROUNDING_ERROR && remainder > l->getMinShipment();
+          remainder -= data->state->a_qty)
         {
           data->state->q_qty = remainder;
           data->state->q_date = best_q_date;

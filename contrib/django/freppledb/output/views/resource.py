@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba
+# Copyright (C) 2007-2013 by frePPLe bvba
 #
 # This library is free software; you can redistribute it and/or modify it
 # under the terms of the GNU Affero General Public License as published
@@ -16,16 +16,16 @@
 #
 
 from django.db import connections
-from django.utils.encoding import force_unicode
+from django.utils.encoding import force_text
 from django.utils.translation import ugettext_lazy as _
 from django.utils.text import capfirst
 
 from freppledb.input.models import Resource
 from freppledb.output.models import LoadPlan
 from freppledb.common.models import Parameter
-from freppledb.common.db import python_date, sql_max
+from freppledb.common.db import python_date, sql_max, string_agg
 from freppledb.common.report import GridReport, GridPivot
-from freppledb.common.report import GridFieldText, GridFieldNumber, GridFieldDateTime, GridFieldBool, GridFieldInteger, GridFieldGraph
+from freppledb.common.report import GridFieldText, GridFieldNumber, GridFieldDateTime, GridFieldBool, GridFieldInteger
 
 
 class OverviewReport(GridPivot):
@@ -39,26 +39,28 @@ class OverviewReport(GridPivot):
   permissions = (("view_resource_report", "Can view resource report"),)
   editable = False
   rows = (
-    GridFieldText('resource', title=_('resource'), key=True, field_name='name', formatter='resource', editable=False),
-    GridFieldText('location', title=_('location'), field_name='location__name', formatter='location', editable=False),
+    GridFieldText('resource', title=_('resource'), key=True, editable=False, field_name='name', formatter='detail', extra="role:'input/resource'"),
+    GridFieldText('location', title=_('location'), editable=False, field_name='location__name', formatter='detail', extra="role:'input/location'"),
     GridFieldText('avgutil', title=_('utilization %'), field_name='util', formatter='percentage', editable=False, width=100, align='center', search=False),
-    GridFieldGraph('graph', title=_('graph'), width="(5*numbuckets<200 ? 5*numbuckets : 200)"),
     )
   crosses = (
-    ('available',{'title': _('available'), 'editable': lambda req: req.user.has_perm('input.change_resource'),}),
-    ('unavailable',{'title': _('unavailable')}),
-    ('setup',{'title': _('setup')}),
-    ('load',{'title': _('load')}),
-    ('utilization',{'title': _('utilization %'),}),
+    ('available', {
+       'title': _('available')
+       }),
+    ('unavailable', {'title': _('unavailable')}),
+    ('setup', {'title': _('setup')}),
+    ('load', {'title': _('load')}),
+    ('utilization', {'title': _('utilization %')}),
     )
 
   @classmethod
   def extra_context(reportclass, request, *args, **kwargs):
     if args and args[0]:
+      request.session['lasttab'] = 'plan'
       return {
         'units': reportclass.getUnits(request),
-        'title': capfirst(force_unicode(Resource._meta.verbose_name) + " " + args[0]),
-        'post_title': ': ' + capfirst(force_unicode(_('plan'))),
+        'title': capfirst(force_text(Resource._meta.verbose_name) + " " + args[0]),
+        'post_title': ': ' + capfirst(force_text(_('plan'))),
         }
     else:
       return {'units': reportclass.getUnits(request)}
@@ -78,7 +80,7 @@ class OverviewReport(GridPivot):
 
   @staticmethod
   def query(request, basequery, sortsql='1 asc'):
-    basesql, baseparams = basequery.query.get_compiler(basequery.db).as_sql(with_col_aliases=True)
+    basesql, baseparams = basequery.query.get_compiler(basequery.db).as_sql(with_col_aliases=False)
 
     # Get the time units
     units = OverviewReport.getUnits(request)
@@ -92,10 +94,10 @@ class OverviewReport(GridPivot):
       select res.name as row1, res.location_id as row2,
              coalesce(max(plan_summary.avg_util),0) as avgutil,
              d.bucket as col1, d.startdate as col2,
-             coalesce(sum(out_resourceplan.available),0) * %f as available,
-             coalesce(sum(out_resourceplan.unavailable),0) * %f as unavailable,
-             coalesce(sum(out_resourceplan.load),0) * %f as loading,
-             coalesce(sum(out_resourceplan.setup),0) * %f as setup
+             coalesce(sum(out_resourceplan.available),0) * (case when res.type = 'buckets' then 1 else %f end) as available,
+             coalesce(sum(out_resourceplan.unavailable),0) * (case when res.type = 'buckets' then 1 else %f end) as unavailable,
+             coalesce(sum(out_resourceplan.load),0) * (case when res.type = 'buckets' then 1 else %f end) as loading,
+             coalesce(sum(out_resourceplan.setup),0) * (case when res.type = 'buckets' then 1 else %f end) as setup
       from (%s) res
       -- Multiply with buckets
       cross join (
@@ -126,33 +128,36 @@ class OverviewReport(GridPivot):
                 ) plan_summary
       on res2.name = plan_summary.theresource
       -- Grouping and sorting
-      group by res.name, res.location_id, d.bucket, d.startdate
+      group by res.name, res.location_id, res.type, d.bucket, d.startdate
       order by %s, d.startdate
-      ''' % ( units[0], units[0], units[0], units[0],
+      ''' % (
+        units[0], units[0], units[0], units[0],
         basesql, request.report_bucket, request.report_startdate,
         request.report_enddate,
         connections[basequery.db].ops.quote_name('resource'),
         request.report_startdate, request.report_enddate,
-        sql_max('sum(out_resourceplan.available)','0.0001'),
+        sql_max('sum(out_resourceplan.available)', '0.0001'),
         request.report_startdate, request.report_enddate, sortsql
-       )
+      )
     cursor.execute(query, baseparams)
 
     # Build the python result
     for row in cursor.fetchall():
-      if row[5] != 0: util = row[7] * 100 / row[5]
-      else: util = 0
+      if row[5] != 0:
+        util = row[7] * 100 / row[5]
+      else:
+        util = 0
       yield {
         'resource': row[0],
         'location': row[1],
-        'avgutil': round(row[2],2),
+        'avgutil': round(row[2], 2),
         'bucket': row[3],
         'startdate': python_date(row[4]),
-        'available': round(row[5],1),
-        'unavailable': round(row[6],1),
-        'load': round(row[7],1),
-        'setup': round(row[8],1),
-        'utilization': round(util,2),
+        'available': round(row[5], 1),
+        'unavailable': round(row[6], 1),
+        'load': round(row[7], 1),
+        'setup': round(row[8], 1),
+        'utilization': round(util, 2)
         }
 
 
@@ -171,26 +176,37 @@ class DetailReport(GridReport):
   @ classmethod
   def basequeryset(reportclass, request, args, kwargs):
     if args and args[0]:
-      return LoadPlan.objects.filter(theresource__exact=args[0]).select_related() \
-        .extra(select={'operation_in': "select name from operation where out_operationplan.operation = operation.name",})
+      base = LoadPlan.objects.filter(theresource__exact=args[0])
     else:
-      return LoadPlan.objects.select_related() \
-        .extra(select={'operation_in': "select name from operation where out_operationplan.operation = operation.name",})
+      base = LoadPlan.objects
+    return base.select_related() \
+      .extra(select={
+        'operation_in': "select name from operation where out_operationplan.operation = operation.name",
+        'demand': ("select %s(q || ' : ' || d, ', ') from ("
+                   "select round(sum(quantity)) as q, demand as d "
+                   "from out_demandpegging "
+                   "where out_demandpegging.operationplan = out_loadplan.operationplan_id "
+                   "group by demand order by 1 desc, 2) peg"
+                   % string_agg())
+        })
 
   @classmethod
   def extra_context(reportclass, request, *args, **kwargs):
+    if args and args[0]:
+      request.session['lasttab'] = 'plandetail'
     return {'active_tab': 'plandetail'}
 
   rows = (
-    GridFieldText('theresource', title=_('resource'), key=True, formatter='resource', editable=False),
-    GridFieldText('operationplan__operation', title=_('operation'), formatter='operation', editable=False),
+    GridFieldText('theresource', title=_('resource'), key=True, editable=False, formatter='detail', extra="role:'input/resource'"),
+    GridFieldText('operationplan__operation', title=_('operation'), editable=False, formatter='detail', extra="role:'input/operation'"),
     GridFieldDateTime('startdate', title=_('start date'), editable=False),
     GridFieldDateTime('enddate', title=_('end date'), editable=False),
+    GridFieldNumber('operationplan__quantity', title=_('operationplan quantity'), editable=False),
+    GridFieldText('demand', title=_('demand quantity'), formatter='demanddetail', width=300, editable=False),
     GridFieldNumber('quantity', title=_('load quantity'), editable=False),
-    GridFieldText('setup', title=_('setup'), editable=False),
+    GridFieldNumber('operationplan__criticality', title=_('criticality'), editable=False),
     GridFieldBool('operationplan__locked', title=_('locked'), editable=False),
     GridFieldNumber('operationplan__unavailable', title=_('unavailable'), editable=False),
-    GridFieldNumber('operationplan__quantity', title=_('operationplan quantity'), editable=False),
     GridFieldInteger('operationplan', title=_('operationplan'), editable=False),
+    GridFieldText('setup', title=_('setup'), editable=False),
     )
-

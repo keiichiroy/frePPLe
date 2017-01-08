@@ -1,7 +1,6 @@
-#!/usr/bin/env python
-
+#!/usr/bin/env python3
 #
-# Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba
+# Copyright (C) 2007-2013 by frePPLe bvba
 #
 # This library is free software; you can redistribute it and/or modify it
 # under the terms of the GNU Affero General Public License as published
@@ -17,15 +16,19 @@
 # License along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-import sys, os, os.path
-sys.path.append(os.path.join(os.path.split(__file__)[0],'..','django'))
-import py2exe, django, freppledb
-from freppledb import VERSION
 from distutils.core import setup
+import django
+import os
+import os.path
+import py2exe
+import sys
+
+sys.path.append(os.path.join(os.path.split(__file__)[0],'..','django'))
+import freppledb
 
 # Add default command lines
 if len(sys.argv) == 1:
-    sys.argv.append("py2exe")
+  sys.argv.append("py2exe")
 
 # Figure out where the django and frepple directories are
 djangodirectory = django.__path__[0]
@@ -33,33 +36,27 @@ freppledirectory = freppledb.__path__[0]
 
 # Define what is to be included and excluded
 packages = [# Required for django standalone deployment
-            'django', 'email', 'cherrypy.wsgiserver', 'csv',
-            'htmlentitydefs','HTMLParser','markupbase',
-            # Added for MySQL
-            'MySQLdb', 'MySQLdb.constants', 'MySQLdb.converters',
+            'logging', 'email', 'cherrypy.wsgiserver', 'sqlite3',
             # Added for PostgreSQL
-            'psycopg2', 'psycopg2.extensions',
-            # Added for oracle
-            'cx_Oracle',
-            # Required for the python initialization
-            'site',
-            # Required for graphing
-            'pygraphviz',
+            'psycopg2',
+            # Added to be able to connect to SQL Server
+            'adodbapi',
+            # Required for reading and writing spreadsheets
+            'openpyxl',
+            # Required for REST API
+            'rest_framework',
             # Added to package a more complete python library with frePPLe
-            'ftplib', 'poplib', 'imaplib', 'telnetlib', 'xmlrpclib',
-            'gzip', 'bz2','zipfile', 'tarfile', 'SimpleXMLRPCServer',
+            'urllib', 'multiprocessing', 'asyncio', 'pip',
             # Added for unicode and internationalization
             'encodings',
            ]
-includes = []
-excludes = ['pydoc', 'Tkinter', 'tcl', 'Tkconstants', 'freppledb']
+includes = ['html.parser', 'csv', 'poplib', 'imaplib', 'telnetlib', '_sitebuiltins']
+excludes = ['django', 'freppledb', 'pydoc', 'cx_Oracle', 'MySQLdb']
 ignores = [# Not using docutils
            'docutils', 'docutils.core', 'docutils.nodes', 'docutils.parsers.rst.roles',
-           # Not using Microsoft ADO
-           'adodbapi',
            # Not using psycopg (using psycopg2 instead)
            'psycopg',
-           # Not using pysqlite2 (using pysqlite3 instead)
+           # Not using pysqlite2
            'pysqlite2',
            # Not using mod_python
            'mod_python', 'mod_python.util',
@@ -87,27 +84,23 @@ ignores = [# Not using docutils
            'frepple',
            ]
 
-# Collect all static files to be included in the distribution.
-# This includes our custom python code as well.
+# Add django and frepple.
+# Both are added in uncompiled format
 from distutils.command.install import INSTALL_SCHEMES
 for scheme in INSTALL_SCHEMES.values(): scheme['data'] = scheme['purelib']
 data_files = []
+import site
+data_files.append( ['custom', [site.__file__,]] )
 for srcdir, targetdir in [
-   (os.path.join(djangodirectory,'contrib','admin','templates'), 'templates'),
-   (os.path.join(djangodirectory,'contrib','admin','static'), 'static'),
-   (os.path.join(djangodirectory,'conf','locale'), os.path.join('locale','django')),
-   (os.path.join(djangodirectory,'contrib','auth','locale'), os.path.join('locale','auth')),
-   (os.path.join(djangodirectory,'contrib','contenttypes','locale'), os.path.join('locale','contenttypes')),
-   (os.path.join(djangodirectory,'contrib','sessions','locale'), os.path.join('locale','sessions')),
-   (os.path.join(djangodirectory,'contrib','admin','locale'), os.path.join('locale','admin')),
-   (os.path.join(djangodirectory,'contrib','messages','locale'), os.path.join('locale','messages')),
+   (djangodirectory, os.path.join('custom','django')),
    (freppledirectory, os.path.join('custom','freppledb')),
    ]:
    root_path_length = len(srcdir) + 1
    for dirpath, dirnames, filenames in os.walk(os.path.join(srcdir)):
      # Ignore dirnames that start with '.'
      for i, dirname in enumerate(dirnames):
-       if dirname.startswith('.'): del dirnames[i]
+       if dirname.startswith('.') or dirname == '__pycache__':
+         del dirnames[i]
      # Append data files for this subdirectory
      data_files.append([
        os.path.join(targetdir, dirpath[root_path_length:]),
@@ -123,28 +116,31 @@ setup(
           # optimize the bytecode
           "optimize": 2,
           # Next option is commented out: Gives a cleaner install, but doesn't work for sqlite
-          # bundle python modules in the zip file as well.
+          # bundle python modules in the zip file as well.  TODO test if it works for postgresql
           #"bundle_files": 2,
           # content of the packaged python
           "packages": packages,
           "excludes": excludes,
           "includes": includes,
           "ignores": ignores,
-          # ignore this file that is useful only in archaic windows versions
-          "dll_excludes": ['w9xpopen.exe'],
           }},
     data_files = data_files,
     # Attributes
-    version = VERSION,
+    version = freppledb.VERSION,
     description = "frePPLe web application",
     name = "frePPLe",
-    author = "www.frepple.com",
-    url = "http://www.frepple.com",
+    author = "frepple.com",
+    url = "http://frepple.com",
     # Target to build a Windows service
     service = [{
        "modules":["freppleservice"],
        "icon_resources": [(1, os.path.join("..","..","src","frepple.ico"))],
        "cmdline_style": 'pywin32',
+       }],
+    # Target to build the system tray application
+    windows = [{
+       "script": "freppleserver.py",
+       "icon_resources": [(1, os.path.join("..","..","src","frepple.ico"))],
        }],
     # Target to build a console application
     console = [{

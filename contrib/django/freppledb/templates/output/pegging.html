@@ -1,14 +1,6 @@
 {% extends "admin/base_site_grid.html" %}
 {% load i18n %}
 
-{% block contextmenus %}
-{% include "operationcontext.html" %}
-{% include "itemcontext.html" %}
-{% include "buffercontext.html" %}
-{% include "demandcontext.html" %}
-{% include "resourcecontext.html" %}
-{% endblock %}
-
 {% block extrahead %}{{block.super}}
 <style type="text/css">
 #grid_location__name, #grid_operationplans, .ui-jqgrid .ui-jqgrid-resize, .ui-jqgrid .ui-jqgrid-htable th div {
@@ -66,7 +58,7 @@ function reslistfmt(cellvalue, options, row)
   if (cellvalue === undefined || cellvalue ==='') return '';
   result = '';
   for (var i in cellvalue)
-    result += "<span>" + cellvalue[i] + "<span class='context ui-icon ui-icon-triangle-1-e' role='resource'></span></span><br/>";
+    result += "<span>" + cellvalue[i] + "<span class='context fa fa-caret-right' role='resource'></span></span><br/>";
   return result;
 }
 
@@ -92,18 +84,15 @@ resizeStop: gantt.redraw,
 {% endblock %}
 
 {% block actions %}
-<a id="zoom_in" href="javascript:gantt.zoom(0.5,0);" class="icon"><span class="ui-icon ui-icon-zoomin"></span>{% trans 'Zoom in' %}</a>
-<a id="zoom_out" href="javascript:gantt.zoom(1.5,0);" class="icon"><span class="ui-icon ui-icon-zoomout"></span>{% trans 'Zoom out' %}</a>
-<a id="move_in" href="javascript:gantt.zoom(1,-86400000);" class="icon"><span class="ui-icon ui-icon-seek-prev"></span>{% trans 'Move in' %}</a>
-<a id="move_out" href="javascript:gantt.zoom(1,86400000);" class="icon"><span class="ui-icon ui-icon-seek-next"></span>{% trans 'Move out' %}</a>
-<a id="reset" href="javascript:gantt.reset();" class="icon"><span class="ui-icon ui-icon-stop"></span>{% trans 'Reset' %}</a>
-<a id="filter" href="javascript:showFilter();" class="icon"><span class="ui-icon ui-icon-search"></span>{% trans 'Filter' %}</a>
-<a href="javascript:grid.showBucket();" id="bucketconfig" class="icon"><span class="ui-icon ui-icon-clock"></span>{% trans 'Time' %}</a>
+<span id="zoom_in" onclick="gantt.zoom(0.5,0)" title="{% trans 'zoom in'|capfirst|force_escape %}" class="fa fa-search-plus fa-lg"></span>&nbsp;&nbsp;
+<span id="zoom_out" onclick="gantt.zoom(1.5,0)" title="{% trans 'zoom out'|capfirst|force_escape %}" class="fa fa-search-minus fa-lg"></span>&nbsp;&nbsp;
+<span id="move_in" onclick="gantt.zoom(1,-86400000)" title="{% filter capfirst|force_escape %}{% trans 'move in' context 'Gantt' %}{% endfilter %}" class="fa fa-backward fa-lg"></span>&nbsp;&nbsp;
+<span id="move_out" onclick="gantt.zoom(1,86400000)" title="{% filter capfirst|force_escape %}{% trans 'move out' context 'Gantt' %}{% endfilter %}" class="fa fa-forward fa-lg"></span>&nbsp;&nbsp;
+<span id="reset" onclick="gantt.reset()" title="{% trans 'reset'|capfirst|force_escape %}" class="fa fa-stop fa-lg"></span>
+<span onclick="grid.showCustomize(false)" title="{% trans 'customize'|capfirst|force_escape %}" class="fa fa-wrench fa-lg"></span>
 {% endblock %}
 
-{% block tools %}
-{% include "demandtabs.html" %}
-{% endblock %}
+{% block tools %}{% tabs "input.demand" %}{% endblock %}
 
 {% comment %}
 TODO operation can be hidden and have no link

@@ -1,7 +1,7 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 #
-# Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba
+# Copyright (C) 2007-2013 by frePPLe bvba
 #
 # This library is free software; you can redistribute it and/or modify it
 # under the terms of the GNU Affero General Public License as published
@@ -18,13 +18,13 @@
 #
 
 r'''
-This command is the wrapper for all administratrive actions on frePPLe.
+This command is the wrapper for all administrative actions on frePPLe.
 '''
 
-import os, sys
+import os
+import sys
 
 if __name__ == "__main__":
-    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "freppledb.settings")
-    from django.core.management import execute_from_command_line
-    execute_from_command_line(sys.argv)
-
+  os.environ.setdefault("DJANGO_SETTINGS_MODULE", "freppledb.settings")
+  from django.core.management import execute_from_command_line
+  execute_from_command_line(sys.argv)

@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2007-2013 by Johan De Taeye, frePPLe bvba                 *
+ * Copyright (C) 2007-2015 by frePPLe bvba                                 *
  *                                                                         *
  * This library is free software; you can redistribute it and/or modify it *
  * under the terms of the GNU Affero General Public License as published   *
@@ -53,8 +53,8 @@ DECLARE_EXPORT void SolverMRP::checkOperationCapacity
       h!=opplan->endLoadPlans() && opplan->getDates()==orig; ++h)
     {
       if (h->getLoad()->getQuantity() == 0.0 || h->getQuantity() == 0.0)
-    	// Empty load or loadplan (eg when load is not effective)
-    	continue;
+        // Empty load or loadplan (eg when load is not effective)
+        continue;
       // Call the load solver - which will call the resource solver.
       data.state->q_operationplan = opplan;
       data.state->q_loadplan = &*h;
@@ -64,12 +64,17 @@ DECLARE_EXPORT void SolverMRP::checkOperationCapacity
       h->getLoad()->solve(*this,&data);
       if (opplan->getDates()!=orig)
       {
-    	if (data.state->a_qty==0)
-    	  // One of the resources is late. We want to prevent that other resources
-    	  // are trying to pull in the operationplan again. It can only be delayed
-    	  // from now on in this loop.
+        if (data.state->a_qty == 0)
+          // One of the resources is late. We want to prevent that other resources
+          // are trying to pull in the operationplan again. It can only be delayed
+          // from now on in this loop.
           data.state->forceLate = true;
-    	if (!first) recheck = true;
+        else if (first)
+          // First load is ok, but moved the operationplan.
+          // We can continue to check the second loadplan.
+          orig = opplan->getDates();
+        if (!first)
+          recheck = true;
       }
       first = false;
     }
@@ -81,7 +86,7 @@ DECLARE_EXPORT void SolverMRP::checkOperationCapacity
   // No need to reloop if there is only a single load (= 2 loadplans)
   while (constrainedLoads>1 && opplan->getDates()!=orig
     && ((data.state->a_qty==0.0 && data.state->a_date > minimumEndDate)
-    	 || recheck));
+        || recheck));
   // TODO doesn't this loop increment a_penalty incorrectly???
 
   // Restore original flags
@@ -92,7 +97,7 @@ DECLARE_EXPORT void SolverMRP::checkOperationCapacity
   // This is required to make sure that the buffer inventory profile also
   // respects this answer.
   if (data.state->a_qty==0.0 && opplan->getQuantity() > 0.0)
-	opplan->setQuantity(0.0);
+    opplan->setQuantity(0.0);
 }
 
 
@@ -123,7 +128,7 @@ DECLARE_EXPORT bool SolverMRP::checkOperation
   }
 
   // Check the leadtime constraints
-  if (data.constrainedPlanning && !checkOperationLeadtime(opplan,data,true))
+  if (data.constrainedPlanning && !checkOperationLeadTime(opplan,data,true))
     // This operationplan is a wreck. It is impossible to make it meet the
     // leadtime constraints
     return false;
@@ -180,61 +185,66 @@ DECLARE_EXPORT bool SolverMRP::checkOperation
     matnext.setStart(Date::infinitePast);
     matnext.setEnd(Date::infiniteFuture);
 
-    // Loop through all flowplans  // @todo need some kind of coordination run here!!! see test alternate_flow_1
-    for (OperationPlan::FlowPlanIterator g=opplan->beginFlowPlans();
-        g!=opplan->endFlowPlans(); ++g)
-      if (g->getFlow()->isConsumer())
+    // Loop through all flowplans, if propagation is required  // @todo need some kind of coordination run here!!! see test alternate_flow_1
+    if (data.getSolver()->getPropagate())
+    {
+      for (OperationPlan::FlowPlanIterator g=opplan->beginFlowPlans();
+          g!=opplan->endFlowPlans(); ++g)
       {
-        // Switch back to the main alternate if this flowplan was already    // @todo is this really required? If yes, in this place?
-        // planned on an alternate
-        if (g->getFlow()->getAlternate())
-          g->setFlow(g->getFlow()->getAlternate());
-
-        // Trigger the flow solver, which will call the buffer solver
-        data.state->q_flowplan = &*g;
-        q_qty_Flow = - data.state->q_flowplan->getQuantity(); // @todo flow quantity can change when using alternate flows -> move to flow solver!
-        q_date_Flow = data.state->q_flowplan->getDate();
-        g->getFlow()->solve(*this,&data);
-
-        // Validate the answered quantity
-        if (data.state->a_qty < q_qty_Flow)
+        if (g->getFlow()->isConsumer())
         {
-          // Update the opplan, which is required to (1) update the flowplans
-          // and to (2) take care of lot sizing constraints of this operation.
-          g->setQuantity(-data.state->a_qty, true);
-          a_qty = opplan->getQuantity();
-          incomplete = true;
+          // Switch back to the main alternate if this flowplan was already    // @todo is this really required? If yes, in this place?
+          // planned on an alternate
+          if (g->getFlow()->getAlternate())
+            g->setFlow(g->getFlow()->getAlternate());
 
-          // Validate the answered date of the most limiting flowplan.
-          // Note that the delay variable only reflects the delay due to
-          // material constraints. If the operationplan is moved early or late
-          // for capacity constraints, this is not included.
-          if (data.state->a_date < Date::infiniteFuture)
-          {
-            OperationPlanState at = opplan->getOperation()->setOperationPlanParameters(
-              opplan, 0.01, data.state->a_date, Date::infinitePast, false, false
-              );
-            if (at.end < matnext.getEnd()) matnext = DateRange(at.start, at.end);
-            //xxxif (matnext.getEnd() <= orig_q_date) logger << "STRANGE" << matnext << "  " << orig_q_date << "  " << at.second << "  " << opplan->getQuantity() << endl;
-          }
+          // Trigger the flow solver, which will call the buffer solver
+          data.state->q_flowplan = &*g;
+          q_qty_Flow = - data.state->q_flowplan->getQuantity(); // @todo flow quantity can change when using alternate flows -> move to flow solver!
+          q_date_Flow = data.state->q_flowplan->getDate();
+          g->getFlow()->solve(*this,&data);
 
-          // Jump out of the loop if the answered quantity is 0.
-          if (a_qty <= ROUNDING_ERROR)
+          // Validate the answered quantity
+          if (data.state->a_qty < q_qty_Flow)
           {
-            // @TODO disabled To speed up the planning the constraining flow is moved up a
-            // position in the list of flows. It'll thus be checked earlier
-            // when this operation is asked again
-            //const_cast<Operation::flowlist&>(g->getFlow()->getOperation()->getFlows()).promote(g->getFlow());
-            // There is absolutely no need to check other flowplans if the
-            // operationplan quantity is already at 0.
-            break;
+            // Update the opplan, which is required to (1) update the flowplans
+            // and to (2) take care of lot sizing constraints of this operation.
+            g->setQuantity(-data.state->a_qty, true);
+            a_qty = opplan->getQuantity();
+            incomplete = true;
+
+            // Validate the answered date of the most limiting flowplan.
+            // Note that the delay variable only reflects the delay due to
+            // material constraints. If the operationplan is moved early or late
+            // for capacity constraints, this is not included.
+            if (data.state->a_date < Date::infiniteFuture)
+            {
+              OperationPlanState at = opplan->getOperation()->setOperationPlanParameters(
+                opplan, 0.01, data.state->a_date, Date::infinitePast, false, false
+                );
+              if (at.end < matnext.getEnd()) matnext = DateRange(at.start, at.end);
+              //xxxif (matnext.getEnd() <= orig_q_date) logger << "STRANGE" << matnext << "  " << orig_q_date << "  " << at.second << "  " << opplan->getQuantity() << endl;
+            }
+
+            // Jump out of the loop if the answered quantity is 0.
+            if (a_qty <= ROUNDING_ERROR)
+            {
+              // @TODO disabled To speed up the planning the constraining flow is moved up a
+              // position in the list of flows. It'll thus be checked earlier
+              // when this operation is asked again
+              //const_cast<Operation::flowlist&>(g->getFlow()->getOperation()->getFlows()).promote(g->getFlow());
+              // There is absolutely no need to check other flowplans if the
+              // operationplan quantity is already at 0.
+              break;
+            }
           }
+          else if (data.state->a_qty >+ q_qty_Flow + ROUNDING_ERROR)
+            // Never answer more than asked.
+            // The actual operationplan could be bigger because of lot sizing.
+            a_qty = - q_qty_Flow / g->getFlow()->getQuantity();
         }
-        else if (data.state->a_qty >+ q_qty_Flow + ROUNDING_ERROR)
-          // Never answer more than asked.
-          // The actual operationplan could be bigger because of lot sizing.
-          a_qty = - q_qty_Flow / g->getFlow()->getQuantity();
       }
+    }
 
     isPlannedEarly = opplan->getDates().getEnd() < orig_dates.getEnd();
 
@@ -261,7 +271,10 @@ DECLARE_EXPORT bool SolverMRP::checkOperation
           << "   Retrying new date." << endl;
     }
     else if (matnext.getEnd() != Date::infiniteFuture && a_qty <= ROUNDING_ERROR
-      && matnext.getStart() < a_date && orig_opplan_qty > opplan->getOperation()->getSizeMinimum())
+      && matnext.getStart() < a_date && orig_opplan_qty > opplan->getOperation()->getSizeMinimum()
+      && (!opplan->getDemand() || orig_opplan_qty > opplan->getDemand()->getMinShipment())
+      && data.getSolver()->getAllowSplits()
+      && !data.safety_stock_planning)
     {
       // The reply is 0, but the next-date is not too far out.
       // If the operationplan would fit in a smaller timeframe we can potentially
@@ -273,7 +286,9 @@ DECLARE_EXPORT bool SolverMRP::checkOperation
         );
       if (opplan->getDates().getStart() >= matnext.getStart()
         && opplan->getDates().getEnd() <= a_date
-        && opplan->getQuantity() > ROUNDING_ERROR)
+        && opplan->getQuantity() > ROUNDING_ERROR
+        && (!opplan->getDemand() || opplan->getQuantity() > opplan->getDemand()->getMinShipment())
+        )
       {
         // It worked
         orig_dates = opplan->getDates();
@@ -357,11 +372,11 @@ DECLARE_EXPORT bool SolverMRP::checkOperation
 }
 
 
-DECLARE_EXPORT bool SolverMRP::checkOperationLeadtime
+DECLARE_EXPORT bool SolverMRP::checkOperationLeadTime
 (OperationPlan* opplan, SolverMRP::SolverMRPdata& data, bool extra)
 {
   // No lead time constraints
-  if (!data.constrainedPlanning || (!isFenceConstrained() && !isLeadtimeConstrained()))
+  if (!data.constrainedPlanning || (!isFenceConstrained() && !isLeadTimeConstrained()))
     return true;
 
   // Compute offset from the current date: A fence problem uses the release
@@ -370,7 +385,7 @@ DECLARE_EXPORT bool SolverMRP::checkOperationLeadtime
   // most constraining date.
   Date threshold = Plan::instance().getCurrent();
   if (isFenceConstrained()
-    && !(isLeadtimeConstrained() && opplan->getOperation()->getFence()<0L))
+    && !(isLeadTimeConstrained() && opplan->getOperation()->getFence()<0L))
     threshold += opplan->getOperation()->getFence();
 
   // Check the setup operationplan
@@ -416,7 +431,7 @@ DECLARE_EXPORT bool SolverMRP::checkOperationLeadtime
   // available timeframe: used for e.g. time-per operations
   // Note that we allow the complete post-operation time to be eaten
   if (extra)
-    // Leadtime check during operation resolver
+    // Lead time check during operation resolver
     opplan->getOperation()->setOperationPlanParameters(
       opplan, opplan->getQuantity(),
       threshold,
@@ -424,7 +439,7 @@ DECLARE_EXPORT bool SolverMRP::checkOperationLeadtime
       false
     );
   else
-    // Leadtime check during capacity resolver
+    // Lead time check during capacity resolver
     opplan->getOperation()->setOperationPlanParameters(
       opplan, opplan->getQuantity(),
       threshold,
@@ -458,7 +473,7 @@ DECLARE_EXPORT bool SolverMRP::checkOperationLeadtime
     opplan->setQuantity(0.0);
 
     // Log the constraint
-    if (data.logConstraints)
+    if (data.logConstraints && data.planningDemand)
       data.planningDemand->getConstraints().push(
         (threshold == Plan::instance().getCurrent()) ?
           ProblemBeforeCurrent::metadata :
@@ -482,7 +497,7 @@ DECLARE_EXPORT void SolverMRP::solve(const Operation* oper, void* v)
   OperationPlan *z;
 
   // Call the user exit
-  if (userexit_operation) userexit_operation.call(oper, PythonObject(data->constrainedPlanning));
+  if (userexit_operation) userexit_operation.call(oper, PythonData(data->constrainedPlanning));
 
   // Find the flow for the quantity-per. This can throw an exception if no
   // valid flow can be found.
@@ -515,7 +530,9 @@ DECLARE_EXPORT void SolverMRP::solve(const Operation* oper, void* v)
       << "' is asked: " << data->state->q_qty << "  " << data->state->q_date << endl;
 
   // Find the current list of constraints
-  Problem* topConstraint = data->planningDemand->getConstraints().top();
+  Problem* topConstraint = data->planningDemand ?
+    data->planningDemand->getConstraints().top() :
+    NULL;
 
   // Subtract the post-operation time
   Date prev_q_date_max = data->state->q_date_max;
@@ -543,7 +560,6 @@ DECLARE_EXPORT void SolverMRP::solve(const Operation* oper, void* v)
         data->state->curOwnerOpplan
         );
     data->state->curDemand = NULL;
-    a->getOperationPlan()->setMotive(data->state->motive);
     z = a->getOperationPlan();
     data->add(a);
   }
@@ -569,7 +585,7 @@ DECLARE_EXPORT void SolverMRP::solve(const Operation* oper, void* v)
   // Ignore any constraints if we get a complete reply.
   // Sometimes constraints are flagged due to a pre- or post-operation time.
   // Such constraints ultimately don't result in lateness and can be ignored.
-  if (data->state->a_qty >= orig_q_qty - ROUNDING_ERROR)
+  if (data->state->a_qty >= orig_q_qty - ROUNDING_ERROR && data->planningDemand)
     data->planningDemand->getConstraints().pop(topConstraint);
 
   // Increment the cost
@@ -585,6 +601,14 @@ DECLARE_EXPORT void SolverMRP::solve(const Operation* oper, void* v)
   }
   assert(data->state->a_qty >= 0);
 
+  // Optionally add a penalty depending on the amount of quantity already planned on
+  // this operation. This is useful to create a plan where the loading is divided
+  // equally over the different available resources, when the search mode MINCOSTPENALTY
+  // is used.
+  if (data->getSolver()->getRotateResources())
+    for (OperationPlan::iterator rr = oper->getOperationPlans(); rr != OperationPlan::end(); ++rr)
+      data->state->a_penalty += rr->getQuantity();
+
   // Message
   if (data->getSolver()->getLogLevel()>1)
     logger << indent(oper->getLevel()) << "   Operation '" << oper->getName()
@@ -599,7 +623,7 @@ DECLARE_EXPORT void SolverMRP::solve(const OperationRouting* oper, void* v)
   SolverMRPdata* data = static_cast<SolverMRPdata*>(v);
 
   // Call the user exit
-  if (userexit_operation) userexit_operation.call(oper, PythonObject(data->constrainedPlanning));
+  if (userexit_operation) userexit_operation.call(oper, PythonData(data->constrainedPlanning));
 
   // Message
   if (data->getSolver()->getLogLevel()>1)
@@ -634,7 +658,7 @@ DECLARE_EXPORT void SolverMRP::solve(const OperationRouting* oper, void* v)
         e != oper->getSubOperations().end();
         ++e)
     {
-      f = (*e)->findFlow(data->state->curBuffer, data->state->q_date);
+      f = (*e)->getOperation()->findFlow(data->state->curBuffer, data->state->q_date);
       if (f)
       {
         // Flow on routing steps
@@ -675,7 +699,9 @@ DECLARE_EXPORT void SolverMRP::solve(const OperationRouting* oper, void* v)
     data->state->q_date, data->state->curDemand, data->state->curOwnerOpplan, false
     );
   data->state->curDemand = NULL;
-  a->getOperationPlan()->setMotive(data->state->motive);
+
+  // Quantity can be changed because of size constraints on the top operation
+  a_qty = a->getOperationPlan()->getQuantity();
 
   // Make sure the subopplans know their owner & store the previous value
   OperationPlan *prev_owner_opplan = data->state->curOwnerOpplan;
@@ -686,7 +712,7 @@ DECLARE_EXPORT void SolverMRP::solve(const OperationRouting* oper, void* v)
 
   // Loop through the steps
   Date max_Date;
-  TimePeriod delay;
+  Duration delay;
   Date top_q_date(data->state->q_date);
   Date q_date;
   for (Operation::Operationlist::const_reverse_iterator
@@ -699,7 +725,7 @@ DECLARE_EXPORT void SolverMRP::solve(const OperationRouting* oper, void* v)
     data->state->q_date = data->state->curOwnerOpplan->getDates().getStart();
     Buffer *tmpBuf = data->state->curBuffer;
     q_date = data->state->q_date;
-    (*e)->solve(*this,v);  // @todo if the step itself has child operations, the curOwnerOpplan field is changed here!!!
+    (*e)->getOperation()->solve(*this,v);  // @todo if the step itself has child operations, the curOwnerOpplan field is changed here!!!
     a_qty = data->state->a_qty;
     data->state->curBuffer = tmpBuf;
 
@@ -801,9 +827,9 @@ DECLARE_EXPORT void SolverMRP::solve(const OperationAlternate* oper, void* v)
   Demand *d = data->state->curDemand;
 
   // Call the user exit
-  if (userexit_operation) userexit_operation.call(oper, PythonObject(data->constrainedPlanning));
+  if (userexit_operation) userexit_operation.call(oper, PythonData(data->constrainedPlanning));
 
-  unsigned int loglevel = data->getSolver()->getLogLevel();
+  short loglevel = data->getSolver()->getLogLevel();
   SearchMode search = oper->getSearch();
 
   // Message
@@ -836,7 +862,9 @@ DECLARE_EXPORT void SolverMRP::solve(const OperationAlternate* oper, void* v)
 
   // Remember the top constraint
   bool originalLogConstraints = data->logConstraints;
-  Problem* topConstraint = data->planningDemand->getConstraints().top();
+  Problem* topConstraint = data->planningDemand ?
+    data->planningDemand->getConstraints().top() :
+    NULL;
 
   // Try all alternates:
   // - First, all alternates that are fully effective in the order of priority.
@@ -847,7 +875,7 @@ DECLARE_EXPORT void SolverMRP::solve(const OperationAlternate* oper, void* v)
   bool effectiveOnly = true;
   Date a_date = Date::infiniteFuture;
   Date ask_date;
-  Operation *firstAlternate = NULL;
+  SubOperation *firstAlternate = NULL;
   double firstFlowPer;
   while (a_qty > 0)
   {
@@ -866,14 +894,10 @@ DECLARE_EXPORT void SolverMRP::solve(const OperationAlternate* oper, void* v)
       CommandManager::Bookmark* topcommand = data->setBookmark();
       bool nextalternate = true;
 
-      // Operations with 0 priority are considered unavailable
-      const OperationAlternate::alternateProperty& props
-        = oper->getProperties(*altIter);
-
       // Filter out alternates that are not suitable
-      if (props.first == 0.0
-        || (effectiveOnly && !props.second.within(data->state->q_date))
-        || (!effectiveOnly && props.second.getEnd() > data->state->q_date)
+      if ((*altIter)->getPriority() == 0
+        || (effectiveOnly && !(*altIter)->getEffective().within(data->state->q_date))
+        || (!effectiveOnly && (*altIter)->getEffectiveEnd() > data->state->q_date)
         )
       {
         ++altIter;
@@ -887,14 +911,14 @@ DECLARE_EXPORT void SolverMRP::solve(const OperationAlternate* oper, void* v)
       }
 
       // Establish the ask date
-      ask_date = effectiveOnly ? origQDate : props.second.getEnd();
+      ask_date = effectiveOnly ? origQDate : (*altIter)->getEffectiveEnd();
 
       // Find the flow into the requesting buffer. It may or may not exist, since
       // the flow could already exist on the top operationplan
       double sub_flow_qty_per = 0.0;
       if (buf)
       {
-        Flow* f = (*altIter)->findFlow(buf, ask_date);
+        Flow* f = (*altIter)->getOperation()->findFlow(buf, ask_date);
         if (f && f->getQuantity() > 0.0)
           sub_flow_qty_per = f->getQuantity();
         else if (!top_flow_exists)
@@ -935,7 +959,8 @@ DECLARE_EXPORT void SolverMRP::solve(const OperationAlternate* oper, void* v)
       {
         // Forget previous constraints if we are replanning the first alternate
         // multiple times
-        data->planningDemand->getConstraints().pop(topConstraint);
+        if (data->planningDemand)
+          data->planningDemand->getConstraints().pop(topConstraint);
         // Potentially keep track of constraints
         data->logConstraints = originalLogConstraints;
       }
@@ -947,7 +972,6 @@ DECLARE_EXPORT void SolverMRP::solve(const OperationAlternate* oper, void* v)
           oper, a_qty, Date::infinitePast, ask_date,
           d, prev_owner_opplan, false
           );
-      a->getOperationPlan()->setMotive(data->state->motive);
       if (!prev_owner_opplan) data->add(a);
 
       // Create a sub operationplan
@@ -966,15 +990,18 @@ DECLARE_EXPORT void SolverMRP::solve(const OperationAlternate* oper, void* v)
       if (search == PRIORITY)
       {
         // Message
-        if (loglevel)
+        if (loglevel>1)
           logger << indent(oper->getLevel()) << "   Alternate operation '" << oper->getName()
             << "' tries alternate '" << *altIter << "' " << endl;
-        (*altIter)->solve(*this,v);
+        (*altIter)->getOperation()->solve(*this,v);
       }
       else
       {
         data->getSolver()->setLogLevel(0);
-        try {(*altIter)->solve(*this,v);}
+        try
+        {
+          (*altIter)->getOperation()->solve(*this,v);
+        }
         catch (...)
         {
           data->getSolver()->setLogLevel(loglevel);
@@ -1018,7 +1045,7 @@ DECLARE_EXPORT void SolverMRP::solve(const OperationAlternate* oper, void* v)
       // Message
       if (loglevel && search != PRIORITY)
         logger << indent(oper->getLevel()) << "   Alternate operation '" << oper->getName()
-          << "' evaluates alternate '" << *altIter << "': quantity " << data->state->a_qty
+          << "' evaluates alternate '" << (*altIter)->getOperation() << "': quantity " << data->state->a_qty
           << ", cost " << deltaCost << ", penalty " << deltaPenalty << endl;
 
       // Process the result
@@ -1067,7 +1094,7 @@ DECLARE_EXPORT void SolverMRP::solve(const OperationAlternate* oper, void* v)
         {
           // Found a better alternate
           bestAlternateValue = val;
-          bestAlternateSelection = *altIter;
+          bestAlternateSelection = (*altIter)->getOperation();
           bestAlternateQuantity = data->state->a_qty;
           bestFlowPer = sub_flow_qty_per + top_flow_qty_per;
           bestQDate = ask_date;
@@ -1104,7 +1131,6 @@ DECLARE_EXPORT void SolverMRP::solve(const OperationAlternate* oper, void* v)
           oper, a_qty, Date::infinitePast, bestQDate,
           d, prev_owner_opplan, false
           );
-      a->getOperationPlan()->setMotive(data->state->motive);
       if (!prev_owner_opplan) data->add(a);
 
       // Recreate the ask
@@ -1156,7 +1182,7 @@ DECLARE_EXPORT void SolverMRP::solve(const OperationAlternate* oper, void* v)
   } // End while loop until the a_qty > 0
 
   // Forget any constraints if we are not short or are planning unconstrained
-  if (a_qty < ROUNDING_ERROR || !originalLogConstraints)
+  if (data->planningDemand && (a_qty < ROUNDING_ERROR || !originalLogConstraints))
     data->planningDemand->getConstraints().pop(topConstraint);
 
   // Unconstrained plan: If some unplanned quantity remains, switch to
@@ -1181,7 +1207,6 @@ DECLARE_EXPORT void SolverMRP::solve(const OperationAlternate* oper, void* v)
         oper, a_qty, Date::infinitePast, origQDate,
         d, prev_owner_opplan, false
         );
-    a->getOperationPlan()->setMotive(data->state->motive);
     if (!prev_owner_opplan) data->add(a);
 
     // Recreate the ask
@@ -1192,7 +1217,7 @@ DECLARE_EXPORT void SolverMRP::solve(const OperationAlternate* oper, void* v)
     data->state->curBuffer = NULL;  // Because we already took care of it... @todo not correct if the suboperation is again a owning operation
 
     // Create a sub operationplan and solve constraints
-    firstAlternate->solve(*this,v);
+    firstAlternate->getOperation()->solve(*this,v);
 
     // Expand flows of the top operationplan.
     data->state->q_qty = data->state->a_qty;
@@ -1232,6 +1257,183 @@ DECLARE_EXPORT void SolverMRP::solve(const OperationAlternate* oper, void* v)
   // Message
   if (loglevel>1)
     logger << indent(oper->getLevel()) << "   Alternate operation '" << oper->getName()
+      << "' answers: " << data->state->a_qty << "  " << data->state->a_date
+      << "  " << data->state->a_cost << "  " << data->state->a_penalty << endl;
+}
+
+
+DECLARE_EXPORT void SolverMRP::solve(const OperationSplit* oper, void* v)
+{
+  SolverMRPdata *data = static_cast<SolverMRPdata*>(v);
+  Date origQDate = data->state->q_date;
+  double origQqty = data->state->q_qty;
+  Buffer *buf = data->state->curBuffer;
+  Demand *dmd = data->state->curDemand;
+
+  // Call the user exit
+  if (userexit_operation) userexit_operation.call(oper, PythonData(data->constrainedPlanning));
+
+  short loglevel = data->getSolver()->getLogLevel();
+
+  // Message
+  if (loglevel>1)
+    logger << indent(oper->getLevel()) << "   Split operation '" << oper->getName()
+      << "' is asked: " << data->state->q_qty << "  " << data->state->q_date << endl;
+
+  // Make sure sub-operationplans know their owner & store the previous value
+  OperationPlan *prev_owner_opplan = data->state->curOwnerOpplan;
+
+  double top_flow_qty_per = 0.0;
+  if (buf)
+  {
+    // Find the flow into the requesting buffer for the quantity-per
+    Flow* f = oper->findFlow(buf, data->state->q_date);
+    if (f && f->getQuantity() > 0.0)
+    {
+      if (f->getType() == *FlowFixedEnd::metadata || f->getType() == *FlowFixedStart::metadata)
+        throw DataException("Fixed flows on a split operation are not supported");
+      top_flow_qty_per = f->getQuantity();
+    }
+  }
+  else
+    // We have a split operation as the delivery operation of a demand.
+    top_flow_qty_per = 1.0;
+
+  // Compute the sum of all effective percentages.
+  int sum_percent = 0;
+  for (Operation::Operationlist::const_iterator iter = oper->getSubOperations().begin();
+    iter != oper->getSubOperations().end();
+    ++iter)
+  {
+    if ((*iter)->getEffective().within(data->state->q_date))
+      sum_percent += (*iter)->getPriority();
+  }
+  if (!sum_percent)
+    // Oops, no effective suboperations found.
+    // TODO Alternative: Look for an earlier date where at least one operation is effective
+    throw DataException("No operation is effective for split operation '" + oper->getName() + "' at " + string(data->state->q_date));
+
+  // Loop until we find quantity that can be planned on each alternate.
+  bool recheck = true;
+  double loop_qty = data->state->q_qty;
+  CommandCreateOperationPlan *top_cmd = NULL;
+  while (recheck)
+  {
+    // Set a bookmark in the command list.
+    CommandManager::Bookmark* topcommand = data->setBookmark();
+
+    // Create the top operationplan.
+    top_cmd = new CommandCreateOperationPlan(
+      oper, top_flow_qty_per ? origQqty / top_flow_qty_per : origQqty,
+      Date::infinitePast, origQDate, dmd, prev_owner_opplan, false
+      );
+    if (!prev_owner_opplan) data->add(top_cmd);
+
+    recheck = false;
+    int planned_percentages = 0;
+    double planned_quantity = 0.0;
+    for (Operation::Operationlist::const_reverse_iterator iter = oper->getSubOperations().rbegin();
+      iter != oper->getSubOperations().rend();
+      ++iter)
+    {
+      // Verify effectivity date and percentage > 0
+      if (!(*iter)->getPriority() || !(*iter)->getEffective().within(origQDate))
+        continue;
+
+      // Message
+      if (loglevel>1)
+        logger << indent(oper->getLevel()) << "   Split operation '" << oper->getName()
+          << "' asks alternate '" << (*iter)->getOperation() << "' " << endl;
+
+      // Find the flow
+      Flow* f = (*iter)->getOperation()->findFlow(buf, data->state->q_date);
+      double flow_qty_per = 0.0;
+      if (f && f->getQuantity()>0.0)
+      {
+        if (top_flow_qty_per)
+          throw DataException("Split operation must have producing flow on the parent opration OR the child operations");
+        if (f->getType() == *FlowFixedEnd::metadata || f->getType() == *FlowFixedStart::metadata)
+          throw DataException("Fixed flows on a split operation are not supported");
+        flow_qty_per = f->getQuantity();
+      }
+      else if (!top_flow_qty_per)
+        // The producing operation doesn't have a valid flow into the current
+        // buffer. Either it is missing or it is producing a negative quantity.
+        throw DataException("Invalid producing operation '" + oper->getName()
+            + "' for buffer '" + data->state->curBuffer->getName() + "'");
+
+      // Plan along this alternate
+      double asked = (loop_qty - planned_quantity)
+        * (*iter)->getPriority() / (sum_percent - planned_percentages)
+        / (flow_qty_per + top_flow_qty_per);
+      if (asked > 0)
+      {
+        // Due to minimum, maximum and multiple size constraints alternates can
+        // plan a different quantity than requested. Asked quantity can thus go
+        // negative and we skip some alternate.
+        data->state->q_qty = asked;
+        data->state->q_date = origQDate;
+        data->state->curDemand = NULL;
+        data->state->curOwnerOpplan = top_cmd->getOperationPlan();
+        data->state->curBuffer = NULL;  // Because we already took care of it... @todo not correct if the suboperation is again a owning operation
+        (*iter)->getOperation()->solve(*this,v);
+      }
+
+      // Evaluate the reply
+      if (asked <= 0.0)
+        // No intention to plan along this alternate
+        continue;
+      else if (data->state->a_qty == 0)
+      {
+        // Nothing can be planned here: break out of the loop and don't recheck.
+        // The a_date is used below as reply from the top operation.
+        loop_qty = 0.0;
+        // Undo all plans done on any of the previous alternates
+        data->rollback(topcommand);
+        top_cmd = NULL;
+        break;
+      }
+      else if (data->state->a_qty <= asked - ROUNDING_ERROR)
+      {
+        // Planned short along this alternate. Replan all alternates
+        // for a smaller quantity.
+        recheck = true;
+        loop_qty *= data->state->a_qty / asked;
+        // Undo all plans done on any of the previous alternates
+        data->rollback(topcommand);
+        top_cmd = NULL;
+        break;
+      }
+      else
+      {
+        // Successfully planned along this alternate.
+        planned_quantity += data->state->a_qty * (flow_qty_per + top_flow_qty_per);
+        planned_percentages += (*iter)->getPriority();
+      }
+    }
+  }
+
+  if (loop_qty && top_cmd)
+  {
+    // Expand flows of the top operationplan.
+    data->state->q_qty = top_cmd->getOperationPlan()->getQuantity();
+    data->state->q_date = origQDate;
+    data->state->curOwnerOpplan->createFlowLoads();
+    data->getSolver()->checkOperation(top_cmd->getOperationPlan(), *data);
+  }
+
+  // Make sure other operationplans don't take this one as owner any more.
+  // We restore the previous owner, which could be NULL.
+  data->state->curOwnerOpplan = prev_owner_opplan;
+
+  // Final reply
+  data->state->a_qty = loop_qty;
+  if (loop_qty)
+    data->state->a_date = Date::infiniteFuture;
+
+  // Message
+  if (loglevel>1)
+    logger << indent(oper->getLevel()) << "   Split operation '" << oper->getName()
       << "' answers: " << data->state->a_qty << "  " << data->state->a_date
       << "  " << data->state->a_cost << "  " << data->state->a_penalty << endl;
 }

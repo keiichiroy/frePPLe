@@ -44,7 +44,8 @@
             <quantity>-1</quantity>
           </flow>
         </flows>
-        <steps>
+        <suboperations>
+          <suboperation>
           <operation name="assemble product step A" xsi:type="operation_fixed_time" duration="P1D">
             <flows>
               <flow xsi:type="flow_start">
@@ -53,6 +54,9 @@
               </flow>
             </flows>
           </operation>
+          <priority>1</priority>
+          </suboperation>
+          <suboperation>
           <operation name="assemble product step B" xsi:type="operation_time_per" duration="P1D" duration_per="P1D">
             <flows>
               <flow xsi:type="flow_start">
@@ -65,6 +69,9 @@
               </flow>
             </flows>
           </operation>
+          <priority>2</priority>
+          </suboperation>
+          <suboperation>
           <operation name="assemble product step C" xsi:type="operation_fixed_time" duration="P1D">
             <flows>
               <flow xsi:type="flow_start">
@@ -73,7 +80,9 @@
               </flow>
             </flows>
           </operation>
-        </steps>
+          <priority>3</priority>
+          </suboperation>
+        </suboperations>
       </producing>
     </buffer>
   </buffers>
@@ -240,12 +249,11 @@
   </demands>
 
 <?python
-from __future__ import print_function
 print("CREATING CONSTRAINED PLAN")
-frepple.solver_mrp(name="MRP", plantype=1, constraints=15, loglevel=2).solve()
+frepple.solver_mrp(plantype=1, constraints=15, loglevel=2).solve()
 frepple.saveplan("output.1.xml")
 print("CREATING UNCONSTRAINED PLAN")
-frepple.solver_mrp(name="MRP", plantype=2, constraints=15, loglevel=2).solve()
+frepple.solver_mrp(plantype=2, constraints=15, loglevel=2).solve()
 frepple.saveplan("output.2.xml")
 ?>
 

@@ -48,18 +48,18 @@
       <item name="component A" />
       <location name="Location 1" />
       <producing name="supply component A" xsi:type="operation_alternate">
-        <alternates>
-          <alternate>
+        <suboperations>
+          <suboperation>
             <operation name="supply component A from supplier 1"
               duration="P1D" xsi:type="operation_fixed_time" />
             <priority>1</priority>
-          </alternate>
-          <alternate>
+          </suboperation>
+          <suboperation>
             <operation name="supply component A from supplier 2"
               duration="P2D" xsi:type="operation_fixed_time" />
             <priority>2</priority>
-          </alternate>
-        </alternates>
+          </suboperation>
+        </suboperations>
       </producing>
     </buffer>
     <buffer name="buffer B">
@@ -156,7 +156,7 @@
 <?python
 
 # Starting position...
-solver = frepple.solver_mrp(name="MRP", plantype=2)
+solver = frepple.solver_mrp(plantype=2)
 frepple.saveXMLfile("output.1.xml")
 solver.solve()
 frepple.saveplan("output.2.xml")
@@ -205,7 +205,7 @@ frepple.saveXMLfile("output.6.xml")
 frepple.readXMLdata(r'''
       <plan>
         <operationplans>
-          <operationplan id="27" action="R"/>
+          <operationplan id="11" action="R"/>
         </operationplans>
       </plan>''')
 # Now we delete a setup matrix.

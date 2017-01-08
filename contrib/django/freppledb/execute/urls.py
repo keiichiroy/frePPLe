@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba
+# Copyright (C) 2007-2013 by frePPLe bvba
 #
 # This library is free software; you can redistribute it and/or modify it
 # under the terms of the GNU Affero General Public License as published
@@ -15,16 +15,17 @@
 # License along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-from django.conf.urls import patterns
+from django.conf.urls import patterns, url
 
 import freppledb.execute.views
 
 # Automatically add these URLs when the application is installed
 autodiscover = True
 
-urlpatterns = patterns('',
-    (r'^execute/$', freppledb.execute.views.TaskReport.as_view()),
-    (r'^execute/logfrepple/$', freppledb.execute.views.logfile),
-    (r'^execute/launch/(.+)/$', freppledb.execute.views.LaunchTask),
-    (r'^execute/cancel/(.+)/$', freppledb.execute.views.CancelTask),
+urlpatterns = patterns(
+  '',   # Prefix
+  url(r'^execute/$', freppledb.execute.views.TaskReport.as_view(), name="execute"),
+  url(r'^execute/logfrepple/$', freppledb.execute.views.logfile, name="execute_log"),
+  url(r'^execute/launch/(.+)/$', freppledb.execute.views.LaunchTask, name="execute_launch"),
+  url(r'^execute/cancel/(.+)/$', freppledb.execute.views.CancelTask, name="execute_cancel"),
 )

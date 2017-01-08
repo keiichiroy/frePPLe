@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba                 *
+ * Copyright (C) 2007-2015 by frePPLe bvba                                 *
  *                                                                         *
  * This library is free software; you can redistribute it and/or modify it *
  * under the terms of the GNU Affero General Public License as published   *
@@ -18,6 +18,7 @@
  *                                                                         *
  ***************************************************************************/
 
+#pragma once
 #ifndef SOLVER_H
 #define SOLVER_H
 
@@ -29,6 +30,66 @@
 
 namespace frepple
 {
+
+
+/** @brief A lightweight solver class to remove excess material.
+  *
+  * The class works in a single thread only.
+  */
+class OperatorDelete : public Solver
+{
+  public:
+	/** Constructor. */
+    DECLARE_EXPORT OperatorDelete(CommandManager* c = NULL) : cmds(c)
+    {
+      initType(metadata);
+    }
+
+    /** Destructor. */
+    virtual DECLARE_EXPORT ~OperatorDelete() {}
+
+    /** Python method for running the solver. */
+    static PyObject* solve(PyObject*, PyObject*);
+
+    /** Remove all entities for excess material that can be removed. */
+    DECLARE_EXPORT void solve(void *v = NULL);
+
+    /** Remove an operationplan and all its upstream supply.<br>
+      * The argument operationplan is invalid when this function returns!
+      */
+    DECLARE_EXPORT void solve(OperationPlan*, void* = NULL);
+
+    /** Remove excess from a buffer and all its upstream colleagues. */
+    DECLARE_EXPORT void solve(const Buffer*, void* = NULL);
+
+    /** Remove excess starting from a single demand. */
+    DECLARE_EXPORT  void solve(const Demand*, void* = NULL);
+
+    /** Remove excess operations on a resource. */
+    DECLARE_EXPORT void solve(const Resource*, void* = NULL);
+
+    static int initialize();
+    static PyObject* create(PyTypeObject*, PyObject*, PyObject*);
+    virtual const MetaClass& getType() const {return *metadata;}
+    static DECLARE_EXPORT const MetaClass* metadata;
+
+  private:
+    /** Auxilary function to push consuming or producing buffers of an
+      * operationplan to the stack.<br>
+      * When the argument is true, we push the consumers.
+      * When the argument is false, we push the producers.
+      */
+	  void pushBuffers(OperationPlan*, bool);
+
+	  /** A list of buffers still to scan for excess. */
+	  vector<Buffer*> buffersToScan;   // TODO Use a different data structure to allow faster lookups and sorting?
+
+	  /** A pointer to a command manager that takes care of the commit and
+	    * rollback of all actions.
+	    */
+	  CommandManager* cmds;
+};
+
 
 /** @brief This solver implements a heuristic algorithm for planning demands.
   *
@@ -52,6 +113,21 @@ class SolverMRP : public Solver
       * By default no constraints are enabled. */
     short constrts;
 
+    bool allowSplits;
+
+    bool rotateResources;
+
+    /** When set to false we solve only for the entity being called. This is
+      * used when you want to control manual the sequence of the planning
+      * loop.
+      */
+    bool propagate;
+
+    /** Copy the user exit functions from the custom dictionary into the
+      * internal fields.
+      */
+    DECLARE_EXPORT void update_user_exits();
+
     /** Behavior of this solver method is:
       *  - It will ask the consuming flows for the required quantity.
       *  - The quantity asked for takes into account the quantity_per of the
@@ -68,6 +144,33 @@ class SolverMRP : public Solver
       *    the next routing step.
       */
     DECLARE_EXPORT void solve(const OperationRouting*, void* = NULL);
+
+    /** Behavior of this solver method is:
+      *  - The solver asks each alternate for the percentage of the requested
+      *    quantity. We ask the operation with the highest percentage first,
+      *    and only ask suboperations that are effective on the requested date.
+      *  - The percentages don't need to add up to 100. We scale the proportiona
+      *  - If an alternate replies more than requested (due to multiple and
+      *    minimum size) this is considered when dividing the remaining
+      *    quantity over the others.
+      *  - If an alternate can't deliver the requested percentage of the
+      *    quantity, we undo all previous alternates and retry planning
+      *    for a rescaled total quantity.
+      *    The split percentage is thus a hard constraint that must be
+      *    respected - a constraint on a single alternate also constrains the
+      *    planned quantity on all others.
+      *    Obviously if an alternate replies 0 the total rescaled quantity
+      *    remains 0.
+      *  - A case not handled with this logic is when the split operations
+      *    merge again upstream. If a shared upstream constraint is limiting
+      *    the total quantity, the solver doesn't see this and can't react
+      *    nicely to it. The solution would be that we a) detect this kind
+      *    of situation and b) iteratively try to split an increasing total
+      *    quantity. TODO...
+      *  - For each effective alternate suboperation we create 1
+      *    suboperationplan of the top operationplan.
+      */
+    DECLARE_EXPORT void solve(const OperationSplit*,void* = NULL);
 
     /** Behavior of this solver method is:
       *  - The solver loops through each alternate operation in order of
@@ -107,6 +210,9 @@ class SolverMRP : public Solver
       *  - The solver completely ignores the maximum target.
       */
     DECLARE_EXPORT void solve(const Buffer*, void* = NULL);
+
+    /** Called by the previous method to solve for safety stock only. */
+    DECLARE_EXPORT void solveSafetyStock(const Buffer*, void* = NULL);
 
     /** Behavior of this solver method:
       *  - When the inventory drops below the minimum inventory level, a new
@@ -160,6 +266,20 @@ class SolverMRP : public Solver
     DECLARE_EXPORT void solve(const ResourceInfinite*,void* = NULL);
 
     /** Behavior of this solver method:
+      *  - The operationplan is checked for a capacity in the time bucket
+      *    where its start date falls.
+      *  - If no capacity is found in that bucket, we check in the previous
+      *    buckets (until we hit the limit defined by the maxearly field).
+      *    We move the operationplan such that it starts one second before
+      *    the end of the earlier bucket.
+      *  - If no available time bucket is found in the allowed time fence,
+      *    we scan for the first later bucket which still has capacity left.
+      *    And we return the start date of that bucket as the answer-date to
+      *    the solver.
+      */
+    DECLARE_EXPORT void solve(const ResourceBuckets*,void* = NULL);
+
+    /** Behavior of this solver method:
       *  - This method simply passes on the request to the referenced resource.
       *    With the current model structure it could easily be avoided (and
       *    thus gain a bit in performance), but we wanted to include it anyway
@@ -168,6 +288,15 @@ class SolverMRP : public Solver
       */
     DECLARE_EXPORT void solve(const Load*, void* = NULL);
 
+    /** Choose a resource.<br>
+      * Normally the chosen resource is simply the resource specified on the
+      * load.<br>
+      * When the load specifies a certain skill and an aggregate resource, then
+      * we search for appropriate child resources.
+      */
+    DECLARE_EXPORT void chooseResource(const Load*, void*);
+
+  public:
     /** Behavior of this solver method:
       *  - Respects the following demand planning policies:<br>
       *     1) Maximum allowed lateness
@@ -178,15 +307,6 @@ class SolverMRP : public Solver
       */
     DECLARE_EXPORT void solve(const Demand*, void* = NULL);
 
-    /** Choose a resource.<br>
-      * Normally the chosen resource is simply the resource specified on the 
-      * load.<br>
-      * When the load specifies a certain skill and an aggregate resource, then
-      * we search for appropriate child resources.
-      */
-    DECLARE_EXPORT void chooseResource(const Load*, void*);
-
-  public:
     /** This is the main solver method that will appropriately call the other
       * solve methods.<br>
       * The demands in the model will all be sorted with the criteria defined in
@@ -196,23 +316,22 @@ class SolverMRP : public Solver
     DECLARE_EXPORT void solve(void *v = NULL);
 
     /** Constructor. */
-    SolverMRP(const string& n) : Solver(n), constrts(15), plantype(1),
-      lazydelay(86400L), iteration_threshold(1), iteration_accuracy(0.01),
-      autocommit(true)
-    { initType(metadata); }
+    DECLARE_EXPORT SolverMRP() : constrts(15), allowSplits(true), rotateResources(true),
+      propagate(true), plantype(1), lazydelay(86400L), iteration_threshold(1),
+      iteration_accuracy(0.01), iteration_max(0), autocommit(true),
+      planSafetyStockFirst(false), erasePreviousFirst(true)
+    {
+      initType(metadata);
+      commands.sol = this;
+    }
 
     /** Destructor. */
-    virtual ~SolverMRP() {}
+    virtual DECLARE_EXPORT ~SolverMRP() {}
 
-    DECLARE_EXPORT void writeElement(XMLOutput*, const Keyword&, mode=DEFAULT) const;
-    DECLARE_EXPORT void endElement(XMLInput& pIn, const Attribute& pAttr, const DataElement& pElement);
-    virtual DECLARE_EXPORT PyObject* getattro(const Attribute&);
-    virtual DECLARE_EXPORT int setattro(const Attribute&, const PythonObject&);
     static int initialize();
-
+    static PyObject* create(PyTypeObject*, PyObject*, PyObject*);
     virtual const MetaClass& getType() const {return *metadata;}
     static DECLARE_EXPORT const MetaClass* metadata;
-    virtual size_t getSize() const {return sizeof(SolverMRP);}
 
     /** Static constant for the LEADTIME constraint type.<br>
       * The numeric value is 1.
@@ -248,32 +367,53 @@ class SolverMRP : public Solver
 
     /** Update the constraints to be considered by this solver. This field may
       * not be applicable for all solvers. */
-    void setConstraints(short i) {constrts = i;}
+    void setConstraints(short i)
+    {
+      constrts = i;
+    }
 
     /** Returns the constraints considered by the solve. */
-    short getConstraints() const {return constrts;}
+    short getConstraints() const
+    {
+      return constrts;
+    }
 
     /** Returns true if this solver respects the operation release fences.
       * The solver isn't allowed to create any operation plans within the
       * release fence.
       */
-    bool isFenceConstrained() const {return (constrts & FENCE)>0;}
+    bool isFenceConstrained() const
+    {
+      return (constrts & FENCE)>0;
+    }
 
     /** Returns true if the solver respects the current time of the plan.
       * The solver isn't allowed to create any operation plans in the past.
       */
-    bool isLeadtimeConstrained() const {return (constrts & LEADTIME)>0;}
+    bool isLeadTimeConstrained() const
+    {
+      return (constrts & LEADTIME)>0;
+    }
 
     /** Returns true if the solver respects the material procurement
       * constraints on procurement buffers.
       */
-    bool isMaterialConstrained() const {return (constrts & MATERIAL)>0;}
+    bool isMaterialConstrained() const
+    {
+      return (constrts & MATERIAL)>0;
+    }
 
     /** Returns true if the solver respects capacity constraints. */
-    bool isCapacityConstrained() const {return (constrts & CAPACITY)>0;}
+    bool isCapacityConstrained() const
+    {
+      return (constrts & CAPACITY)>0;
+    }
 
     /** Returns true if any constraint is relevant for the solver. */
-    bool isConstrained() const {return constrts>0;}
+    bool isConstrained() const
+    {
+      return constrts>0;
+    }
 
     /** Returns the plan type:
       *  - 1: Constrained plan.<br>
@@ -293,7 +433,10 @@ class SolverMRP : public Solver
       *       The demand is always fully met on time.
       * The default is 1.
       */
-    short getPlanType() const {return plantype;}
+    short getPlanType() const
+    {
+      return plantype;
+    }
 
     void setPlanType(short b)
     {
@@ -313,11 +456,14 @@ class SolverMRP : public Solver
 
     /** Return the time increment between requests when the answered reply
       * date isn't usable. */
-    TimePeriod getLazyDelay() const {return lazydelay;}
+    Duration getLazyDelay() const
+    {
+      return lazydelay;
+    }
 
     /** Update the time increment between requests when the answered reply
       * date isn't usable. */
-    void setLazyDelay(TimePeriod l)
+    void setLazyDelay(Duration l)
     {
       if (l <= 0L) throw DataException("Invalid lazy delay");
       lazydelay = l;
@@ -326,7 +472,10 @@ class SolverMRP : public Solver
     /** Get the threshold to stop iterating when the delta between iterations
       * is less than this absolute threshold.
       */
-    double getIterationThreshold() const {return iteration_threshold;}
+    double getIterationThreshold() const
+    {
+      return iteration_threshold;
+    }
 
     /** Set the threshold to stop iterating when the delta between iterations
       * is less than this absolute threshold.<br>
@@ -342,7 +491,10 @@ class SolverMRP : public Solver
     /** Get the threshold to stop iterating when the delta between iterations
       * is less than this percentage threshold.
       */
-    double getIterationAccuracy() const {return iteration_accuracy;}
+    double getIterationAccuracy() const
+    {
+      return iteration_accuracy;
+    }
 
     /** Set the threshold to stop iterating when the delta between iterations
       * is less than this percentage threshold.<br>
@@ -355,58 +507,97 @@ class SolverMRP : public Solver
       iteration_accuracy = d;
     }
 
+    /** Return the maximum number of asks allowed to plan a demand.
+      * If the can't plan a demand within this limit, we consider it
+      * unplannable.
+      */
+    unsigned long getIterationMax() const
+    {
+      return iteration_max;
+    }
+
+    /** Update the maximum number of asks allowed to plan a demand.
+      * If the can't plan a demand within this limit, we consider it
+      * unplannable.
+      */
+    void setIterationMax(unsigned long d)
+    {
+      iteration_max = d;
+    }
+
     /** Return whether or not we automatically commit the changes after
       * planning a demand. */
-    bool getAutocommit() const {return autocommit;}
+    bool getAutocommit() const
+    {
+      return autocommit;
+    }
 
     /** Update whether or not we automatically commit the changes after
       * planning a demand. */
-    void setAutocommit(const bool b) {autocommit = b;}
+    void setAutocommit(const bool b)
+    {
+      autocommit = b;
+    }
 
     /** Specify a Python function that is called before solving a flow. */
-    DECLARE_EXPORT void setUserExitFlow(const string& n) {userexit_flow = n;}
-
-    /** Specify a Python function that is called before solving a flow. */
-    DECLARE_EXPORT void setUserExitFlow(PyObject* p) {userexit_flow = p;}
+    DECLARE_EXPORT void setUserExitFlow(PythonFunction n)
+    {
+      userexit_flow = n;
+    }
 
     /** Return the Python function that is called before solving a flow. */
-    PythonFunction getUserExitFlow() const {return userexit_flow;}
+    PythonFunction getUserExitFlow() const
+    {
+      return userexit_flow;
+    }
 
     /** Specify a Python function that is called before solving a demand. */
-    DECLARE_EXPORT void setUserExitDemand(const string& n) {userexit_demand = n;}
-
-    /** Specify a Python function that is called before solving a demand. */
-    DECLARE_EXPORT void setUserExitDemand(PyObject* p) {userexit_demand = p;}
+    DECLARE_EXPORT void setUserExitDemand(PythonFunction n)
+    {
+      userexit_demand = n;
+    }
 
     /** Return the Python function that is called before solving a demand. */
-    PythonFunction getUserExitDemand() const {return userexit_demand;}
+    PythonFunction getUserExitDemand() const
+    {
+      return userexit_demand;
+    }
 
     /** Specify a Python function that is called before solving a buffer. */
-    DECLARE_EXPORT void setUserExitBuffer(const string& n) {userexit_buffer = n;}
-
-    /** Specify a Python function that is called before solving a buffer. */
-    DECLARE_EXPORT void setUserExitBuffer(PyObject* p) {userexit_buffer = p;}
+    DECLARE_EXPORT void setUserExitBuffer(PythonFunction n)
+    {
+      userexit_buffer = n;
+    }
 
     /** Return the Python function that is called before solving a buffer. */
-    PythonFunction getUserExitBuffer() const {return userexit_buffer;}
+    PythonFunction getUserExitBuffer() const
+    {
+      return userexit_buffer;
+    }
 
     /** Specify a Python function that is called before solving a resource. */
-    DECLARE_EXPORT void setUserExitResource(const string& n) {userexit_resource = n;}
-
-    /** Specify a Python function that is called before solving a resource. */
-    DECLARE_EXPORT void setUserExitResource(PyObject* p) {userexit_resource = p;}
+    DECLARE_EXPORT void setUserExitResource(PythonFunction n)
+    {
+      userexit_resource = n;
+    }
 
     /** Return the Python function that is called before solving a resource. */
-    PythonFunction getUserExitResource() const {return userexit_resource;}
+    PythonFunction getUserExitResource() const
+    {
+      return userexit_resource;
+    }
 
     /** Specify a Python function that is called before solving a operation. */
-    DECLARE_EXPORT void setUserExitOperation(const string& n) {userexit_operation = n;}
-
-    /** Specify a Python function that is called before solving a operation. */
-    DECLARE_EXPORT void setUserExitOperation(PyObject* p) {userexit_operation = p;}
+    DECLARE_EXPORT void setUserExitOperation(PythonFunction n)
+    {
+      userexit_operation = n;
+    }
 
     /** Return the Python function that is called before solving a operation. */
-    PythonFunction getUserExitOperation() const {return userexit_operation;}
+    PythonFunction getUserExitOperation() const
+    {
+      return userexit_operation;
+    }
 
     /** Python method for running the solver. */
     static DECLARE_EXPORT PyObject* solve(PyObject*, PyObject*);
@@ -417,10 +608,82 @@ class SolverMRP : public Solver
     /** Python method for undoing the plan changes. */
     static DECLARE_EXPORT PyObject* rollback(PyObject*, PyObject*);
 
+    bool getRotateResources() const
+    {
+      return rotateResources;
+    }
+
+    void setRotateResources(bool b)
+    {
+      rotateResources = b;
+    }
+
+    bool getAllowSplits() const
+    {
+      return allowSplits;
+    }
+
+    void setAllowSplits(bool b)
+    {
+      allowSplits = b;
+    }
+
+    bool getPropagate() const
+    {
+      return propagate;
+    }
+
+    void setPropagate(bool b)
+    {
+      propagate = b;
+    }
+
+    bool getPlanSafetyStockFirst() const
+    {
+      return planSafetyStockFirst;
+    }
+
+    void setPlanSafetyStockFirst(bool b)
+    {
+      planSafetyStockFirst = b;
+    }
+
+    bool getErasePreviousFirst() const
+    {
+      return erasePreviousFirst;
+    }
+
+    void setErasePreviousFirst(bool b)
+    {
+      erasePreviousFirst= b;
+    }
+
+    template<class Cls> static inline void registerFields(MetaClass* m)
+    {
+      m->addShortField<Cls>(Tags::constraints, &Cls::getConstraints, &Cls::setConstraints);
+      m->addBoolField<Cls>(Tags::autocommit, &Cls::getAutocommit, &Cls::setAutocommit);
+      m->addShortField<Cls>(Tags::plantype, &Cls::getPlanType, &Cls::setPlanType);
+      m->addDoubleField<Cls>(SolverMRP::tag_iterationthreshold, &Cls::getIterationThreshold, &Cls::setIterationThreshold);
+      m->addDoubleField<Cls>(SolverMRP::tag_iterationaccuracy, &Cls::getIterationAccuracy, &Cls::setIterationAccuracy);
+      m->addDurationField<Cls>(SolverMRP::tag_lazydelay, &Cls::getLazyDelay, &Cls::setLazyDelay);
+      m->addBoolField<Cls>(SolverMRP::tag_allowsplits, &Cls::getAllowSplits, &Cls::setAllowSplits);
+      m->addBoolField<Cls>(SolverMRP::tag_rotateresources, &Cls::getRotateResources, &Cls::setRotateResources);
+      m->addBoolField<Cls>(SolverMRP::tag_planSafetyStockFirst, &Cls::getPlanSafetyStockFirst, &Cls::setPlanSafetyStockFirst);
+      m->addUnsignedLongField<Cls>(SolverMRP::tag_iterationmax, &Cls::getIterationMax, &Cls::setIterationMax);
+    }
+
   private:
-    typedef map < int, deque<Demand*>, less<int> > classified_demand;
+    typedef vector< deque<Demand*> > classified_demand;
     typedef classified_demand::iterator cluster_iterator;
     classified_demand demands_per_cluster;
+
+    static const Keyword tag_iterationthreshold;
+    static const Keyword tag_iterationaccuracy;
+    static const Keyword tag_lazydelay;
+    static const Keyword tag_allowsplits;
+    static const Keyword tag_rotateresources;
+    static const Keyword tag_planSafetyStockFirst;
+    static const Keyword tag_iterationmax;
 
     /** Type of plan to be created. */
     short plantype;
@@ -433,7 +696,7 @@ class SolverMRP : public Solver
       * request with a request date incremented by this value.<br>
       * The default value is 1 day.
       */
-    TimePeriod lazydelay;
+    Duration lazydelay;
 
     /** Threshold to stop iterating when the delta between iterations is
       * less than this absolute limit.
@@ -444,6 +707,12 @@ class SolverMRP : public Solver
       * less than this percentage limit.
       */
     double iteration_accuracy;
+
+    /** Maximum number of asks allowed to plan a demand.
+      * If the can't plan a demand within this limit, we consider it
+      * unplannable.
+      */
+    unsigned long iteration_max;
 
     /** Enable or disable automatically committing the changes in the plan
       * after planning each demand.<br>
@@ -477,6 +746,29 @@ class SolverMRP : public Solver
       * value is not used.
       */
     PythonFunction userexit_operation;
+
+    /** A flag that determines how we plan safety stock.<br/>
+      *
+      * By default the flag is FALSE and we get the following behavior:
+      *  - When planning demands, we already try to replenish towards the
+      *    safety stock level.
+      *  - After planning all demands, we do another loop over all buffers
+      *    to replenish to the safety stock level. This will replenish eg
+      *    buffers without any (direct or indirect) demand on them.
+      *
+      * If the flag is set to TRUE, replenishing to the safety stock level
+      * is more important than planning the demand on time. We get the
+      * following behavior:
+      *  - Before planning any demand, we try to replenish any buffer to its
+      *    safety stock level.
+      *    Buffers closer to the end item demand are replenished first.
+      *  - When planning demands, we try to replenish towards the safety
+      *    stock level.
+      */
+    bool planSafetyStockFirst;
+
+    /** Flag to specify whether we erase the previous plan first or not. */
+    bool erasePreviousFirst;
 
   protected:
     /** @brief This class is used to store the solver status during the
@@ -541,9 +833,6 @@ class SolverMRP : public Solver
         * inventory carrying costs, ...
         */
       double a_penalty;
-
-      /** Motive of the current solver. */
-      Plannable* motive;
     };
 
     /** @brief This class is a helper class of the SolverMRP class.
@@ -568,13 +857,23 @@ class SolverMRP : public Solver
         /** Constructor. */
         SolverMRPdata(SolverMRP* s = NULL, int c = 0, deque<Demand*>* d = NULL)
           : sol(s), cluster(c), demands(d), constrainedPlanning(true),
-            state(statestack), prevstate(statestack-1) {}
-            
+            logConstraints(true), planningDemand(NULL), state(statestack),
+            prevstate(statestack-1)
+        {
+          operator_delete = new OperatorDelete(this);
+        }
+
         /** Destructor. */
-        virtual ~SolverMRPdata() {};
+        virtual ~SolverMRPdata()
+        {
+          delete operator_delete;
+        };
 
         /** Verbose mode is inherited from the solver. */
-        unsigned short getLogLevel() const {return sol ? sol->getLogLevel() : 0;}
+        unsigned short getLogLevel() const
+        {
+          return sol ? sol->getLogLevel() : 0;
+        }
 
         /** This function runs a single planning thread. Such a thread will loop
           * through the following steps:
@@ -593,7 +892,6 @@ class SolverMRP : public Solver
         virtual DECLARE_EXPORT void commit();
 
         virtual const MetaClass& getType() const {return *SolverMRP::metadata;}
-        virtual size_t getSize() const {return sizeof(SolverMRPdata);}
 
         bool getVerbose() const
         {
@@ -630,13 +928,24 @@ class SolverMRP : public Solver
       private:
         static const int MAXSTATES = 256;
 
+        /** Auxilary method to replenish safety stock in all buffers of a
+          * cluster. This method is only intended to be called from the
+          * commit() method.
+          * @see SolverMRP::planSafetyStockFirst
+          * @see SolverMRP::SolverMRPdata::commit
+          */
+        void solveSafetyStock(SolverMRP*);
+
         /** Points to the solver. */
         SolverMRP* sol;
 
         /** An identifier of the cluster being replanned. Note that it isn't
           * always the complete cluster that is being planned.
           */
-        int cluster;
+        unsigned int cluster;
+
+        /** Internal solver to remove material. */
+        OperatorDelete *operator_delete;
 
         /** A deque containing all demands to be (re-)planned. */
         deque<Demand*>* demands;
@@ -652,6 +961,12 @@ class SolverMRP : public Solver
 
         /** Points to the demand being planned. */
         Demand* planningDemand;
+
+        /** Internal flag that is set to true when solving for safety stock. */
+        bool safety_stock_planning;
+
+        /** Count the number of asks. */
+        unsigned long iteration_count;
 
       public:
         /** Pointer to the current solver status. */
@@ -676,7 +991,7 @@ class SolverMRP : public Solver
 
     /** Verifies whether this operationplan violates the leadtime
       * constraints. */
-    DECLARE_EXPORT bool checkOperationLeadtime(OperationPlan*, SolverMRPdata&, bool);
+    DECLARE_EXPORT bool checkOperationLeadTime(OperationPlan*, SolverMRPdata&, bool);
 
     /** Verifies whether this operationplan violates the capacity constraint.<br>
       * In case it does the operationplan is moved to an earlier or later
@@ -684,6 +999,7 @@ class SolverMRP : public Solver
       */
     DECLARE_EXPORT void checkOperationCapacity(OperationPlan*, SolverMRPdata&);
 
+  public:
     /** Scan the operationplans that are about to be committed to verify that
       * they are not creating any excess.
       */
@@ -693,6 +1009,13 @@ class SolverMRP : public Solver
       * they are not creating any excess.
       */
     DECLARE_EXPORT void scanExcess(CommandList*);
+
+    /** Get a reference to the command list. */
+    SolverMRPdata& getCommands()
+    {
+      return commands;
+    }
+
 };
 
 

@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba
+# Copyright (C) 2007-2013 by frePPLe bvba
 #
 # This library is free software; you can redistribute it and/or modify it
 # under the terms of the GNU Affero General Public License as published
@@ -17,37 +17,63 @@
 
 from datetime import datetime
 
-from django.contrib.auth.models import Group
-from django.contrib.auth.admin import UserAdmin, GroupAdmin
-from django.contrib.auth.forms import UserCreationForm
 from django import forms
-from django.forms.util import ErrorList
+from django.contrib.auth.admin import UserAdmin
+from django.contrib.auth.models import Group
+from django.forms.utils import ErrorList
 from django.utils.translation import ugettext_lazy as _
 
 from freppledb.common.models import User, Parameter, Comment, Bucket, BucketDetail
 from freppledb.common.adminforms import MultiDBModelAdmin, MultiDBTabularInline
-from freppledb.admin import admin_site
+from freppledb.admin import data_site
 
 
-# Registering the User admin for our custom model.
-# See http://stackoverflow.com/questions/16953302/django-custom-user-model-in-admin-relation-auth-user-does-not-exists
-# to understand the need for this extra customization.
-class MyUserCreationForm(UserCreationForm):
-  def clean_username(self):
-    username = self.cleaned_data["username"]
-    try: User.objects.get(username=username)
-    except User.DoesNotExist: return username
-    raise forms.ValidationError(self.error_messages['duplicate_username'])
+class MyUserAdmin(UserAdmin, MultiDBModelAdmin):
+  '''
+  This class is a frePPLe specific override of its standard
+  Django base class.
+  '''
+  save_on_top = True
 
-  class Meta(UserCreationForm.Meta):
-    model = User
+  change_user_password_template = 'auth/change_password.html'
 
-class MyUserAdmin(UserAdmin):
-    save_on_top = True
-    add_form = MyUserCreationForm
+  fieldsets = (
+    (None, {'fields': ('username', 'password')}),
+    # Translators: Translation included with Django
+    (_('Personal info'), {'fields': ('first_name', 'last_name', 'email')}),
+    (_('Permissions in this scenario'), {'fields': ('is_active', 'is_superuser',
+                                   'groups', 'user_permissions')}),
+    (_('Important dates'), {'fields': ('last_login', 'date_joined')}),
+  )
 
-admin_site.register(Group, GroupAdmin)
-admin_site.register(User, MyUserAdmin)
+  tabs = [
+    {"name": 'edit', "label": _("edit"), "view": "admin:common_user_change", "permission": 'common.change_user'},
+    {"name": 'comments', "label": _("comments"), "view": "admin:common_user_comment"},
+    # Translators: Translation included with Django
+    {"name": 'history', "label": _("History"), "view": "admin:common_user_history"},
+    ]
+
+  def get_readonly_fields(self, request, obj=None):
+    if obj:
+      return self.readonly_fields + ('last_login', 'date_joined')
+    return self.readonly_fields
+
+  def has_delete_permission(self, request, obj=None):
+    # Users can't be deleted. Just mark them as inactive instead
+    return False
+
+data_site.register(User, MyUserAdmin)
+
+
+class MyGroupAdmin(MultiDBModelAdmin):
+  pass
+  tabs = [
+    {"name": 'edit', "label": _("edit"), "view": "admin:common_group_change", "permission": 'auth.change_group'},
+    {"name": 'comments', "label": _("comments"), "view": "admin:common_group_comment"},
+    # Translators: Translation included with Django
+    {"name": 'history', "label": _("History"), "view": "admin:common_group_history"},
+    ]
+data_site.register(Group, MyGroupAdmin)
 
 
 class ParameterForm(forms.ModelForm):
@@ -61,7 +87,8 @@ class ParameterForm(forms.ModelForm):
     value = cleaned_data.get("value")
     # Currentdate parameter must be a date+time value
     if name == "currentdate":
-      try: datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+      try:
+        datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
       except:
         self._errors["value"] = ErrorList([_("Invalid date: expecting YYYY-MM-DD HH:MM:SS")])
         del cleaned_data["value"]
@@ -73,13 +100,19 @@ class Parameter_admin(MultiDBModelAdmin):
   save_on_top = True
   form = ParameterForm
   exclude = ('source',)
-admin_site.register(Parameter, Parameter_admin)
+  tabs = [
+    {"name": 'edit', "label": _("edit"), "view": "admin:common_parameter_change", "permission": 'common.change_parameter'},
+    {"name": 'comments', "label": _("comments"), "view": "admin:common_parameter_comment"},
+    # Translators: Translation included with Django
+    {"name": 'history', "label": _("History"), "view": "admin:common_parameter_history"},
+    ]
+data_site.register(Parameter, Parameter_admin)
 
 
 class Comment_admin(MultiDBModelAdmin):
   model = Comment
   save_on_top = True
-admin_site.register(Comment, Comment_admin)
+data_site.register(Comment, Comment_admin)
 
 
 class BucketDetail_inline(MultiDBTabularInline):
@@ -88,11 +121,18 @@ class BucketDetail_inline(MultiDBTabularInline):
   extra = 3
   exclude = ('source',)
 
+
 class BucketDetail_admin(MultiDBModelAdmin):
   model = BucketDetail
   save_on_top = True
   exclude = ('source',)
-admin_site.register(BucketDetail, BucketDetail_admin)
+  tabs = [
+    {"name": 'edit', "label": _("edit"), "view": "admin:common_bucketdetail_change", "permission": 'common.change_bucketdetail'},
+    {"name": 'comments', "label": _("comments"), "view": "admin:common_bucketdetail_comment"},
+    # Translators: Translation included with Django
+    {"name": 'history', "label": _("History"), "view": "admin:common_bucketdetail_history"},
+    ]
+data_site.register(BucketDetail, BucketDetail_admin)
 
 
 class Bucket_admin(MultiDBModelAdmin):
@@ -100,4 +140,10 @@ class Bucket_admin(MultiDBModelAdmin):
   save_on_top = True
   inlines = [ BucketDetail_inline, ]
   exclude = ('source',)
-admin_site.register(Bucket, Bucket_admin)
+  tabs = [
+    {"name": 'edit', "label": _("edit"), "view": "admin:common_bucket_change", "permission": 'common.change_bucket'},
+    {"name": 'comments', "label": _("comments"), "view": "admin:common_bucket_comment"},
+    # Translators: Translation included with Django
+    {"name": 'history', "label": _("History"), "view": "admin:common_group_history"},
+    ]
+data_site.register(Bucket, Bucket_admin)

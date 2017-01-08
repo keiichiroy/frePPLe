@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2010-2012 by Johan De Taeye, frePPLe bvba
+# Copyright (C) 2010-2013 by frePPLe bvba
 #
 # This library is free software; you can redistribute it and/or modify it
 # under the terms of the GNU Affero General Public License as published
@@ -14,7 +14,6 @@
 # You should have received a copy of the GNU Affero General Public
 # License along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
-from __future__ import print_function
 import sys
 import os
 import socket
@@ -84,7 +83,7 @@ class frePPLeService(win32serviceutil.ServiceFramework):
 
         # Redirect all output and log a start event
         try:
-          log = os.path.join(settings.FREPPLE_APP,'server.log')
+          log = os.path.join(settings.FREPPLE_LOGDIR,'service.log')
           sys.stdout = open(log, 'a', 0)
           msg = "frePPLe web server listening on http://%s:%d and logging to %s" % (address, port, log)
           servicemanager.LogInfoMsg(msg)

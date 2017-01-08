@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba                 *
+ * Copyright (C) 2007-2015 by frePPLe bvba                                 *
  *                                                                         *
  * This library is free software; you can redistribute it and/or modify it *
  * under the terms of the GNU Affero General Public License as published   *
@@ -244,11 +244,7 @@ DECLARE_EXPORT void CommandManager::rollback()
 
 DECLARE_EXPORT void ThreadGroup::execute()
 {
-#ifndef MT
-  // CASE 1: Sequential execution when compiled without multithreading
-  wrapper(this);
-#else
-  // CASE 2: No need to create worker threads when either a) only a single
+  // CASE 1: No need to create worker threads when either a) only a single
   // worker is allowed or b) only a single function needs to be called.
   if (maxParallel<=1 || countCallables<=1)
   {
@@ -256,7 +252,7 @@ DECLARE_EXPORT void ThreadGroup::execute()
     return;
   }
 
-  // CASE 3: Parallel execution in worker threads
+  // CASE 2: Parallel execution in worker threads
   int numthreads = countCallables;
   // Limit the number of threads to the maximum allowed
   if (numthreads > maxParallel) numthreads = maxParallel;
@@ -303,13 +299,13 @@ DECLARE_EXPORT void ThreadGroup::execute()
   // Create a thread for every command list. The main thread will then
   // wait for all of them to finish.
   HANDLE* threads = new HANDLE[numthreads];
-  unsigned int * m_id = new unsigned int[numthreads];
+  unsigned int* m_id = new unsigned int[numthreads];
 
   // Create the threads
   for (; worker<numthreads; ++worker)
   {
     threads[worker] =  reinterpret_cast<HANDLE>(
-        _beginthreadex(0,  // Security atrtributes
+        _beginthreadex(0,  // Security attributes
             0,                 // Stack size
             &wrapper,          // Thread function
             this,              // Argument list
@@ -320,8 +316,8 @@ DECLARE_EXPORT void ThreadGroup::execute()
       if (!worker)
       {
         // No threads could be created at all.
-        delete threads;
-        delete m_id;
+        delete[] threads;
+        delete[] m_id;
         throw RuntimeException("Can't create any threads, error " + errno);
       }
       // Some threads could be created.
@@ -345,24 +341,23 @@ DECLARE_EXPORT void ThreadGroup::execute()
       error,
       256,
       NULL );
-    delete threads;
-    delete m_id;
+    delete[] threads;
+    delete[] m_id;
     throw RuntimeException(string("Can't join threads: ") + error);
   }
 
   // Cleanup
   for (--worker; worker>=0; --worker)
     CloseHandle(threads[worker]);
-  delete threads;
-  delete m_id;
+  delete[] threads;
+  delete[] m_id;
 #endif    // End of #ifdef ifHAVE_PTHREAD_H
-#endif    // End of #ifndef MT
 }
 
 
 DECLARE_EXPORT ThreadGroup::callableWithArgument ThreadGroup::selectNextCallable()
 {
-  ScopeMutexLock l(lock );
+  ScopeMutexLock l(lock);
   if (callables.empty())
   {
     // No more functions
@@ -376,7 +371,7 @@ DECLARE_EXPORT ThreadGroup::callableWithArgument ThreadGroup::selectNextCallable
 }
 
 
-#if defined(HAVE_PTHREAD_H) || !defined(MT)
+#if defined(HAVE_PTHREAD_H)
 void* ThreadGroup::wrapper(void *arg)
 #else
 unsigned __stdcall ThreadGroup::wrapper(void *arg)
@@ -391,9 +386,9 @@ unsigned __stdcall ThreadGroup::wrapper(void *arg)
       nextfunc.first;
       nextfunc = l->selectNextCallable())
   {
-#if defined(HAVE_PTHREAD_H) && defined(MT)
+#if defined(HAVE_PTHREAD_H)
     // Verify whether there has been a cancellation request in the meantime
-    pthread_testcancel();
+    if (threaded) pthread_testcancel();
 #endif
     try {nextfunc.first(nextfunc.second);}
     catch (...)
@@ -433,7 +428,7 @@ DECLARE_EXPORT PyObject* loadModule
     PyObject *key, *value;
     Py_ssize_t pos = 0;
     while (PyDict_Next(kwds, &pos, &key, &value))
-      params[PythonObject(key).getString()] = PythonObject(value).getString();
+      params[PythonData(key).getString()] = PythonData(value).getString();
   }
 
   // Free Python interpreter for other threads.

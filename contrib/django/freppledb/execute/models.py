@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba
+# Copyright (C) 2007-2013 by frePPLe bvba
 #
 # This library is free software; you can redistribute it and/or modify it
 # under the terms of the GNU Affero General Public License as published
@@ -14,13 +14,8 @@
 # You should have received a copy of the GNU Affero General Public
 # License along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
-from __future__ import print_function
-
-from django.db import models, transaction, DEFAULT_DB_ALIAS
-from django.db.models.signals import post_save
-from django.dispatch import receiver
+from django.db import models
 from django.utils.translation import ugettext_lazy as _
-from django.conf import settings
 
 from freppledb.common.models import User
 
@@ -40,6 +35,7 @@ class Task(models.Model):
   '''
   # Database fields
   id = models.AutoField(_('identifier'), primary_key=True, editable=False)
+  #. Translators: Translation included with Django
   name = models.CharField(_('name'), max_length=20, db_index=True, editable=False)
   submitted = models.DateTimeField(_('submitted'), editable=False)
   started = models.DateTimeField(_('started'), blank=True, null=True, editable=False)
@@ -47,10 +43,11 @@ class Task(models.Model):
   arguments = models.TextField(_('arguments'), max_length=200, null=True, editable=False)
   status = models.CharField(_('status'), max_length=20, editable=False)
   message = models.TextField(_('message'), max_length=200, null=True, editable=False)
+  #. Translators: Translation included with Django
   user = models.ForeignKey(User, verbose_name=_('user'), blank=True, null=True, editable=False)
 
-  def __unicode__(self):
-    return self.id + ' - ' + self.name + ' - ' + self.status
+  def __str__(self):
+    return "%s - %s - %s" % (self.id, self.name, self.status)
 
   class Meta:
     db_table = "execute_log"
@@ -62,67 +59,3 @@ class Task(models.Model):
     # Add record to the database
     # Check if a worker is present. If not launch one.
     return 1
-
-
-class Scenario(models.Model):
-  scenarioStatus = (
-    ('free',_('Free')),
-    ('in use',_('In use')),
-    ('busy',_('Busy')),
-  )
-
-  # Database fields
-  name = models.CharField(_('name'), max_length=settings.NAMESIZE, primary_key=True)
-  description = models.CharField(_('description'), max_length=settings.DESCRIPTIONSIZE, null=True, blank=True)
-  status = models.CharField(_('status'), max_length=10,
-    null=False, blank=False, choices=scenarioStatus
-    )
-  lastrefresh = models.DateTimeField(_('last refreshed'), null=True, editable=False)
-
-  def __unicode__(self):
-    return self.name
-
-  @staticmethod
-  def syncWithSettings():
-    ac = transaction.get_autocommit()
-    transaction.set_autocommit(False)
-    try:
-      # Bring the scenario table in sync with settings.databases
-      dbs = [ i for i,j in settings.DATABASES.items() if j['NAME'] ]
-      for sc in Scenario.objects.all():
-        if sc.name not in dbs:
-          sc.delete()
-      scs = [sc.name for sc in Scenario.objects.all()]
-      for db in dbs:
-        if db not in scs:
-          if db == DEFAULT_DB_ALIAS:
-            Scenario(name=db, status=u"In use", description='Production database').save()
-          else:
-            Scenario(name=db, status=u"Free").save()
-      transaction.commit()
-    except Exception as e:
-      logger.error("Error synchronizing the scenario table with the settings: %s" % e)
-      transaction.rollback()
-    finally:
-      transaction.set_autocommit(ac)
-
-  class Meta:
-    db_table = "execute_scenario"
-    permissions = (
-        ("copy_scenario", "Can copy a scenario"),
-        ("release_scenario", "Can release a scenario"),
-       )
-    verbose_name_plural = _('scenarios')
-    verbose_name = _('scenario')
-    ordering = ['name']
-
-
-@receiver(post_save, sender=User)
-def sync_handler(sender, **kwargs):
-  if not kwargs.get('created',False) or kwargs.get('using',DEFAULT_DB_ALIAS) != DEFAULT_DB_ALIAS:
-    return
-  # A new user is created in the default database.
-  # We create the same user in all scenarios that are in use. Otherwise the user can't create
-  # comments or edit objects in these what-if scenarios.
-  for sc in Scenario.objects.all().filter(status=u'In use'):
-    kwargs['instance'].save(using=sc.name)

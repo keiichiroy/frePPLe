@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2010-2012 by Johan De Taeye, frePPLe bvba
+# Copyright (C) 2010-2013 by frePPLe bvba
 #
 # This library is free software; you can redistribute it and/or modify it
 # under the terms of the GNU Affero General Public License as published
@@ -14,7 +14,6 @@
 # You should have received a copy of the GNU Affero General Public
 # License along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
-from __future__ import print_function
 from optparse import make_option
 
 from django.core.management.base import BaseCommand, CommandError
@@ -28,19 +27,23 @@ class Command(BaseCommand):
   help = "Generates output in the DOT language to visualize the network"
 
   option_list = BaseCommand.option_list + (
-      make_option('--database', action='store', dest='database',
-        default=DEFAULT_DB_ALIAS, help='Nominates a specific database to graph'),
-  )
+    make_option(
+      '--database', action='store', dest='database',
+      default=DEFAULT_DB_ALIAS, help='Nominates a specific database to graph'
+      ),
+    )
 
-  requires_model_validation = False
+  requires_system_checks = False
 
   def handle(self, **options):
     try:
 
       # Pick up the options
-      if 'database' in options: database = options['database'] or DEFAULT_DB_ALIAS
-      else: database = DEFAULT_DB_ALIAS
-      if not database in settings.DATABASES:
+      if 'database' in options:
+        database = options['database'] or DEFAULT_DB_ALIAS
+      else:
+        database = DEFAULT_DB_ALIAS
+      if database not in settings.DATABASES:
         raise CommandError("No database settings known for '%s'" % database )
 
       # Create a database connection
@@ -58,7 +61,7 @@ class Command(BaseCommand):
       print('  node[shape=triangle,color=red];')
       cursor.execute('select name from buffer')
       for row in cursor.fetchall():
-        print('  "B%s" [label="%s",tooltip="%s"];' % (row[0], row[0], row[0]));
+        print('  "B%s" [label="%s",tooltip="%s"];' % (row[0], row[0], row[0]))
       print('}')
 
       # Resources
@@ -66,7 +69,7 @@ class Command(BaseCommand):
       print('	 node[shape=circle,color=blue];')
       cursor.execute('select name from resource')
       for row in cursor.fetchall():
-        print('  "R%s" [label="%s",tooltip="%s"];' % (row[0], row[0], row[0]));
+        print('  "R%s" [label="%s",tooltip="%s"];' % (row[0], row[0], row[0]))
       print('}')
 
       # Operations
@@ -87,8 +90,8 @@ class Command(BaseCommand):
         if o != previous and needs_closure > 0:
           needs_closure -= 1
           print('  }')
-        if s == None:
-          print('  "O%s" [label="%s",tooltip="%s"];' % (o, o, o));
+        if s is None:
+          print('  "O%s" [label="%s",tooltip="%s"];' % (o, o, o))
         else:
           if o != previous:
             print('  subgraph "cluster_O%s" {' % o)
@@ -97,7 +100,7 @@ class Command(BaseCommand):
             print('    fontsize=8;')
             previous = o
             needs_closure += 1
-          print('    "O%s" [label="%s",tooltip="%s"];' % (s,s,s))
+          print('    "O%s" [label="%s",tooltip="%s"];' % (s, s, s))
       print('}')
 
       # Flows
@@ -106,9 +109,9 @@ class Command(BaseCommand):
       cursor.execute('select operation_id, thebuffer_id, quantity from flow')
       for o, b, q in cursor.fetchall():
         if q > 0:
-          print('  "O%s"->"B%s";' % (o,b))
+          print('  "O%s"->"B%s";' % (o, b))
         else:
-          print('  "B%s"->"O%s";' % (b,o))
+          print('  "B%s"->"O%s";' % (b, o))
       print('}')
 
       # Loads
@@ -116,7 +119,7 @@ class Command(BaseCommand):
       print('  edge[style=dashed,dir=none,weight=100];')
       cursor.execute('select operation_id, resource_id from resourceload')
       for o, r in cursor.fetchall():
-        print('  "O%s"->"R%s";' % (o,r))
+        print('  "O%s"->"R%s";' % (o, r))
       print('}')
 
       # Footer

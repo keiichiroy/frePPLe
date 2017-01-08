@@ -1,4 +1,3 @@
-;(function($){
 /**
  * jqGrid Hebrew Translation
  * Shuki Shukrun shukrun.shuki@gmail.com
@@ -7,20 +6,34 @@
  * http://www.opensource.org/licenses/mit-license.php
  * http://www.gnu.org/licenses/gpl.html
 **/
-$.jgrid = $.jgrid || {};
-$.extend($.jgrid,{
+
+/*jslint white: true */
+/*global jQuery */
+(function($){
+"use strict";
+var locInfo = {
+	isRTL: true,
 	defaults : {
 		recordtext: "מציג {0} - {1} מתוך {2}",
 		emptyrecords: "אין רשומות להציג",
 		loadtext: "טוען...",
-		pgtext : "דף {0} מתוך {1}"
+		pgtext : "דף {0} מתוך {1}",
+		pgfirst : "First Page",
+		pglast : "Last Page",
+		pgnext : "Next Page",
+		pgprev : "Previous Page",
+		pgrecs : "Records per Page",
+		showhide: "Toggle Expand Collapse Grid",
+		savetext: "שומר..."
 	},
 	search : {
 		caption: "מחפש...",
 		Find: "חפש",
 		Reset: "התחל",
-		odata: [{ oper:'eq', text:"שווה"},{ oper:'ne', text:"לא שווה"},{ oper:'lt', text:"קטן"},{ oper:'le', text:"קטן או שווה"},{ oper:'gt', text:"גדול"},{ oper:'ge', text:"גדול או שווה"},{ oper:'bw', text:"מתחיל ב"},{ oper:'bn', text:"לא מתחיל ב"},{ oper:'in', text:"נמצא ב"},{ oper:'ni', text:"לא נמצא ב"},{ oper:'ew', text:"מסתיים ב"},{ oper:'en', text:"לא מסתיים ב"},{ oper:'cn', text:"מכיל"},{ oper:'nc', text:"לא מכיל"}],
-		groupOps: [	{ op: "AND", text: "הכל" },	{ op: "OR",  text: "אחד מ" }	]
+		odata: [{ oper:'eq', text:"שווה"},{ oper:'ne', text:"לא שווה"},{ oper:'lt', text:"קטן"},{ oper:'le', text:"קטן או שווה"},{ oper:'gt', text:"גדול"},{ oper:'ge', text:"גדול או שווה"},{ oper:'bw', text:"מתחיל ב"},{ oper:'bn', text:"לא מתחיל ב"},{ oper:'in', text:"נמצא ב"},{ oper:'ni', text:"לא נמצא ב"},{ oper:'ew', text:"מסתיים ב"},{ oper:'en', text:"לא מסתיים ב"},{ oper:'cn', text:"מכיל"},{ oper:'nc', text:"לא מכיל"},{ oper:'nu', text:'is null'},{ oper:'nn', text:'is not null'}],
+		groupOps: [	{ op: "AND", text: "הכל" },	{ op: "OR",  text: "אחד מ" }],
+		operandTitle : "Click to select search operation.",
+		resetTitle : "Reset Search Value"
 	},
 	edit : {
 		addCaption: "הוסף רשומה",
@@ -98,30 +111,34 @@ $.extend($.jgrid,{
 				"ינואר", "פברואר", "מרץ", "אפריל", "מאי", "יוני", "יולי", "אוגוסט", "ספטמבר", "אוקטובר", "נובמבר", "דצמבר"
 			],
 			AmPm : ["לפני הצהרים","אחר הצהרים","לפני הצהרים","אחר הצהרים"],
-			S: function (j) {return j < 11 || j > 13 ? ['', '', '', ''][Math.min((j - 1) % 10, 3)] : ''},
+			S: function (j) {return j < 11 || j > 13 ? ['', '', '', ''][Math.min((j - 1) % 10, 3)] : '';},
 			srcformat: 'Y-m-d',
 			newformat: 'd/m/Y',
-			parseRe : /[Tt\\\/:_;.,\t\s-]/,
 			masks : {
-				ISO8601Long:"Y-m-d H:i:s",
-				ISO8601Short:"Y-m-d",
 				ShortDate: "n/j/Y",
 				LongDate: "l, F d, Y",
 				FullDateTime: "l, F d, Y g:i:s A",
 				MonthDay: "F d",
 				ShortTime: "g:i A",
 				LongTime: "g:i:s A",
-				SortableDateTime: "Y-m-d\\TH:i:s",
-				UniversalSortableDateTime: "Y-m-d H:i:sO",
 				YearMonth: "F, Y"
-			},
-			reformatAfterEdit : false
-		},
-		baseLinkUrl: '',
-		showAction: '',
-		target: '',
-		checkbox : {disabled:true},
-		idName : 'id'
+			}
+		}
+	}
+};
+$.jgrid = $.jgrid || {};
+$.extend(true, $.jgrid, {
+	defaults: {
+		locale: "he"
+	},
+	locales: {
+		// In general the property name is free, but it's recommended to use the names based on
+		// http://www.iana.org/assignments/language-subtag-registry/language-subtag-registry
+		// http://rishida.net/utils/subtags/ and RFC 5646. See Appendix A of RFC 5646 for examples.
+		// One can use the lang attribute to specify language tags in HTML, and the xml:lang attribute for XML
+		// if it exists. See http://www.w3.org/International/articles/language-tags/#extlang
+		he: $.extend({}, locInfo, { name: "עברית", nameEnglish: "Hebrew" }),
+		"he-IL": $.extend({}, locInfo, { name: "עברית (ישראל)", nameEnglish: "Hebrew (Israel)" })
 	}
 });
-})(jQuery);
+}(jQuery));

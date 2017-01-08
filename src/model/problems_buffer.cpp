@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba                 *
+ * Copyright (C) 2007-2015 by frePPLe bvba                                 *
  *                                                                         *
  * This library is free software; you can redistribute it and/or modify it *
  * under the terms of the GNU Affero General Public License as published   *
@@ -46,9 +46,9 @@ DECLARE_EXPORT void Buffer::updateProblems()
       iter != flowplans.end(); )
   {
     // Process changes in the maximum or minimum targets
-    if (iter->getType() == 4)
+    if (iter->getEventType() == 4)
       curMax = iter->getMax();
-    else if (iter->getType() == 3)
+    else if (iter->getEventType() == 3)
       curMin = iter->getMin();
 
     // Only consider the last flowplan for a certain date
@@ -82,11 +82,8 @@ DECLARE_EXPORT void Buffer::updateProblems()
       }
     }
 
-    // Note that theoretically we can have a minimum and a maximum problem for
-    // the same moment in time.
-
     // Check against maximum target
-    delta = f->getOnhand() - curMax;
+    delta = f->getOnhand() - (curMin<curMax ? curMax : curMin);
     if (delta > ROUNDING_ERROR)
     {
       if (!excessProblem)

@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba
+# Copyright (C) 2007-2013 by frePPLe bvba
 #
 # This library is free software; you can redistribute it and/or modify it
 # under the terms of the GNU Affero General Public License as published
@@ -18,12 +18,12 @@
 from django.db import connections
 from django.utils.translation import ugettext_lazy as _
 from django.utils.text import capfirst
-from django.utils.encoding import force_unicode
+from django.utils.encoding import force_text
 
 from freppledb.input.models import Operation
 from freppledb.output.models import OperationPlan
-from freppledb.common.db import sql_true, python_date
-from freppledb.common.report import GridReport, GridPivot, GridFieldText, GridFieldNumber, GridFieldDateTime, GridFieldBool, GridFieldInteger, GridFieldGraph
+from freppledb.common.db import sql_true, python_date, string_agg
+from freppledb.common.report import GridReport, GridPivot, GridFieldText, GridFieldNumber, GridFieldDateTime, GridFieldBool, GridFieldInteger
 
 
 class OverviewReport(GridPivot):
@@ -36,30 +36,30 @@ class OverviewReport(GridPivot):
   model = Operation
   permissions = (("view_operation_report", "Can view operation report"),)
   rows = (
-    GridFieldText('operation', title=_('operation'), key=True, field_name='name', formatter='operation', editable=False),
-    GridFieldText('location', title=_('location'), field_name='location__name', formatter='location', editable=False),
-    GridFieldGraph('graph', title=_('graph'), width="(5*numbuckets<200 ? 5*numbuckets : 200)"),
+    GridFieldText('operation', title=_('operation'), key=True, editable=False, field_name='name', formatter='detail', extra="role:'input/operation'"),
+    GridFieldText('location', title=_('location'), editable=False, field_name='location__name', formatter='detail', extra="role:'input/location'"),
     )
   crosses = (
-    ('locked_start', {'title': _('locked starts'),}),
-    ('total_start', {'title': _('total starts'),}),
-    ('locked_end', {'title': _('locked ends'),}),
-    ('total_end', {'title': _('total ends'),}),
+    ('locked_start', {'title': _('locked starts')}),
+    ('total_start', {'title': _('total starts')}),
+    ('locked_end', {'title': _('locked ends')}),
+    ('total_end', {'title': _('total ends')}),
     )
 
   @classmethod
   def extra_context(reportclass, request, *args, **kwargs):
     if args and args[0]:
+      request.session['lasttab'] = 'plan'
       return {
-        'title': capfirst(force_unicode(Operation._meta.verbose_name) + " " + args[0]),
-        'post_title': ': ' + capfirst(force_unicode(_('plan'))),
+        'title': capfirst(force_text(Operation._meta.verbose_name) + " " + args[0]),
+        'post_title': ': ' + capfirst(force_text(_('plan'))),
         }
     else:
       return {}
 
   @staticmethod
   def query(request, basequery, sortsql='1 asc'):
-    basesql, baseparams = basequery.query.get_compiler(basequery.db).as_sql(with_col_aliases=True)
+    basesql, baseparams = basequery.query.get_compiler(basequery.db).as_sql(with_col_aliases=False)
     # Run the query
     cursor = connections[request.database].cursor()
     query = '''
@@ -129,22 +129,36 @@ class DetailReport(GridReport):
   @ classmethod
   def basequeryset(reportclass, request, args, kwargs):
     if args and args[0]:
-      return OperationPlan.objects.filter(operation__exact=args[0]).extra(select={'operation_in': "select name from operation where out_operationplan.operation = operation.name",})
+      base = OperationPlan.objects.filter(operation__exact=args[0])
     else:
-      return OperationPlan.objects.extra(select={'operation_in': "select name from operation where out_operationplan.operation = operation.name",})
+      base = OperationPlan.objects
+    return base.select_related() \
+      .extra(select={
+        'operation_in': "select name from operation where out_operationplan.operation = operation.name",
+        'demand': ("select %s(q || ' : ' || d, ', ') from ("
+                   "select round(sum(quantity)) as q, demand as d "
+                   "from out_demandpegging "
+                   "where out_demandpegging.operationplan = out_operationplan.id "
+                   "group by demand order by 1 desc, 2) peg"
+                   % string_agg())
+        })
 
   @classmethod
   def extra_context(reportclass, request, *args, **kwargs):
+    if args and args[0]:
+      request.session['lasttab'] = 'plandetail'
     return {'active_tab': 'plandetail'}
+
 
   rows = (
     GridFieldInteger('id', title=_('operationplan'), key=True, editable=False),
-    GridFieldText('operation', title=_('operation'), formatter='operation', editable=False),
+    GridFieldText('operation', title=_('operation'), editable=False, formatter='detail', extra="role:'input/operation'"),
     GridFieldNumber('quantity', title=_('quantity'), editable=False),
+    GridFieldText('demand', title=_('demand quantity'), formatter='demanddetail', width=300, editable=False),
     GridFieldDateTime('startdate', title=_('start date'), editable=False),
     GridFieldDateTime('enddate', title=_('end date'), editable=False),
+    GridFieldNumber('criticality', title=_('criticality'), editable=False),
     GridFieldBool('locked', title=_('locked'), editable=False),
     GridFieldNumber('unavailable', title=_('unavailable'), editable=False),
     GridFieldInteger('owner', title=_('owner'), editable=False),
     )
-

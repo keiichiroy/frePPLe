@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba                 *
+ * Copyright (C) 2007-2015 by frePPLe bvba                                 *
  *                                                                         *
  * This library is free software; you can redistribute it and/or modify it *
  * under the terms of the GNU Affero General Public License as published   *
@@ -32,7 +32,8 @@ DECLARE_EXPORT const MetaClass* SkillDefault::metadata;
 int Skill::initialize()
 {
   // Initialize the metadata
-  metadata = new MetaCategory("skill", "skills", reader, writer);
+  metadata = MetaCategory::registerCategory<Skill>("skill", "skills", reader, finder);
+  registerFields<Skill>(const_cast<MetaCategory*>(metadata));
 
   // Initialize the Python class
   return FreppleCategory<Skill>::initialize();
@@ -42,51 +43,14 @@ int Skill::initialize()
 int SkillDefault::initialize()
 {
   // Initialize the metadata
-  SkillDefault::metadata = new MetaClass(
+  SkillDefault::metadata = MetaClass::registerClass<SkillDefault>(
     "skill",
     "skill_default",
-    Object::createString<SkillDefault>,
+    Object::create<SkillDefault>,
     true);
 
   // Initialize the Python class
   return FreppleClass<SkillDefault,Skill>::initialize();
-}
-
-
-DECLARE_EXPORT void Skill::writeElement(XMLOutput *o, const Keyword& tag, mode m) const
-{
-  // Write a reference
-  if (m == REFERENCE)
-  {
-    o->writeElement(tag, Tags::tag_name, getName());
-    return;
-  }
-
-  // Write the head
-  if (m != NOHEAD && m != NOHEADTAIL)
-    o->BeginObject(tag, Tags::tag_name, XMLEscape(getName()));
-
-  // Write the tail
-  if (m != NOHEADTAIL && m != NOTAIL) o->EndObject(tag);
-}
-
-
-DECLARE_EXPORT void Skill::beginElement(XMLInput& pIn, const Attribute& pAttr)
-{
-  if (pAttr.isA(Tags::tag_resourceskill)
-      && pIn.getParentElement().first.isA(Tags::tag_resourceskills))
-  {
-    ResourceSkill *s =
-      dynamic_cast<ResourceSkill*>(MetaCategory::ControllerDefault(ResourceSkill::metadata,pIn.getAttributes()));
-    if (s) s->setSkill(this);
-    pIn.readto(s);
-  }
-}
-
-
-DECLARE_EXPORT void Skill::endElement (XMLInput& pIn, const Attribute& pAttr, const DataElement& pElement)
-{
-  // No specific fields to retrieve
 }
 
 
@@ -102,26 +66,5 @@ DECLARE_EXPORT Skill::~Skill()
       if (l->getSkill() == this)
         const_cast<Load&>(*l).setSkill(NULL);
 }
-
-
-DECLARE_EXPORT PyObject* Skill::getattro(const Attribute& attr)
-{
-  if (attr.isA(Tags::tag_name))
-    return PythonObject(getName());
-  if (attr.isA(Tags::tag_resourceskills))
-    return new ResourceSkillIterator(this);
-  return NULL;
-}
-
-
-DECLARE_EXPORT int Skill::setattro(const Attribute& attr, const PythonObject& field)
-{
-  if (attr.isA(Tags::tag_name))
-    setName(field.getString());
-  else
-    return -1;  // Error
-  return 0;  // OK
-}
-
 
 }

@@ -1,0 +1,419 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plan xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<name>Test model for alternate flows</name>
+	<description>
+  This test verifies the behavior of alternate flows.
+  An assembly operation is modeled which has alternate components:
+    * Component A or component B can be used in the assembly.
+      Component A is the preferred one, and Component B is only used
+      when constraints are found on A.
+    * Component C can be replaced by component D till a certain date, or by
+      component E valid from a date.
+      The validity periods of the components D and E can overlap.
+    * Component F is used till a certain date, after which the component G is
+      used. The validity periods of the components can overlap.
+  </description>
+	<current>2009-01-01T00:00:00</current>
+	<items>
+		<item>
+			<name>component A</name>
+		</item>
+		<item>
+			<name>component B</name>
+		</item>
+		<item>
+			<name>component C</name>
+		</item>
+		<item>
+			<name>component D</name>
+		</item>
+		<item>
+			<name>component E</name>
+		</item>
+		<item>
+			<name>component F</name>
+		</item>
+		<item>
+			<name>component G</name>
+		</item>
+		<item>
+			<name>product</name>
+			<operation>
+				<name>deliver product</name>
+			</operation>
+		</item>
+	</items>
+	<buffers>
+		<buffer xsi:type="buffer_procure">
+			<name>component A</name>
+			<item>
+				<name>component A</name>
+			</item>
+			<onhand>1</onhand>
+			<leadtime>P7D</leadtime>
+			<mininventory>20</mininventory>
+			<maxinventory>70</maxinventory>
+		</buffer>
+		<buffer xsi:type="buffer_procure">
+			<name>component B</name>
+			<item>
+				<name>component B</name>
+			</item>
+			<onhand>4</onhand>
+			<leadtime>P5D</leadtime>
+			<mininventory>20</mininventory>
+			<maxinventory>70</maxinventory>
+		</buffer>
+		<buffer xsi:type="buffer_procure">
+			<name>component C</name>
+			<item>
+				<name>component C</name>
+			</item>
+			<onhand>5</onhand>
+			<leadtime>P7D</leadtime>
+			<mininventory>20</mininventory>
+			<maxinventory>70</maxinventory>
+		</buffer>
+		<buffer xsi:type="buffer_procure">
+			<name>component D</name>
+			<item>
+				<name>component D</name>
+			</item>
+			<leadtime>P7D</leadtime>
+			<mininventory>20</mininventory>
+			<maxinventory>70</maxinventory>
+		</buffer>
+		<buffer xsi:type="buffer_procure">
+			<name>component E</name>
+			<item>
+				<name>component E</name>
+			</item>
+			<leadtime>P7D</leadtime>
+			<mininventory>20</mininventory>
+			<maxinventory>70</maxinventory>
+		</buffer>
+		<buffer xsi:type="buffer_procure">
+			<name>component F</name>
+			<item>
+				<name>component F</name>
+			</item>
+			<onhand>5</onhand>
+			<leadtime>P7D</leadtime>
+			<mininventory>20</mininventory>
+			<maxinventory>70</maxinventory>
+		</buffer>
+		<buffer xsi:type="buffer_procure">
+			<name>component G</name>
+			<item>
+				<name>component G</name>
+			</item>
+			<onhand>5</onhand>
+			<leadtime>P5D</leadtime>
+			<mininventory>20</mininventory>
+			<maxinventory>70</maxinventory>
+		</buffer>
+		<buffer>
+			<name>product</name>
+			<producing xsi:type="operation_time_per">
+				<name>assembly</name>
+			</producing>
+			<item>
+				<name>product</name>
+			</item>
+		</buffer>
+	</buffers>
+	<operations>
+		<operation>
+			<name>Purchase component A</name>
+			<size_minimum>0</size_minimum>
+			<flows>
+				<flow xsi:type="flow_end">
+					<buffer xsi:type="buffer_procure">
+						<name>component A</name>
+					</buffer>
+					<quantity>1</quantity>
+				</flow>
+			</flows>
+			<duration>P7D</duration>
+		</operation>
+		<operation>
+			<name>Purchase component B</name>
+			<size_minimum>0</size_minimum>
+			<flows>
+				<flow xsi:type="flow_end">
+					<buffer xsi:type="buffer_procure">
+						<name>component B</name>
+					</buffer>
+					<quantity>1</quantity>
+				</flow>
+			</flows>
+			<duration>P5D</duration>
+		</operation>
+		<operation>
+			<name>Purchase component C</name>
+			<size_minimum>0</size_minimum>
+			<flows>
+				<flow xsi:type="flow_end">
+					<buffer xsi:type="buffer_procure">
+						<name>component C</name>
+					</buffer>
+					<quantity>1</quantity>
+				</flow>
+			</flows>
+			<duration>P7D</duration>
+		</operation>
+		<operation>
+			<name>Purchase component D</name>
+			<size_minimum>0</size_minimum>
+			<flows>
+				<flow xsi:type="flow_end">
+					<buffer xsi:type="buffer_procure">
+						<name>component D</name>
+					</buffer>
+					<quantity>1</quantity>
+				</flow>
+			</flows>
+			<duration>P7D</duration>
+		</operation>
+		<operation>
+			<name>Purchase component E</name>
+			<size_minimum>0</size_minimum>
+			<flows>
+				<flow xsi:type="flow_end">
+					<buffer xsi:type="buffer_procure">
+						<name>component E</name>
+					</buffer>
+					<quantity>1</quantity>
+				</flow>
+			</flows>
+			<duration>P7D</duration>
+		</operation>
+		<operation>
+			<name>Purchase component F</name>
+			<size_minimum>0</size_minimum>
+			<flows>
+				<flow xsi:type="flow_end">
+					<buffer xsi:type="buffer_procure">
+						<name>component F</name>
+					</buffer>
+					<quantity>1</quantity>
+				</flow>
+			</flows>
+			<duration>P7D</duration>
+		</operation>
+		<operation>
+			<name>Purchase component G</name>
+			<size_minimum>0</size_minimum>
+			<flows>
+				<flow xsi:type="flow_end">
+					<buffer xsi:type="buffer_procure">
+						<name>component G</name>
+					</buffer>
+					<quantity>1</quantity>
+				</flow>
+			</flows>
+			<duration>P5D</duration>
+		</operation>
+		<operation xsi:type="operation_time_per">
+			<name>assembly</name>
+			<flows>
+				<flow xsi:type="flow_end">
+					<buffer>
+						<name>product</name>
+					</buffer>
+					<quantity>1</quantity>
+				</flow>
+				<flow>
+					<buffer xsi:type="buffer_procure">
+						<name>component A</name>
+					</buffer>
+					<quantity>-1</quantity>
+					<name>group1</name>
+				</flow>
+				<flow>
+					<buffer xsi:type="buffer_procure">
+						<name>component B</name>
+					</buffer>
+					<quantity>-2</quantity>
+					<priority>2</priority>
+					<name>group1</name>
+				</flow>
+				<flow>
+					<buffer xsi:type="buffer_procure">
+						<name>component C</name>
+					</buffer>
+					<quantity>-1</quantity>
+					<name>group2</name>
+				</flow>
+				<flow>
+					<buffer xsi:type="buffer_procure">
+						<name>component D</name>
+					</buffer>
+					<quantity>-1</quantity>
+					<priority>2</priority>
+					<name>group2</name>
+				</flow>
+				<flow>
+					<buffer xsi:type="buffer_procure">
+						<name>component E</name>
+					</buffer>
+					<quantity>-1</quantity>
+					<priority>3</priority>
+					<name>group2</name>
+				</flow>
+				<flow>
+					<buffer xsi:type="buffer_procure">
+						<name>component F</name>
+					</buffer>
+					<quantity>-1</quantity>
+					<name>group3</name>
+				</flow>
+				<flow>
+					<buffer xsi:type="buffer_procure">
+						<name>component G</name>
+					</buffer>
+					<quantity>-1</quantity>
+					<priority>2</priority>
+					<name>group3</name>
+				</flow>
+			</flows>
+			<duration>P1D</duration>
+			<duration_per>P1D</duration_per>
+		</operation>
+		<operation>
+			<name>deliver product</name>
+			<flows>
+				<flow>
+					<buffer>
+						<name>product</name>
+					</buffer>
+					<quantity>-1</quantity>
+				</flow>
+			</flows>
+		</operation>
+	</operations>
+	<demands>
+		<demand>
+			<name>order 1</name>
+			<quantity>10</quantity>
+			<item>
+				<name>product</name>
+			</item>
+			<due>2009-01-04T00:00:00</due>
+			<priority>11</priority>
+		</demand>
+	</demands>
+	<operationplans>
+		<operationplan>
+			<id>2</id>
+			<operation>
+				<name>Purchase component A</name>
+			</operation>
+			<start>1971-01-01T00:00:00</start>
+			<end>1971-01-01T00:00:00</end>
+			<quantity>69</quantity>
+		</operationplan>
+		<operationplan>
+			<id>3</id>
+			<operation>
+				<name>Purchase component B</name>
+			</operation>
+			<start>1971-01-01T00:00:00</start>
+			<end>1971-01-01T00:00:00</end>
+			<quantity>66</quantity>
+		</operationplan>
+		<operationplan>
+			<id>4</id>
+			<operation>
+				<name>Purchase component C</name>
+			</operation>
+			<start>1971-01-01T00:00:00</start>
+			<end>1971-01-01T00:00:00</end>
+			<quantity>65</quantity>
+		</operationplan>
+		<operationplan>
+			<id>5</id>
+			<operation>
+				<name>Purchase component D</name>
+			</operation>
+			<start>1971-01-01T00:00:00</start>
+			<end>1971-01-01T00:00:00</end>
+			<quantity>70</quantity>
+		</operationplan>
+		<operationplan>
+			<id>6</id>
+			<operation>
+				<name>Purchase component E</name>
+			</operation>
+			<start>1971-01-01T00:00:00</start>
+			<end>1971-01-01T00:00:00</end>
+			<quantity>70</quantity>
+		</operationplan>
+		<operationplan>
+			<id>7</id>
+			<operation>
+				<name>Purchase component F</name>
+			</operation>
+			<start>1971-01-01T00:00:00</start>
+			<end>1971-01-01T00:00:00</end>
+			<quantity>65</quantity>
+		</operationplan>
+		<operationplan>
+			<id>8</id>
+			<operation>
+				<name>Purchase component G</name>
+			</operation>
+			<start>1971-01-01T00:00:00</start>
+			<end>1971-01-01T00:00:00</end>
+			<quantity>65</quantity>
+		</operationplan>
+		<operationplan>
+			<id>9</id>
+			<operation xsi:type="operation_time_per">
+				<name>assembly</name>
+			</operation>
+			<start>2008-12-24T00:00:00</start>
+			<end>2009-01-04T00:00:00</end>
+			<quantity>1</quantity>
+		</operationplan>
+		<operationplan>
+			<id>10</id>
+			<operation xsi:type="operation_time_per">
+				<name>assembly</name>
+			</operation>
+			<start>2008-12-25T00:00:00</start>
+			<end>2009-01-04T00:00:00</end>
+			<quantity>2</quantity>
+		</operationplan>
+		<operationplan>
+			<id>11</id>
+			<operation xsi:type="operation_time_per">
+				<name>assembly</name>
+			</operation>
+			<start>2008-12-27T00:00:00</start>
+			<end>2009-01-04T00:00:00</end>
+			<quantity>2</quantity>
+		</operationplan>
+		<operationplan>
+			<id>12</id>
+			<operation xsi:type="operation_time_per">
+				<name>assembly</name>
+			</operation>
+			<start>2008-12-29T00:00:00</start>
+			<end>2009-01-04T00:00:00</end>
+			<quantity>5</quantity>
+		</operationplan>
+		<operationplan>
+			<id>13</id>
+			<operation>
+				<name>deliver product</name>
+			</operation>
+			<demand>
+				<name>order 1</name>
+			</demand>
+			<start>2009-01-04T00:00:00</start>
+			<end>2009-01-04T00:00:00</end>
+			<quantity>10</quantity>
+		</operationplan>
+	</operationplans>
+</plan>

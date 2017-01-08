@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba                 *
+ * Copyright (C) 2007-2015 by frePPLe bvba                                 *
  *                                                                         *
  * This library is free software; you can redistribute it and/or modify it *
  * under the terms of the GNU Affero General Public License as published   *
@@ -43,19 +43,11 @@ DECLARE_EXPORT const Date Date::infinitePast("1971-01-01T00:00:00",true);
  * limit of the internal representation, but more a convenient end date. */
 DECLARE_EXPORT const Date Date::infiniteFuture("2030-12-31T00:00:00",true);
 
-DECLARE_EXPORT const TimePeriod TimePeriod::MAX(Date::infiniteFuture - Date::infinitePast);
-DECLARE_EXPORT const TimePeriod TimePeriod::MIN(Date::infinitePast - Date::infiniteFuture);
+DECLARE_EXPORT const Duration Duration::MAX(Date::infiniteFuture - Date::infinitePast);
+DECLARE_EXPORT const Duration Duration::MIN(Date::infinitePast - Date::infiniteFuture);
 
 
-DECLARE_EXPORT void Date::checkFinite(long long i)
-{
-  if (i > infiniteFuture.lval) lval = infiniteFuture.lval;
-  else if (i < infinitePast.lval) lval = infinitePast.lval;
-  else lval = static_cast<long>(i);
-}
-
-
-DECLARE_EXPORT void TimePeriod::toCharBuffer(char* t) const
+DECLARE_EXPORT void Duration::toCharBuffer(char* t) const
 {
   if (!lval)
   {
@@ -98,6 +90,57 @@ DECLARE_EXPORT void TimePeriod::toCharBuffer(char* t) const
 }
 
 
+DECLARE_EXPORT void Duration::double2CharBuffer(double val, char* t)
+{
+  if (!val)
+  {
+    sprintf(t,"P0D");
+    return;
+  }
+  double fractpart, intpart;
+  fractpart = modf(val, &intpart);
+  if (fractpart < 0) fractpart = - fractpart;
+  long tmp = static_cast<long>(intpart>0 ? intpart : -intpart);
+  if (val<0) *(t++) = '-';
+  *(t++) = 'P';
+  if (tmp >= 31536000L)
+  {
+    long y = tmp / 31536000L;
+    t += sprintf(t,"%liY", y);
+    tmp %= 31536000L;
+  }
+  if (tmp >= 86400L)
+  {
+    long d = tmp / 86400L;
+    t += sprintf(t,"%liD", d);
+    tmp %= 86400L;
+  }
+  if (tmp > 0L)
+  {
+    *(t++) = 'T';
+    if (tmp >= 3600L)
+    {
+      long h = tmp / 3600L;
+      t += sprintf(t,"%liH", h);
+      tmp %= 3600L;
+    }
+    if (tmp >= 60L)
+    {
+      long h = tmp / 60L;
+      t += sprintf(t,"%liM", h);
+      tmp %= 60L;
+    }
+    if (tmp > 0L || fractpart)
+    {
+      if (fractpart)
+        sprintf(t,"%.3fS", fractpart + tmp);
+      else
+        sprintf(t,"%liS", tmp);
+    }
+  }
+}
+
+
 DECLARE_EXPORT DateRange::operator string() const
 {
   // Start date
@@ -114,7 +157,7 @@ DECLARE_EXPORT DateRange::operator string() const
 }
 
 
-DECLARE_EXPORT void TimePeriod::parse (const char* s)
+DECLARE_EXPORT void Duration::parse (const char* s)
 {
   long totalvalue = 0;
   long value = 0;
@@ -196,12 +239,122 @@ DECLARE_EXPORT void TimePeriod::parse (const char* s)
   // Missing a time unit
   if (value) throw DataException("Invalid time string '" + string(s) + "'");
 
-  // If no exceptions where thrown we can now store the value
+  // If no exceptions were thrown we can now store the value
   lval = negative ? -totalvalue : totalvalue;
 }
 
 
-DECLARE_EXPORT void Date::parse (const char* s, const string& fmt)
+DECLARE_EXPORT double Duration::parse2double (const char* s)
+{
+  double totalvalue = 0.0;
+  long value = 0;
+  double milliseconds = 0.0;
+  bool negative = false;
+  bool subseconds = false;
+  const char *c = s;
+
+  // Optional minus sign
+  if (*c == '-')
+  {
+    negative = true;
+    ++c;
+  }
+
+  // Compulsary 'P' if the string is formatted as an XML duration, but
+  // the string can also be formatted as a numeric value
+  if (*c != 'P')
+  {
+    char* endptr;
+    double value = strtod(s, &endptr);
+    if (*endptr)
+      throw DataException("Invalid time string '" + string(s) + "'");
+    return value;
+  }
+  ++c;
+
+  // Parse the date part
+  for ( ; *c && *c != 'T'; ++c)
+  {
+    switch (*c)
+    {
+      case '0': case '1': case '2': case '3': case '4':
+      case '5': case '6': case '7': case '8': case '9':
+        value = value * 10 + (*c - '0');
+        break;
+      case 'Y':
+        totalvalue += value * 31536000L;
+        value = 0;
+        break;
+      case 'M':
+        // 1 Month = 1 Year / 12 = 365 days / 12
+        totalvalue += value * 2628000L;
+        value = 0;
+        break;
+      case 'W':
+        totalvalue += value * 604800L;
+        value = 0;
+        break;
+      case 'D':
+        totalvalue += value * 86400L;
+        value = 0;
+        break;
+      default:
+        throw DataException("Invalid time string '" + string(s) + "'");
+    }
+  }
+
+  // Parse the time part
+  if (*c == 'T')
+  {
+    for (++c ; *c; ++c)
+    {
+      switch (*c)
+      {
+        case '0': case '1': case '2': case '3': case '4':
+        case '5': case '6': case '7': case '8': case '9':
+          if (subseconds)
+          {
+            milliseconds = milliseconds + static_cast<double>(*c - '0') / value;
+            value *= 10;
+          }
+          else
+            value = value * 10 + (*c - '0');
+          break;
+        case 'H':
+          totalvalue += value * 3600L;
+          value = 0;
+          break;
+        case 'M':
+          totalvalue += value * 60L;
+          value = 0;
+          break;
+        case '.':
+          totalvalue += value;
+          value = 10;
+          subseconds = true;
+          break;
+        case 'S':
+          if (subseconds)
+            totalvalue += milliseconds;
+          else
+            totalvalue += value;
+          value = 0;
+          break;
+        default:
+          throw DataException("Invalid time string '" + string(s) + "'");
+      }
+    }
+  }
+
+  // Missing a time unit
+  if (value) throw DataException("Invalid time string '" + string(s) + "'");
+
+  // If no exceptions were thrown we can now store the value
+  return negative ? -totalvalue : totalvalue;
+}
+
+
+DECLARE_EXPORT void Date::parse (const char* s, const char* fmt)
 {
   if (!s)
   {
@@ -210,7 +363,7 @@ DECLARE_EXPORT void Date::parse (const char* s, const string& fmt)
     return;
   }
   struct tm p;
-  strptime(s, fmt.c_str(), &p);
+  strptime(s, fmt, &p);
   // No clue whether daylight saving time is in effect...
   p.tm_isdst = -1;
   lval = mktime(&p);

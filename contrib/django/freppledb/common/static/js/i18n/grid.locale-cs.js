@@ -1,4 +1,3 @@
-;(function($){
 /**
  * jqGrid Czech Translation
  * Pavel Jirak pavel.jirak@jipas.cz
@@ -8,20 +7,34 @@
  * http://www.opensource.org/licenses/mit-license.php
  * http://www.gnu.org/licenses/gpl.html
 **/
-$.jgrid = $.jgrid || {};
-$.extend($.jgrid,{
+
+/*jslint white: true */
+/*global jQuery */
+(function($){
+"use strict";
+var locInfo = {
+	isRTL: false,
 	defaults : {
 		recordtext: "Zobrazeno {0} - {1} z {2} záznamů",
 	    emptyrecords: "Nenalezeny žádné záznamy",
 		loadtext: "Načítám...",
-		pgtext : "Strana {0} z {1}"
+		pgtext : "Strana {0} z {1}",
+		pgfirst : "First Page",
+		pglast : "Last Page",
+		pgnext : "Next Page",
+		pgprev : "Previous Page",
+		pgrecs : "Records per Page",
+		showhide: "Toggle Expand Collapse Grid",
+		savetext: "Ukládání..."
 	},
 	search : {
 		caption: "Vyhledávám...",
 		Find: "Hledat",
 		Reset: "Reset",
-	    odata: [{ oper:'eq', text:"rovno"},{ oper:'ne', text:"nerovono"},{ oper:'lt', text:"menší"},{ oper:'le', text:"menší nebo rovno"},{ oper:'gt', text:"větší"},{ oper:'ge', text:"větší nebo rovno"},{ oper:'bw', text:"začíná s"},{ oper:'bn', text:"nezačíná s"},{ oper:'in', text:"je v"},{ oper:'ni', text:"není v"},{ oper:'ew', text:"končí s"},{ oper:'en', text:"nekončí s"},{ oper:'cn', text:"obahuje"},{ oper:'nc', text:"neobsahuje"}],
-	    groupOps: [	{ op: "AND", text: "všech" },	{ op: "OR",  text: "některého z" }	]
+	    odata: [{ oper:'eq', text:"rovno"},{ oper:'ne', text:"nerovno"},{ oper:'lt', text:"menší"},{ oper:'le', text:"menší nebo rovno"},{ oper:'gt', text:"větší"},{ oper:'ge', text:"větší nebo rovno"},{ oper:'bw', text:"začíná s"},{ oper:'bn', text:"nezačíná s"},{ oper:'in', text:"je v"},{ oper:'ni', text:"není v"},{ oper:'ew', text:"končí s"},{ oper:'en', text:"nekončí s"},{ oper:'cn', text:"obsahuje"},{ oper:'nc', text:"neobsahuje"},{ oper:'nu', text:'is null'},{ oper:'nn', text:'is not null'}],
+	    groupOps: [	{ op: "AND", text: "všech" },	{ op: "OR",  text: "některého z" }	],
+		operandTitle : "Click to select search operation.",
+		resetTitle : "Reset Search Value"
 	},
 	edit : {
 		addCaption: "Přidat záznam",
@@ -59,13 +72,13 @@ $.extend($.jgrid,{
 		bCancel: "Storno"
 	},
 	nav : {
-		edittext: " ",
+		edittext: "",
 		edittitle: "Editovat vybraný řádek",
 		addtext:" ",
 		addtitle: "Přidat nový řádek",
-		deltext: " ",
+		deltext: "",
 		deltitle: "Smazat vybraný záznam ",
-		searchtext: " ",
+		searchtext: "",
 		searchtitle: "Najít záznamy",
 		refreshtext: "",
 		refreshtitle: "Obnovit tabulku",
@@ -99,30 +112,34 @@ $.extend($.jgrid,{
 				"Leden", "Únor", "Březen", "Duben", "Květen", "Červen", "Červenec", "Srpen", "Září", "Říjen", "Listopad", "Prosinec"
 			],
 			AmPm : ["do","od","DO","OD"],
-			S: function (j) {return j < 11 || j > 13 ? ['st', 'nd', 'rd', 'th'][Math.min((j - 1) % 10, 3)] : 'th'},
+			S: function (j) {return j < 11 || j > 13 ? ['st', 'nd', 'rd', 'th'][Math.min((j - 1) % 10, 3)] : 'th';},
 			srcformat: 'Y-m-d',
 			newformat: 'd/m/Y',
-			parseRe : /[Tt\\\/:_;.,\t\s-]/,
 			masks : {
-		        ISO8601Long:"Y-m-d H:i:s",
-		        ISO8601Short:"Y-m-d",
 		        ShortDate: "n/j/Y",
 		        LongDate: "l, F d, Y",
 		        FullDateTime: "l, F d, Y g:i:s A",
 		        MonthDay: "F d",
 		        ShortTime: "g:i A",
 		        LongTime: "g:i:s A",
-		        SortableDateTime: "Y-m-d\\TH:i:s",
-		        UniversalSortableDateTime: "Y-m-d H:i:sO",
 		        YearMonth: "F, Y"
-		    },
-		    reformatAfterEdit : false
-		},
-		baseLinkUrl: '',
-		showAction: '',
-	    target: '',
-	    checkbox : {disabled:true},
-		idName : 'id'
+		    }
+		}
+	}
+};
+$.jgrid = $.jgrid || {};
+$.extend(true, $.jgrid, {
+	defaults: {
+		locale: "cs"
+	},
+	locales: {
+		// In general the property name is free, but it's recommended to use the names based on
+		// http://www.iana.org/assignments/language-subtag-registry/language-subtag-registry
+		// http://rishida.net/utils/subtags/ and RFC 5646. See Appendix A of RFC 5646 for examples.
+		// One can use the lang attribute to specify language tags in HTML, and the xml:lang attribute for XML
+		// if it exists. See http://www.w3.org/International/articles/language-tags/#extlang
+		cs: $.extend({}, locInfo, { name: "čeština", nameEnglish: "Czech" }),
+		"cs-CZ": $.extend({}, locInfo, { name: "čeština (Česká republika)", nameEnglish: "Czech (Czech Republic)" })
 	}
 });
-})(jQuery);
+}(jQuery));

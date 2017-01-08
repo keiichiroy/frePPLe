@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba                 *
+ * Copyright (C) 2007-2015 by frePPLe bvba                                 *
  *                                                                         *
  * This library is free software; you can redistribute it and/or modify it *
  * under the terms of the GNU Affero General Public License as published   *
@@ -25,18 +25,23 @@ namespace frepple
 {
 
 DECLARE_EXPORT const MetaCategory* ResourceSkill::metadata;
+DECLARE_EXPORT const MetaClass* ResourceSkillDefault::metadata;
 
 
 int ResourceSkill::initialize()
 {
   // Initialize the metadata
-  metadata = new MetaCategory("resourceskill", "resourceskills", MetaCategory::ControllerDefault, writer);
-  const_cast<MetaCategory*>(metadata)->registerClass(
-    "resourceskill","resourceskill",true,Object::createDefault<ResourceSkill>
-  );
+  metadata = MetaCategory::registerCategory<ResourceSkill>(
+    "resourceskill", "resourceskills",
+    Association<Resource,Skill,ResourceSkill>::reader, finder
+    );
+  registerFields<ResourceSkill>(const_cast<MetaCategory*>(metadata));
+  ResourceSkillDefault::metadata = MetaClass::registerClass<ResourceSkillDefault>(
+    "resourceskill", "resourceskill", Object::create<ResourceSkillDefault>, true
+    );
 
   // Initialize the Python class
-  PythonType& x = FreppleCategory<ResourceSkill>::getType();
+  PythonType& x = FreppleCategory<ResourceSkill>::getPythonType();
   x.setName("resourceskill");
   x.setDoc("frePPLe resourceskill");
   x.supportgetattro();
@@ -54,14 +59,6 @@ DECLARE_EXPORT ResourceSkill::ResourceSkill(Skill* s, Resource* r, int u)
   setResource(r);
   setPriority(u);
   initType(metadata);
-  try { validate(ADD); }
-  catch (...)
-  {
-    if (getSkill()) getSkill()->resources.erase(this);
-    if (getResource()) getResource()->skills.erase(this);
-    resetReferenceCount();
-    throw;
-  }
 }
 
 
@@ -72,167 +69,16 @@ DECLARE_EXPORT ResourceSkill::ResourceSkill(Skill* s, Resource* r, int u, DateRa
   setPriority(u);
   setEffective(e);
   initType(metadata);
-  try { validate(ADD); }
-  catch (...)
-  {
-    if (getSkill()) getSkill()->resources.erase(this);
-    if (getResource()) getResource()->skills.erase(this);
-    resetReferenceCount();
-    throw;
-  }
 }
 
 
-void ResourceSkill::writer(const MetaCategory* c, XMLOutput* o)
+DECLARE_EXPORT ResourceSkill::~ResourceSkill()
 {
-  bool first = true;
-  for (Resource::iterator i = Resource::begin(); i != Resource::end(); ++i)
-    for (Resource::skilllist::const_iterator j = i->getSkills().begin(); j != i->getSkills().end(); ++j)
-    {
-      if (first)
-      {
-        o->BeginObject(Tags::tag_resourceskills);
-        first = false;
-      }
-      // We use the FULL mode, to force the flows being written regardless
-      // of the depth in the XML tree.
-      o->writeElement(Tags::tag_resourceskill, &*j, FULL);
-    }
-  if (!first) o->EndObject(Tags::tag_resourceskills);
-}
-
-
-DECLARE_EXPORT void ResourceSkill::writeElement(XMLOutput *o, const Keyword& tag, mode m) const
-{
-  // If the resourceskill has already been saved, no need to repeat it again
-  // A 'reference' to a load is not useful to be saved.
-  if (m == REFERENCE) return;
-  assert(m != NOHEAD && m != NOHEADTAIL);
-
-  o->BeginObject(tag);
-
-  // If the resourceskill is defined inside of a resource tag, we don't need to save
-  // the resource. Otherwise we do save it...
-  if (!dynamic_cast<Resource*>(o->getPreviousObject()))
-    o->writeElement(Tags::tag_resource, getResource());
-
-  // If the resourceskill is defined inside of a skill tag, we don't need to save
-  // the skill. Otherwise we do save it...
-  if (!dynamic_cast<Skill*>(o->getPreviousObject()))
-    o->writeElement(Tags::tag_skill, getSkill());
-
-  // Write the priority and effective daterange
-  if (getPriority()!=1) o->writeElement(Tags::tag_priority, getPriority());
-  if (getEffective().getStart() != Date::infinitePast)
-    o->writeElement(Tags::tag_effective_start, getEffective().getStart());
-  if (getEffective().getEnd() != Date::infiniteFuture)
-    o->writeElement(Tags::tag_effective_end, getEffective().getEnd());
-
-  // Write the tail
-  if (m != NOHEADTAIL && m != NOTAIL) o->EndObject(tag);
-}
-
-
-DECLARE_EXPORT void ResourceSkill::beginElement(XMLInput& pIn, const Attribute& pAttr)
-{
-  if (pAttr.isA (Tags::tag_resource))
-    pIn.readto( Resource::reader(Resource::metadata,pIn.getAttributes()) );
-  else if (pAttr.isA (Tags::tag_skill))
-    pIn.readto( Skill::reader(Skill::metadata,pIn.getAttributes()) );
-}
-
-
-DECLARE_EXPORT void ResourceSkill::endElement (XMLInput& pIn, const Attribute& pAttr, const DataElement& pElement)
-{
-  if (pAttr.isA (Tags::tag_resource))
-  {
-    Resource *r = dynamic_cast<Resource*>(pIn.getPreviousObject());
-    if (r) setResource(r);
-    else throw LogicException("Incorrect object type during read operation");
-  }
-  else if (pAttr.isA (Tags::tag_skill))
-  {
-    Skill *s = dynamic_cast<Skill*>(pIn.getPreviousObject());
-    if (s) setSkill(s);
-    else throw LogicException("Incorrect object type during read operation");
-  }
-  else if (pAttr.isA(Tags::tag_priority))
-    setPriority(pElement.getInt());
-  else if (pAttr.isA(Tags::tag_effective_end))
-    setEffectiveEnd(pElement.getDate());
-  else if (pAttr.isA(Tags::tag_effective_start))
-    setEffectiveStart(pElement.getDate());
-  else if (pAttr.isA(Tags::tag_action))
-  {
-    delete static_cast<Action*>(pIn.getUserArea());
-    pIn.setUserArea(
-      new Action(MetaClass::decodeAction(pElement.getString().c_str()))
-    );
-  }
-  else if (pIn.isObjectEnd())
-  {
-    // The resourceskill data is now all read in. See if it makes sense now...
-    Action a = pIn.getUserArea() ?
-        *static_cast<Action*>(pIn.getUserArea()) :
-        ADD_CHANGE;
-    delete static_cast<Action*>(pIn.getUserArea());
-    try { validate(a); }
-    catch (...)
-    {
-      delete this;
-      throw;
-    }
-  }
-}
-
-
-DECLARE_EXPORT PyObject* ResourceSkill::getattro(const Attribute& attr)
-{
-  if (attr.isA(Tags::tag_resource))
-    return PythonObject(getResource());
-  if (attr.isA(Tags::tag_skill))
-    return PythonObject(getSkill());
-  if (attr.isA(Tags::tag_priority))
-    return PythonObject(getPriority());
-  if (attr.isA(Tags::tag_effective_end))
-    return PythonObject(getEffective().getEnd());
-  if (attr.isA(Tags::tag_effective_start))
-    return PythonObject(getEffective().getStart());
-  return NULL;
-}
-
-
-DECLARE_EXPORT int ResourceSkill::setattro(const Attribute& attr, const PythonObject& field)
-{
-  if (attr.isA(Tags::tag_resource))
-  {
-    if (!field.check(Resource::metadata))
-    {
-      PyErr_SetString(PythonDataException, "resourceskill resource must be of type resource");
-      return -1;
-    }
-    Resource* y = static_cast<Resource*>(static_cast<PyObject*>(field));
-    setResource(y);
-  }
-  else if (attr.isA(Tags::tag_skill))
-  {
-    if (!field.check(Skill::metadata))
-    {
-      PyErr_SetString(PythonDataException, "resourceskill skill must be of type skill");
-      return -1;
-    }
-    Skill* y = static_cast<Skill*>(static_cast<PyObject*>(field));
-    setSkill(y);
-  }
-  else if (attr.isA(Tags::tag_priority))
-    setPriority(field.getInt());
-  else if (attr.isA(Tags::tag_effective_end))
-    setEffectiveEnd(field.getDate());
-  else if (attr.isA(Tags::tag_effective_start))
-    setEffectiveStart(field.getDate());
-  else
-    return -1;
-  return 0;
+  // Delete the associated from the related objects
+  if (getResource())
+    getResource()->skills.erase(this);
+  if (getSkill())
+    getSkill()->resources.erase(this);
 }
 
 
@@ -243,39 +89,71 @@ PyObject* ResourceSkill::create(PyTypeObject* pytype, PyObject* args, PyObject* 
   {
     // Pick up the skill
     PyObject* skill = PyDict_GetItemString(kwds,"skill");
+    if (!skill)
+      throw DataException("Missing skill on ResourceSkill");
     if (!PyObject_TypeCheck(skill, Skill::metadata->pythonClass))
       throw DataException("resourceskill skill must be of type skill");
 
     // Pick up the resource
     PyObject* res = PyDict_GetItemString(kwds,"resource");
+    if (!skill)
+      throw DataException("Missing resource on ResourceSkill");
     if (!PyObject_TypeCheck(res, Resource::metadata->pythonClass))
       throw DataException("resourceskill resource must be of type resource");
 
     // Pick up the priority
     PyObject* q1 = PyDict_GetItemString(kwds,"priority");
-    int q2 = q1 ? PythonObject(q1).getInt() : 1;
+    int q2 = q1 ? PythonData(q1).getInt() : 1;
 
     // Pick up the effective dates
     DateRange eff;
     PyObject* eff_start = PyDict_GetItemString(kwds,"effective_start");
     if (eff_start)
     {
-      PythonObject d(eff_start);
+      PythonData d(eff_start);
       eff.setStart(d.getDate());
     }
     PyObject* eff_end = PyDict_GetItemString(kwds,"effective_end");
     if (eff_end)
     {
-      PythonObject d(eff_end);
+      PythonData d(eff_end);
       eff.setEnd(d.getDate());
     }
 
-    // Create the load
+    // Create the resourceskill
     ResourceSkill *l = new ResourceSkill(
       static_cast<Skill*>(skill),
       static_cast<Resource*>(res),
       q2, eff
     );
+
+    // Iterate over extra keywords, and set attributes.   @todo move this responsibility to the readers...
+    if (l)
+    {
+      PyObject *key, *value;
+      Py_ssize_t pos = 0;
+      while (PyDict_Next(kwds, &pos, &key, &value))
+      {
+        PythonData field(value);
+        PyObject* key_utf8 = PyUnicode_AsUTF8String(key);
+        DataKeyword attr(PyBytes_AsString(key_utf8));
+        Py_DECREF(key_utf8);
+        if (!attr.isA(Tags::effective_end) && !attr.isA(Tags::effective_start)
+          && !attr.isA(Tags::skill) && !attr.isA(Tags::resource)
+          && !attr.isA(Tags::priority) && !attr.isA(Tags::type)
+          && !attr.isA(Tags::action))
+        {
+          const MetaFieldBase* fmeta = l->getType().findField(attr.getHash());
+          if (!fmeta && l->getType().category)
+            fmeta = l->getType().category->findField(attr.getHash());
+          if (fmeta)
+            // Update the attribute
+            fmeta->setField(l, field);
+          else
+            l->setProperty(attr.getName(), value);
+        }
+      };
+    }
 
     // Return the object
     Py_INCREF(l);
@@ -289,92 +167,54 @@ PyObject* ResourceSkill::create(PyTypeObject* pytype, PyObject* args, PyObject* 
 }
 
 
-DECLARE_EXPORT void ResourceSkill::validate(Action action)
+DECLARE_EXPORT Object* ResourceSkill::finder(const DataValueDict& d)
 {
-  // Catch null operation and resource pointers
-  Skill *skill = getSkill();
-  Resource *res = getResource();
-  if (!skill || !res)
+  // Check resource
+  const DataValue* tmp = d.get(Tags::resource);
+  if (!tmp)
+    return NULL;
+  Resource* res = static_cast<Resource*>(tmp->getObject());
+
+  // Check skill field
+  tmp = d.get(Tags::skill);
+  if (!tmp)
+    return NULL;
+  Skill* skill = static_cast<Skill*>(tmp->getObject());
+
+  // Walk over all skills of the resurce, and return
+  // the first one with matching
+  const DataValue* hasEffectiveStart = d.get(Tags::effective_start);
+  Date effective_start;
+  if (hasEffectiveStart)
+    effective_start = hasEffectiveStart->getDate();
+  const DataValue* hasEffectiveEnd = d.get(Tags::effective_end);
+  Date effective_end;
+  if (hasEffectiveEnd)
+    effective_end = hasEffectiveEnd->getDate();
+  const DataValue* hasPriority = d.get(Tags::priority);
+  int priority;
+  if (hasPriority)
+    priority = hasPriority->getInt();
+  const DataValue* hasName = d.get(Tags::name);
+  string name;
+  if (hasName)
+    name = hasName->getString();
+  Resource::skilllist::const_iterator s = res->getSkills();
+  while (ResourceSkill *i = s.next())
   {
-    // Invalid load model
-    if (!skill && !res)
-      throw DataException("Missing resource and kill on a resourceskill");
-    else if (!skill)
-      throw DataException("Missing skill on a resourceskill on resource '"
-          + res->getName() + "'");
-    else if (!res)
-      throw DataException("Missing resource on a resourceskill on skill '"
-          + skill->getName() + "'");
+    if (i->getSkill() != skill)
+      continue;
+    if (hasEffectiveStart && i->getEffectiveStart() != effective_start)
+      continue;
+    if (hasEffectiveEnd && i->getEffectiveEnd() != effective_end)
+      continue;
+    if (hasPriority && i->getPriority() != priority)
+      continue;
+    if (hasName && i->getName() != name)
+      continue;
+    return const_cast<ResourceSkill*>(&*i);
   }
-
-  // Check if a resourceskill with 1) identical resource, 2) identical skill and
-  // 3) overlapping effectivity dates already exists
-  Skill::resourcelist::const_iterator i = skill->getResources().begin();
-  for (; i != skill->getResources().end(); ++i)
-    if (i->getResource() == res
-        && i->getEffective().overlap(getEffective())
-        && &*i != this)
-      break;
-
-  // Apply the appropriate action
-  switch (action)
-  {
-    case ADD:
-      if (i != skill->getResources().end())
-      {
-        throw DataException("Resourceskill of '" + res->getName() + "' and '"
-            + skill->getName() + "' already exists");
-      }
-      break;
-    case CHANGE:
-      throw DataException("Can't update a resourceskill");
-    case ADD_CHANGE:
-      // ADD is handled in the code after the switch statement
-      if (i == skill->getResources().end()) break;
-      throw DataException("Can't update a resourceskill");
-    case REMOVE:
-      // This resourceskill was only used temporarily during the reading process
-      delete this;
-      if (i == skill->getResources().end())
-        // Nothing to delete
-        throw DataException("Can't remove nonexistent resourceskill of '"
-            + res->getName() + "' and '" + skill->getName() + "'");
-      delete &*i;
-      return;
-  }
-}
-
-
-int ResourceSkillIterator::initialize()
-{
-  // Initialize the type
-  PythonType& x = PythonExtension<ResourceSkillIterator>::getType();
-  x.setName("resourceSkillIterator");
-  x.setDoc("frePPLe iterator for resource skills");
-  x.supportiter();
-  return x.typeReady();
-}
-
-
-PyObject* ResourceSkillIterator::iternext()
-{
-  PyObject* result;
-  if (res)
-  {
-    // Iterate over skills on a resource
-    if (ir == res->getSkills().end()) return NULL;
-    result = const_cast<ResourceSkill*>(&*ir);
-    ++ir;
-  }
-  else
-  {
-    // Iterate over resources having a skill
-    if (is == skill->getResources().end()) return NULL;
-    result = const_cast<ResourceSkill*>(&*is);
-    ++is;
-  }
-  Py_INCREF(result);
-  return result;
+  return NULL;
 }
 
 }

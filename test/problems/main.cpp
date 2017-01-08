@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba                 *
+ * Copyright (C) 2007-2013 by frePPLe bvba                                 *
  *                                                                         *
  * This library is free software; you can redistribute it and/or modify it *
  * under the terms of the GNU Affero General Public License as published   *
@@ -27,7 +27,8 @@ using namespace frepple;
 void reportProblems(string when)
 {
   logger << "Problems after " << when << ":" << endl;
-  for (Problem::const_iterator i = Problem::begin(); i != Problem::end(); ++i)
+  Problem::iterator iter;
+  while (Problem* i = iter.next())
     logger << "   " << i->getDates() << " - " << i->getDescription() << endl;
   logger << endl;
 }
@@ -73,11 +74,11 @@ int main (int argc, char *argv[])
 
     // 5: Move the delivery early & report
     Date oldstart = deliver->getDates().getStart();
-    deliver->setStart(oldstart - TimePeriod(86400));
+    deliver->setStart(oldstart - Duration(86400));
     reportProblems("moving delivery early");
 
     // 6: Move the delivery late & report
-    deliver->setStart(oldstart + TimePeriod(86400));
+    deliver->setStart(oldstart + Duration(86400));
     reportProblems("moving delivery late");
 
     // 7: Restoring original delivery plan & report
@@ -91,7 +92,7 @@ int main (int argc, char *argv[])
 
     // 9: Move the make operation before current & report
     oldstart = build->getDates().getStart();
-    build->setStart(Plan::instance().getCurrent() - TimePeriod(1));
+    build->setStart(Plan::instance().getCurrent() - Duration(1));
     reportProblems("moving build early");
 
     // 10: Restoring the original build plan & report

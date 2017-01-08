@@ -1,0 +1,264 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plan xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<name>Test model for suppliers</name>
+	<description>
+  In this test we verify the creation of procurements, triggered by
+  item supplier definitions.
+  </description>
+	<current>2015-01-01T00:00:00</current>
+	<locations>
+		<location>
+			<name>warehouse</name>
+		</location>
+	</locations>
+	<suppliers>
+		<supplier>
+			<name>Supplier of component A</name>
+		</supplier>
+		<supplier>
+			<name>Supplier of component B</name>
+		</supplier>
+		<supplier>
+			<name>Supplier of component C</name>
+		</supplier>
+		<supplier>
+			<name>Supplier of components A and B</name>
+		</supplier>
+	</suppliers>
+	<items>
+		<item>
+			<name>Component A</name>
+			<owner>
+				<name>Component group A and B</name>
+			</owner>
+			<operation>
+				<name>Delivery A</name>
+			</operation>
+			<itemsuppliers>
+				<itemsupplier>
+					<supplier>
+						<name>Supplier of component A</name>
+					</supplier>
+					<leadtime>P7D</leadtime>
+					<priority>2</priority>
+				</itemsupplier>
+			</itemsuppliers>
+		</item>
+		<item>
+			<name>Component B</name>
+			<owner>
+				<name>Component group A and B</name>
+			</owner>
+			<price>1</price>
+			<operation>
+				<name>Delivery B</name>
+			</operation>
+			<itemsuppliers>
+				<itemsupplier>
+					<supplier>
+						<name>Supplier of component B</name>
+					</supplier>
+					<leadtime>P14D</leadtime>
+				</itemsupplier>
+			</itemsuppliers>
+		</item>
+		<item>
+			<name>Component C</name>
+			<price>1</price>
+			<operation>
+				<name>Delivery C</name>
+			</operation>
+			<itemsuppliers>
+				<itemsupplier>
+					<supplier>
+						<name>Supplier of component C</name>
+					</supplier>
+					<leadtime>P21D</leadtime>
+					<size_minimum>125</size_minimum>
+					<size_multiple>100</size_multiple>
+				</itemsupplier>
+			</itemsuppliers>
+		</item>
+		<item>
+			<name>Component D</name>
+			<price>1</price>
+			<operation>
+				<name>Delivery D</name>
+			</operation>
+		</item>
+		<item>
+			<name>Component group A and B</name>
+			<price>1</price>
+			<itemsuppliers>
+				<itemsupplier>
+					<supplier>
+						<name>Supplier of components A and B</name>
+					</supplier>
+					<leadtime>P14D</leadtime>
+				</itemsupplier>
+			</itemsuppliers>
+		</item>
+	</items>
+	<buffers>
+		<buffer>
+			<name>A @ warehouse</name>
+			<item>
+				<name>Component A</name>
+			</item>
+			<location>
+				<name>warehouse</name>
+			</location>
+			<onhand>10</onhand>
+		</buffer>
+		<buffer>
+			<name>B @ warehouse</name>
+			<item>
+				<name>Component B</name>
+			</item>
+			<location>
+				<name>warehouse</name>
+			</location>
+			<onhand>10</onhand>
+		</buffer>
+		<buffer>
+			<name>C @ warehouse</name>
+			<item>
+				<name>Component C</name>
+			</item>
+			<location>
+				<name>warehouse</name>
+			</location>
+			<onhand>10</onhand>
+		</buffer>
+		<buffer>
+			<name>D @ warehouse</name>
+			<item>
+				<name>Component D</name>
+			</item>
+			<location>
+				<name>warehouse</name>
+			</location>
+			<onhand>10</onhand>
+		</buffer>
+	</buffers>
+	<operations>
+		<operation>
+			<name>Delivery A</name>
+			<flows>
+				<flow>
+					<buffer>
+						<name>A @ warehouse</name>
+					</buffer>
+					<quantity>-1</quantity>
+				</flow>
+			</flows>
+		</operation>
+		<operation>
+			<name>Delivery B</name>
+			<flows>
+				<flow>
+					<buffer>
+						<name>B @ warehouse</name>
+					</buffer>
+					<quantity>-1</quantity>
+				</flow>
+			</flows>
+		</operation>
+		<operation>
+			<name>Delivery C</name>
+			<flows>
+				<flow>
+					<buffer>
+						<name>C @ warehouse</name>
+					</buffer>
+					<quantity>-1</quantity>
+				</flow>
+			</flows>
+		</operation>
+		<operation>
+			<name>Delivery D</name>
+			<flows>
+				<flow>
+					<buffer>
+						<name>D @ warehouse</name>
+					</buffer>
+					<quantity>-1</quantity>
+				</flow>
+			</flows>
+		</operation>
+	</operations>
+	<demands>
+		<demand>
+			<name>order 1 for item A</name>
+			<quantity>100</quantity>
+			<item>
+				<name>Component A</name>
+			</item>
+			<due>2015-01-01T00:00:00</due>
+			<priority>1</priority>
+		</demand>
+		<demand>
+			<name>order 1 for item B</name>
+			<quantity>100</quantity>
+			<item>
+				<name>Component B</name>
+			</item>
+			<due>2015-01-01T00:00:00</due>
+			<priority>1</priority>
+		</demand>
+		<demand>
+			<name>order 1 for item C</name>
+			<quantity>100</quantity>
+			<item>
+				<name>Component C</name>
+			</item>
+			<due>2015-01-01T00:00:00</due>
+			<priority>1</priority>
+		</demand>
+		<demand>
+			<name>order 1 for item D</name>
+			<quantity>100</quantity>
+			<item>
+				<name>Component D</name>
+			</item>
+			<due>2015-01-01T00:00:00</due>
+			<priority>1</priority>
+		</demand>
+		<demand>
+			<name>order 2 for item A</name>
+			<quantity>100</quantity>
+			<item>
+				<name>Component A</name>
+			</item>
+			<due>2015-02-01T00:00:00</due>
+			<priority>1</priority>
+		</demand>
+		<demand>
+			<name>order 2 for item B</name>
+			<quantity>100</quantity>
+			<item>
+				<name>Component B</name>
+			</item>
+			<due>2015-02-01T00:00:00</due>
+			<priority>1</priority>
+		</demand>
+		<demand>
+			<name>order 2 for item C</name>
+			<quantity>100</quantity>
+			<item>
+				<name>Component C</name>
+			</item>
+			<due>2015-02-01T00:00:00</due>
+			<priority>1</priority>
+		</demand>
+		<demand>
+			<name>order 2 for item D</name>
+			<quantity>100</quantity>
+			<item>
+				<name>Component D</name>
+			</item>
+			<due>2015-02-01T00:00:00</due>
+			<priority>1</priority>
+		</demand>
+	</demands>
+</plan>

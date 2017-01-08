@@ -74,12 +74,12 @@
           </load>
           <load>
             <resource name="Painting line B"/>
-            <alternate>paint</alternate>
+            <name>paint</name>
             <setup>red</setup>
           </load>
           <load>
             <resource name="Painting line C"/>
-            <alternate>paint</alternate>
+            <name>paint</name>
             <setup>red</setup>
           </load>
         </loads>
@@ -107,12 +107,12 @@
           </load>
           <load>
             <resource name="Painting line B"/>
-            <alternate>paint</alternate>
+            <name>paint</name>
             <setup>green</setup>
           </load>
           <load>
             <resource name="Painting line C"/>
-            <alternate>paint</alternate>
+            <name>paint</name>
             <setup>green</setup>
           </load>
         </loads>
@@ -326,7 +326,6 @@
   </demands>
 
 <?python
-from __future__ import print_function
 from datetime import timedelta
 
 def printStatus(d = None, mode = 1):
@@ -338,7 +337,7 @@ def printStatus(d = None, mode = 1):
   print("")
 
 
-solver = frepple.solver_mrp(name="MRP", plantype=1, constraints=15, loglevel=2, userexit_demand=printStatus)
+solver = frepple.solver_mrp(plantype=1, constraints=15, loglevel=2, userexit_demand=printStatus)
 
 print("CREATING CONSTRAINED PLAN")
 for d in frepple.demands():
@@ -347,7 +346,7 @@ solver.solve()
 frepple.saveplan("output.1.xml")
 printStatus()
 
-print "\n\nCREATING UNCONSTRAINED PLAN"
+print("\n\nCREATING UNCONSTRAINED PLAN")
 for d in frepple.demands():
   d.due = frepple.settings.current + timedelta(10)
 solver.solve()

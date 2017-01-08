@@ -1,4 +1,4 @@
-# Copyright (C) 2013 by Johan De Taeye, frePPLe bvba
+# Copyright (C) 2013 by frePPLe bvba
 #
 # This library is free software; you can redistribute it and/or modify it
 # under the terms of the GNU Affero General Public License as published
@@ -14,7 +14,7 @@
 # License along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-from django.utils.translation import ugettext as _
+from django.utils.translation import ugettext_lazy as _
 
 from freppledb.menu import menu
 

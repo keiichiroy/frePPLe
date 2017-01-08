@@ -1,7 +1,7 @@
 
 The primary authors of frePPLe are:
 
-* Johan De Taeye (jdetaeye at users.sourceforge.net)
+* Johan De Taeye (jdetaeye at frepple dot com)
 
 
 And here is an inevitably incomplete list of MUCH-APPRECIATED CONTRIBUTORS --
@@ -14,7 +14,10 @@ frePPLe that much better:
 * Stephen Liu (2notebook at yahoo dot com dot tw, http://job.achi.idv.tw)
 * Antonio Mascolo (tonio at purpless dot com)
 * Guy Ollagnon (guy dot ollagnon at demand2plan dot com)
-
+* Keiichiro Yamamoto (k dot yanmar at gmail dot com)
+* Wu Fei (1713034961 at qq dot com)
+* Jorge Enrique Moreira Broche (jemoreira7 at gmail dot com)
+* Chris Zajaczkowski (info at businesstec.net)
 
 FrePPLe redistributes parts of the following third party software components:
 
@@ -38,16 +41,10 @@ FrePPLe redistributes parts of the following third party software components:
 * contrib\django\freppledb\common\static\js\jquery.jqgid*.js
   contrib\django\freppledb\common\static\js\i18n\grid.locale-*.js
   contrib\django\freppledb\common\static\css\ui.jqgrid.css
-    Redistributed from jqGrid - jQuery Grid
-    Copyright (c) 2008, Tony Tomov, tony@trirand.com
-    Dual licensed under the MIT and GPL licenses
-    See http://www.trirand.com/blog/
-
-* contrib\django\freppledb\common\static\js\flotr2*.js
-    Redistributed from flotr2
-    Copyright (c) 2012 Carl Sutherland
-    Licensed as public domain software
-    See https://github.com/HumbleSoftware/Flotr2/
+    Redistributed from free-jqGrid - jQuery Grid
+    Copyright (c) 2015, Oleg Kiriljuk, oleg.kiriljuk@ok-soft-gmbh.com
+    Dual licensed under the MIT and GPL Version 2 licenses
+    See https://github.com/free-jqgrid/jqGrid
 
 * contrib\django\freppledb\common\static\js\jquery.uix.multiselect.*js
   contrib\django\freppledb\common\static\css\uix.multiselect.css
@@ -62,3 +59,15 @@ FrePPLe redistributes parts of the following third party software components:
     Copyright Michael Bostock
     Licensed under BSD license
     See http://d3js.org/
+
+* contrib\django\freppledb\common\static\fonts\FontAwesome*
+  contrib\django\freppledb\common\static\css\font-awesome*
+    Redistributed Font Awesome
+    Copyright Dave Gandy
+    Licensed under SIL Open Font License 1.1 (http://scripts.sil.org/OFL) and MIT License
+    See http://fontawesome.io
+
+* contrib\django\freppledb\common\static\fonts\opensans*
+    Redistributed Open Sans Webfont
+    Copyright Steve Matteson
+    Licensed under Apache License, Version 2.0, January 2004

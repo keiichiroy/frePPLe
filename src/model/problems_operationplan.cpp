@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba                 *
+ * Copyright (C) 2007-2015 by frePPLe bvba                                 *
  *                                                                         *
  * This library is free software; you can redistribute it and/or modify it *
  * under the terms of the GNU Affero General Public License as published   *
@@ -49,7 +49,7 @@ void OperationPlan::updateProblems()
   //  - opplans of hidden operations
   if (!getLocked() && getOperation()->getDetectProblems())
   {
-    if (!getOwner() || getOperation() == OperationSetup::setupoperation)
+    if (!firstsubopplan || getOperation() == OperationSetup::setupoperation)
     {
       // Avoid duplicating problems on child and owner operationplans
       // Check if a BeforeCurrent problem is required.
@@ -63,12 +63,16 @@ void OperationPlan::updateProblems()
       (dates.getStart() < Plan::instance().getCurrent() + oper->getFence())
         needsBeforeFence = true;
     }
-    if (nextsubopplan && getDates().getEnd() > nextsubopplan->getDates().getStart())
+    if (nextsubopplan
+      && getDates().getEnd() > nextsubopplan->getDates().getStart()
+      && !nextsubopplan->getLocked()
+      && owner && owner->getOperation()->getType() != *OperationSplit::metadata
+      )
       needsPrecedence = true;
   }
 
   // Loop through the existing problems
-  for (Problem::const_iterator j = Problem::begin(this, false);
+  for (Problem::iterator j = Problem::begin(this, false);
       j!=Problem::end();)
   {
     // Need to increment now and define a pointer to the problem, since the

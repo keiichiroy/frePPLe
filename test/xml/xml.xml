@@ -16,7 +16,8 @@
         <operation name="operation 1" xsi:type="operation_routing">
           <!-- Level 3: operation -->
           <size_multiple>3</size_multiple>
-          <steps>
+          <suboperations>
+            <suboperation>
             <operation name="operation 1 step1"
               xsi:type="operation_fixed_time">
               <!-- Level 4: operation -->
@@ -50,11 +51,14 @@
               </loads>
               <duration>P7D</duration>
             </operation>
+            </suboperation>
+            <suboperation>
             <operation name="operation 1 step2"
               xsi:type="operation_fixed_time">
               <duration>P7D</duration>
             </operation>
-          </steps>
+            </suboperation>
+          </suboperations>
         </operation>
       </item>
     </demand>
@@ -64,7 +68,7 @@
   </problems>
 
 <?python
-frepple.solver_mrp(name="MRP", constraints=0, loglevel=0).solve()
+frepple.solver_mrp(constraints=0, loglevel=0).solve()
 frepple.saveplan("output.1.xml")
 frepple.saveXMLfile("output.2.xml")
 ?>

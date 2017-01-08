@@ -1,7 +1,7 @@
 ;
 ; Nullsoft script for creating a windows installer for frePPLe
 ;
-; Copyright (C) 2007-2013 by Johan De Taeye, frePPLe bvba
+; Copyright (C) 2007-2014 by frePPLe bvba
 ;
 ; This library is free software; you can redistribute it and/or modify it
 ; under the terms of the GNU Affero General Public License as published
@@ -26,14 +26,14 @@
 ; Make sure that this variable points to the windows version of Python, not
 ; the one that is part of cygwin.
 !ifndef PYTHON
-!define PYTHON "python.exe"
+!define PYTHON "python3.exe"
 !endif
 
 ; Main definitions
 !define PRODUCT_NAME "frePPLe"
-!define PRODUCT_VERSION "2.1.beta"
+!define PRODUCT_VERSION "3.1.beta"
 !define PRODUCT_PUBLISHER "frePPLe"
-!define PRODUCT_WEB_SITE "http://www.frepple.com"
+!define PRODUCT_WEB_SITE "http://frepple.com"
 !define PRODUCT_DIR_REGKEY "Software\Microsoft\Windows\CurrentVersion\App Paths\frepple.exe"
 !define PRODUCT_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME} ${PRODUCT_VERSION}"
 
@@ -103,7 +103,7 @@ FunctionEnd
 !define MUI_ABORTWARNING
 !define MUI_WELCOMEFINISHPAGE_BITMAP "frepple.bmp"
 !define MUI_UNWELCOMEFINISHPAGE_BITMAP "frepple.bmp"
-!define MUI_WELCOMEPAGE_TEXT "This wizard will guide you through the installation of frePPLe.$\r$\n$\r$\nIt is recommended to uninstall a previous version before this installing a new one.$\r$\n$\r$\nClick Next to continue"
+!define MUI_WELCOMEPAGE_TEXT "This wizard will guide you through the installation of frePPLe.$\r$\n$\r$\nIt is recommended to uninstall a previous version before this installing a new one."
 !define MUI_HEADERIMAGE_BITMAP "..\..\doc\frepple.bmp"
 !define MUI_ICON "..\..\src\frepple.ico"
 !define MUI_UNICON "..\..\src\frepple.ico"
@@ -113,7 +113,6 @@ FunctionEnd
 !insertmacro MUI_PAGE_LICENSE "../../COPYING"
 !insertmacro MULTIUSER_PAGE_INSTALLMODE
 !insertmacro MUI_PAGE_DIRECTORY
-Page custom LicenseFileOpen LicenseFileLeave
 !insertmacro MUI_PAGE_COMPONENTS
 Page custom DatabaseOpen DatabaseLeave
 !insertmacro MUI_PAGE_INSTFILES
@@ -125,16 +124,21 @@ Page custom FinishOpen FinishLeave
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_UNPAGE_FINISH
 
-; Language files
+; Language files, sorted alphabetically
 !insertmacro MUI_LANGUAGE "English"   ; First option is the default language
 !insertmacro MUI_LANGUAGE "Dutch"
 !insertmacro MUI_LANGUAGE "French"
 !insertmacro MUI_LANGUAGE "Italian"
+!insertmacro MUI_LANGUAGE "Japanese"
+!insertmacro MUI_LANGUAGE "Portuguese"
+!insertmacro MUI_LANGUAGE "PortugueseBR"
+!insertmacro MUI_LANGUAGE "SimpChinese"
+!insertmacro MUI_LANGUAGE "Spanish"
 !insertmacro MUI_LANGUAGE "TradChinese"
 
 ;Version Information
-VIProductVersion "2.1.0.0"
-VIAddVersionKey /LANG=${LANG_ENGLISH} FileVersion "2.1.0.0"
+VIProductVersion "3.1.0.0"
+VIAddVersionKey /LANG=${LANG_ENGLISH} FileVersion "3.1.0.0"
 VIAddVersionKey /LANG=${LANG_ENGLISH} ProductName "frePPLe community edition installer"
 VIAddVersionKey /LANG=${LANG_ENGLISH} Comments "frePPLe community edition installer"
 VIAddVersionKey /LANG=${LANG_ENGLISH} CompanyName "frePPLe"
@@ -147,33 +151,45 @@ BrandingText "${PRODUCT_NAME} ${PRODUCT_VERSION}"
 CRCcheck on
 ShowInstDetails show
 ShowUnInstDetails show
-Var InstalledDocumentation
-Var LicenseFile
+Var day
+Var month
+Var year
+Var day_name
+Var hours
+Var minutes
+Var seconds
 
-ReserveFile "licensefile.ini"
+; Declare everything that needs to be extracted on startup.
+; Only useful for BZIP2 compression
 ReserveFile "parameters.ini"
 ReserveFile "finish.ini"
 ReserveFile '${NSISDIR}\Plugins\InstallOptions.dll'
+ReserveFile "finish.bmp"
+
 
 Function .onInit
-  ;Extract INI files
-  !insertmacro INSTALLOPTIONS_EXTRACT "licensefile.ini"
+  ;Extract some files used by the installer
   !insertmacro INSTALLOPTIONS_EXTRACT "parameters.ini"
   !insertmacro INSTALLOPTIONS_EXTRACT "finish.ini"
+  !insertmacro INSTALLOPTIONS_EXTRACT "finish.bmp"
+
+  ;Write image paths to the INI file
+  WriteINIStr "$PLUGINSDIR\finish.ini" "Field 7" "Text" "$PLUGINSDIR\finish.bmp"
 
   !insertmacro MULTIUSER_INIT
-
-  ; Set to "yes" when the documentation is chosen to be installed
-  strcpy $InstalledDocumentation "no"
 FunctionEnd
 
 
 Section -Start
   ; Create the python distribution and django server
-  !system "${PYTHON} setup.py"
+  !system '${PYTHON} setup.py'
+
+  ; Build the documentation if it doesn't exist yet
+  !cd "../../doc"
+  !system "bash -c 'if (test ! -f _build/html/index.html ); then pwd; fi'"
 
   ; Create a distribution if none exists yet
-  !cd "../.."
+  !cd ".."
   !system "bash -c 'if (test ! -f frepple-${PRODUCT_VERSION}.tar.gz ); then make dist; fi'"
 
   ; Expand the distribution
@@ -195,11 +211,9 @@ Section "Application" SecAppl
   SetOutPath "$INSTDIR\bin"
   File "..\bin\frepple.exe"
   !insertmacro InstallLib DLL NOTSHARED NOREBOOT_NOTPROTECTED "..\bin\frepple.dll" "$INSTDIR\bin\frepple.dll" "$SYSDIR"
-  File "..\bin\frepple.lib"
-  File "..\bin\frepple.exp"
 
   ; Copy modules
-  File "..\bin\mod_*.so"
+  File /nonfatal "..\bin\mod_*.so"
 
    ; Copy configuration files
   File "..\bin\*.xsd"
@@ -207,9 +221,6 @@ Section "Application" SecAppl
 
   ; Copy the license file the user specified
   File "..\bin\license.xml"
-  StrCmp $LicenseFile "" +3 0
-    Rename license.xml license_community_edition.xml
-    CopyFiles $LicenseFile "$INSTDIR\bin"
 
   ; Copy the django and python redistributables created by py2exe
   File /r "..\contrib\installer\dist\*.*"
@@ -218,17 +229,13 @@ Section "Application" SecAppl
   SetOutPath "$INSTDIR\bin\custom"
   File "..\contrib\django\djangosettings.py"
 
-  ; Copy sqlite database if it is available.
-  ; This file shouldn't be put in the read-only "Program files" directory.
-  SetOutPath "$APPDATA\${PRODUCT_NAME}\${PRODUCT_VERSION}"
-  File "..\contrib\django\frepple.sqlite"
-  AccessControl::GrantOnFile "$APPDATA\${PRODUCT_NAME}\${PRODUCT_VERSION}" "(S-1-5-32-545)" "FullAccess"
-  AccessControl::GrantOnFile "$APPDATA\${PRODUCT_NAME}\${PRODUCT_VERSION}\frepple.sqlite" "(S-1-5-32-545)" "FullAccess"
-
   ; Create menu
   CreateDirectory "$SMPROGRAMS\${PRODUCT_NAME} ${PRODUCT_VERSION}"
-  CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME} ${PRODUCT_VERSION}\Run server.lnk" "$INSTDIR\bin\frepplectl.exe" "frepple_runserver"
-  CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME} ${PRODUCT_VERSION}\Open customization folder.lnk" "$INSTDIR\bin\custom"
+  ; SetOutPath is used to set the working directory for the shortcut
+  SetOutPath "$LOCALAPPDATA\${PRODUCT_NAME}\${PRODUCT_VERSION}"
+  CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME} ${PRODUCT_VERSION}\Start frePPLe server.lnk" "$INSTDIR\bin\freppleserver.exe"
+  CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME} ${PRODUCT_VERSION}\Open configuration folder.lnk" "$INSTDIR\bin\custom"
+  CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME} ${PRODUCT_VERSION}\Open log folder.lnk" "$LOCALAPPDATA\${PRODUCT_NAME}\${PRODUCT_VERSION}"
 
   ; Pick up the installation parameters
   ReadINIStr $6 "$PLUGINSDIR\parameters.ini" "Field 8" "State"  # Language
@@ -244,26 +251,26 @@ Section "Application" SecAppl
   StrCmp $6 "Italian" 0 +3
     StrCpy $6 "it"
     Goto ok2
+  StrCmp $6 "Japanese" 0 +3
+    StrCpy $6 "ja"
+    Goto ok2
+  StrCmp $6 "Portuguese" 0 +3
+    StrCpy $6 "pt"
+    Goto ok2
+  StrCmp $6 "Brazilian Portuguese" 0 +3
+    StrCpy $6 "pt-br"
+    Goto ok2
+  StrCmp $6 "Simplified Chinese" 0 +3
+    StrCpy $6 "zh_cn"
+    Goto ok2
+  StrCmp $6 "Spanish" 0 +3
+    StrCpy $6 "es"
+    Goto ok2
   StrCmp $6 "Traditional Chinese" 0 +3
     StrCpy $6 "zh_tw"
     Goto ok2
   MessageBox MB_ICONEXCLAMATION|MB_OK "Invalid language selection $6!"
   ok2:
-  ReadINIStr $0 "$PLUGINSDIR\parameters.ini" "Field 9" "State"   # DB engine
-  StrCmp $0 "SQLite" 0 +3
-    StrCpy $0 "sqlite3"
-    Goto ok
-  StrCmp $0 "PostgreSQL 9" 0 +3
-    StrCpy $0 "postgresql_psycopg2"
-    Goto ok
-  StrCmp $0 "MySQL" 0 +3
-    StrCpy $0 "mysql"
-    Goto ok
-  StrCmp $0 "Oracle 11g" 0 +3
-    StrCpy $0 "oracle"
-    Goto ok
-  MessageBox MB_ICONEXCLAMATION|MB_OK "Invalid database type $0!"
-  ok:
   ReadINIStr $1 "$PLUGINSDIR\parameters.ini" "Field 10" "State"  # DB name
   ReadINIStr $2 "$PLUGINSDIR\parameters.ini" "Field 11" "State"  # DB user
   ReadINIStr $3 "$PLUGINSDIR\parameters.ini" "Field 12" "State"  # DB password
@@ -290,47 +297,27 @@ Section "Application" SecAppl
     StrCmp "$R5" "# ================= END UPDATED BLOCK BY WINDOWS INSTALLER =================$\n" +3 0
     StrCmp "$R5" "# ================= END UPDATED BLOCK BY WINDOWS INSTALLER =================$\r$\n" +2 0
   Goto read2_loop
+  ${GetTime} "" "L" $day $month $year $day_name $hours $minutes $seconds
+  FileWrite $R4 "# Make this unique, and don't share it with anybody.$\r$\n"
+  FileWrite $R4 "SECRET_KEY = '%@mzit!i8b*$zc&6oev96=$year$month$day$hours$minutes$seconds'$\r$\n"
+  FileWrite $R4 "$\r$\n"
+  FileWrite $R4 "# FrePPLe only supports the 'postgresql_psycopg2' database.$\r$\n"
+  FileWrite $R4 "# Create additional entries in this dictionary to define scenario schemas.$\r$\n"
   FileWrite $R4 "DATABASES = {$\r$\n"
   FileWrite $R4 "  'default': {$\r$\n"
-  FileWrite $R4 "    'ENGINE': 'django.db.backends.$0',$\r$\n"
+  FileWrite $R4 "    'ENGINE': 'django.db.backends.postgresql_psycopg2',$\r$\n"
   FileWrite $R4 "    'NAME': '$1',  # Database name $\r$\n"
-  FileWrite $R4 "    'USER': '$2',  # Not used with sqlite3.$\r$\n"
-  FileWrite $R4 "    'PASSWORD': '$3', # Not used with sqlite3.$\r$\n"
-  FileWrite $R4 "    'HOST': '$4',     # Set to empty string for localhost. Not used with sqlite3.$\r$\n"
-  FileWrite $R4 "    'PORT': '$5',     # Set to empty string for default port number. Not used with sqlite3.$\r$\n"
+  FileWrite $R4 "    'USER': '$2',  # Database user.$\r$\n"
+  FileWrite $R4 "    'PASSWORD': '$3', # Password of the database user.$\r$\n"
+  FileWrite $R4 "    'HOST': '$4',     # Set to empty string for localhost.$\r$\n"
+  FileWrite $R4 "    'PORT': '$5',     # Set to empty string for default port number.$\r$\n"
   FileWrite $R4 "    'OPTIONS': {},  # Backend specific configuration parameters.$\r$\n"
+  FileWrite $R4 "    'TEST': {$\r$\n"
+  FileWrite $R4 "      'NAME': 'test_$1',  # Database used when running the test suite.$\r$\n"
+  FileWrite $R4 "      },$\r$\n"
   FileWrite $R4 "    },$\r$\n"
-  StrCmp $0 "sqlite3" 0 NoScenarios
-    FileWrite $R4 "  'scenario1': {$\r$\n"
-    FileWrite $R4 "    'ENGINE': 'django.db.backends.$0',$\r$\n"
-    FileWrite $R4 "    'NAME': 'scenario1',  # Database name $\r$\n"
-    FileWrite $R4 "    'USER': '',  # Not used with sqlite3.$\r$\n"
-    FileWrite $R4 "    'PASSWORD': '', # Not used with sqlite3.$\r$\n"
-    FileWrite $R4 "    'HOST': '',     # Set to empty string for localhost. Not used with sqlite3.$\r$\n"
-    FileWrite $R4 "    'PORT': '',     # Set to empty string for default port number. Not used with sqlite3.$\r$\n"
-    FileWrite $R4 "    'OPTIONS': {},  # Backend specific configuration parameters.$\r$\n"
-    FileWrite $R4 "    },$\r$\n"
-    FileWrite $R4 "  'scenario2': {$\r$\n"
-    FileWrite $R4 "    'ENGINE': 'django.db.backends.$0',$\r$\n"
-    FileWrite $R4 "    'NAME': 'scenario2',  # Database name $\r$\n"
-    FileWrite $R4 "    'USER': '',  # Not used with sqlite3.$\r$\n"
-    FileWrite $R4 "    'PASSWORD': '', # Not used with sqlite3.$\r$\n"
-    FileWrite $R4 "    'HOST': '',     # Set to empty string for localhost. Not used with sqlite3.$\r$\n"
-    FileWrite $R4 "    'PORT': '',     # Set to empty string for default port number. Not used with sqlite3.$\r$\n"
-    FileWrite $R4 "    'OPTIONS': {},  # Backend specific configuration parameters.$\r$\n"
-    FileWrite $R4 "    },$\r$\n"
-    FileWrite $R4 "  'scenario3': {$\r$\n"
-    FileWrite $R4 "    'ENGINE': 'django.db.backends.$0',$\r$\n"
-    FileWrite $R4 "    'NAME': 'scenario3',  # Database name $\r$\n"
-    FileWrite $R4 "    'USER': '',  # Not used with sqlite3.$\r$\n"
-    FileWrite $R4 "    'PASSWORD': '', # Not used with sqlite3.$\r$\n"
-    FileWrite $R4 "    'HOST': '',     # Set to empty string for localhost. Not used with sqlite3.$\r$\n"
-    FileWrite $R4 "    'PORT': '',     # Set to empty string for default port number. Not used with sqlite3.$\r$\n"
-    FileWrite $R4 "    'OPTIONS': {},  # Backend specific configuration parameters.$\r$\n"
-    FileWrite $R4 "    },$\r$\n"
-  NoScenarios:
   FileWrite $R4 "  }$\r$\n$\r$\n"
-  FileWrite $R4 "FREPPLE_LOGDIR = r'$APPDATA\${PRODUCT_NAME}\${PRODUCT_VERSION}'$\r$\n$\r$\n"
+  FileWrite $R4 "FREPPLE_LOGDIR = r'$LOCALAPPDATA\${PRODUCT_NAME}\${PRODUCT_VERSION}'$\r$\n$\r$\n"
   FileWrite $R4 "LANGUAGE_CODE = '$6' # Language for the user interface$\r$\n"
   ; Read the third section in settings.py and write unmodified to the output file
   read3_loop:
@@ -347,66 +334,48 @@ Section "Application" SecAppl
 SectionEnd
 
 
-Function LicenseFileOpen
-  !insertmacro MUI_HEADER_TEXT "License file" "Locate your license file."
-  !insertmacro INSTALLOPTIONS_DISPLAY "licensefile.ini"
-FunctionEnd
-
-
-Function LicenseFileLeave
-  !insertmacro INSTALLOPTIONS_READ $0 "licensefile.ini" "Field 3" "State"
-  StrCpy $LicenseFile $0
-FunctionEnd
-
-
 Function DatabaseOpen
   !insertmacro MUI_HEADER_TEXT "Language selection and database configuration" "Specify the installation parameters."
   !insertmacro INSTALLOPTIONS_DISPLAY "parameters.ini"
 FunctionEnd
 
 
-Function DatabaseLeave
-  ReadINIStr $0 "$PLUGINSDIR\parameters.ini" "Settings" "State"
-  IntCmp $0 7 0 done
-    ; Disable user name, user password, host and port when the
-    ; SQLite database engine is selected.
-    ReadINIStr $1 "$PLUGINSDIR\parameters.ini" "Field 9" "State"
-    StrCpy $2 ""
-    StrCpy $3 1
-    StrCmp $1 "SQLite" 0 +3
-      StrCpy $2 "DISABLED"
-      StrCpy $3 0
-    WriteIniStr "$PLUGINSDIR\parameters.ini" "Field 11" "Flags" "$2"
-    ReadINIStr $4 "$PLUGINSDIR\parameters.ini" "Field 11" "HWND"
-    EnableWindow $4 $3
-    ReadINIStr $4 "$PLUGINSDIR\parameters.ini" "Field 11" "HWND2"
-    EnableWindow $4 $3
-    WriteIniStr "$PLUGINSDIR\parameters.ini" "Field 12" "Flags" "$2"
-    ReadINIStr $4 "$PLUGINSDIR\parameters.ini" "Field 12" "HWND"
-    EnableWindow $4 $3
-    ReadINIStr $4 "$PLUGINSDIR\parameters.ini" "Field 12" "HWND2"
-    EnableWindow $4 $3
-    WriteIniStr "$PLUGINSDIR\parameters.ini" "Field 13" "Flags" "$2"
-    ReadINIStr $4 "$PLUGINSDIR\parameters.ini" "Field 13" "HWND"
-    EnableWindow $4 $3
-    ReadINIStr $4 "$PLUGINSDIR\parameters.ini" "Field 13" "HWND2"
-    EnableWindow $4 $3
-    WriteIniStr "$PLUGINSDIR\parameters.ini" "Field 14" "Flags" "$2"
-    ReadINIStr $4 "$PLUGINSDIR\parameters.ini" "Field 14" "HWND"
-    EnableWindow $4 $3
-    ReadINIStr $4 "$PLUGINSDIR\parameters.ini" "Field 14" "HWND2"
-    EnableWindow $4 $3
+Function Databaseleave
+  ; Verify the connection to the database
+  ReadINIStr $2 "$PLUGINSDIR\parameters.ini" "Field 10" "State"  # DB name
+  ReadINIStr $3 "$PLUGINSDIR\parameters.ini" "Field 11" "State"  # DB user
+  ReadINIStr $4 "$PLUGINSDIR\parameters.ini" "Field 12" "State"  # DB password
+  ReadINIStr $5 "$PLUGINSDIR\parameters.ini" "Field 13" "State"  # DB host
+  ReadINIStr $6 "$PLUGINSDIR\parameters.ini" "Field 14" "State"  # DB port
+  ${if} $2 == ""
+  ${OrIf} $3 == ""
+  ${OrIf} $4 == ""
+    MessageBox MB_OK "Missing a mandatory field"
     ; Return to the page
     Abort
-  done:
+  ${endif}
+  ClearErrors
+  System::Call 'Kernel32::SetEnvironmentVariable(t, t)i ("PGPASSWORD", "$4").r0'
+  ExecWait 'psql -d $2 -U $3 -h $5 -p $6 -c "select version();"'
+  IfErrors 0 ok
+     StrCpy $1 'A test connection to the database failed...$\r$\n$\r$\n'
+     StrCpy $1 '$1Update the parameters or:$\r$\n'
+     StrCpy $1 '$1  1) Install PostgreSQL 9.4$\r$\n'
+     StrCpy $1 '$1  2) Configure it to till you can successfully connect from the commands:$\r$\n'
+     StrCpy $1 '$1        set PGPASSWORD=$4$\r$\n'
+     StrCpy $1 '$1        psql -d $2 -U $3 -h $5 -p $6 -c "select version();"$\r$\n'
+     StrCpy $1 '$1  3) Assure psql is on the PATH environment variable'
+     MessageBox MB_OK $1
+     ; Return to the page
+     Abort
+  ok:
 FunctionEnd
 
 
 Function FinishOpen
   ; Display the page
   ${If} $MultiUser.InstallMode == "CurrentUser"
-    WriteIniStr "$PLUGINSDIR\finish.ini" "Field 3" "Flags" "DISABLED"
-    WriteIniStr "$PLUGINSDIR\finish.ini" "Field 4" "Flags" "DISABLED"
+    WriteIniStr "$PLUGINSDIR\finish.ini" "Field 6" "Flags" "DISABLED"
   ${EndIf}
   !insertmacro MUI_HEADER_TEXT "Completing the installation" "frePPLe has been installed on your computer"
   !insertmacro INSTALLOPTIONS_DISPLAY "finish.ini"
@@ -416,46 +385,36 @@ FunctionEnd
 Function FinishLeave
   ; Check how we left the screen: toggle "install service", toggle "run in console", or "next" button
   ReadINIStr $0 "$PLUGINSDIR\finish.ini" "Settings" "State"
-  ${If} $0 == 1
-     ; Toggling the "run in console" checkbox
-     ReadINIStr $0 "$PLUGINSDIR\finish.ini" "Field 1" "State"
+  ${If} $0 == 5
+     ; Toggling the "run in system tray" checkbox
+     ReadINIStr $0 "$PLUGINSDIR\finish.ini" "Field 5" "State"
      ${If} $0 == 1
        ; Deactivate the "install service" checkbox
-       WriteIniStr "$PLUGINSDIR\finish.ini" "Field 3" "State" "0"
-       readinistr $2 "$PLUGINSDIR\finish.ini" "Field 3" "HWND"
+       WriteIniStr "$PLUGINSDIR\finish.ini" "Field 6" "State" "0"
+       readinistr $2 "$PLUGINSDIR\finish.ini" "Field 6" "HWND"
        SendMessage $2 ${BM_SETCHECK} 0 0
      ${EndIf}
      Abort  ; Return to the page
-  ${ElseIf} $0 == 3
+  ${ElseIf} $0 == 6
      ; Toggling the "install service" checkbox
-     ReadINIStr $0 "$PLUGINSDIR\finish.ini" "Field 3" "State"
+     ReadINIStr $0 "$PLUGINSDIR\finish.ini" "Field 6" "State"
      ${If} $0 == 1
-       ; Deactivate the "run in console" checkbox
-       WriteIniStr "$PLUGINSDIR\finish.ini" "Field 1" "State" "0"
-       readinistr $2 "$PLUGINSDIR\finish.ini" "Field 1" "HWND"
+       ; Deactivate the "run in system tray" checkbox
+       WriteIniStr "$PLUGINSDIR\finish.ini" "Field 5" "State" "0"
+       readinistr $2 "$PLUGINSDIR\finish.ini" "Field 5" "HWND"
        SendMessage $2 ${BM_SETCHECK} 0 0
      ${EndIf}
      Abort  ; Return to the page
   ${EndIf}
 
-  ; Start the server in console window
-  ReadINIStr $0 "$PLUGINSDIR\finish.ini" "Field 1" "State"
+  ; Start the server in system tray
+  ReadINIStr $0 "$PLUGINSDIR\finish.ini" "Field 5" "State"
   ${If} $0 == 1
-    Exec '"$INSTDIR\bin\frepplectl.exe" "frepple_runserver"'
-  ${EndIf}
-
-  ; View the documentation
-  ReadINIStr $0 "$PLUGINSDIR\finish.ini" "Field 2" "State"
-  ${If} $0 == 1
-    ${If} $InstalledDocumentation == "yes"
-      ExecShell open "$INSTDIR\doc\index.html"
-    ${Else}
-      ExecShell open "http://www.frepple.com/documentation/"
-    ${EndIf}
+    Exec '"$INSTDIR\bin\freppleserver.exe"'
   ${EndIf}
 
   ; Install the service
-  ReadINIStr $0 "$PLUGINSDIR\finish.ini" "Field 3" "State"
+  ReadINIStr $0 "$PLUGINSDIR\finish.ini" "Field 6" "State"
   ${If} $0 == 1
     nsExec::Exec '"$INSTDIR\bin\freppleservice.exe" --startup auto install'
     sleep 2
@@ -470,9 +429,8 @@ Section "Documentation" SecDoc
   SetOutPath "$INSTDIR"
   SetOverwrite ifnewer
   CreateDirectory "$SMPROGRAMS\${PRODUCT_NAME} ${PRODUCT_VERSION}"
-  CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME} ${PRODUCT_VERSION}\Documentation.lnk" "$INSTDIR\doc\index.html"
-  File /r "doc"
-  StrCpy $InstalledDocumentation "yes"
+  CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME} ${PRODUCT_VERSION}\Documentation.lnk" "$INSTDIR\html\index.html"
+  File /r "..\doc\_build\html"   ; Pick up doc from build folder, not dist folder
 SectionEnd
 
 Section "Examples" SecEx
@@ -521,9 +479,25 @@ Section -Post
   !cd ".."
   !system "sh -c 'rm -rf frepple-${PRODUCT_VERSION}'"
 
-  ; Open the post-installation page
-  Push "http://www.frepple.com/post-install/?version=${PRODUCT_VERSION}"
-  Call openLinkNewWindow
+  ; Create the log directory
+  CreateDirectory "$LOCALAPPDATA\${PRODUCT_NAME}\${PRODUCT_VERSION}"
+
+  ; Create the database schema
+  DetailPrint "Creating database schema"
+  nsExec::ExecToLog /OEM /TIMEOUT=90000 '"$INSTDIR\bin\frepplectl.exe" migrate --noinput'
+  Pop $0
+  ${If} $0 == "0"
+    DetailPrint "Loading demo data"
+    nsExec::ExecToLog /OEM /TIMEOUT=90000 '"$INSTDIR\bin\frepplectl.exe" loaddata demo'
+    DetailPrint "Generating initial plan"
+    nsExec::ExecToLog /OEM /TIMEOUT=90000 '"$INSTDIR\bin\frepplectl.exe" frepple_run'
+  ${else}
+    DetailPrint "x $0 x"
+    DetailPrint "ERROR CREATING DATABASE SCHEMA!!!"
+    DetailPrint " "
+    DetailPrint "Review the file 'bin\\custom\\djangosettings.py' and run 'frepplectl migrate'"
+    DetailPrint " "
+  ${EndIf}
 
   ; Create uninstaller
   WriteUninstaller "$INSTDIR\uninst.exe"
@@ -540,6 +514,10 @@ Section -Post
   ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
   IntFmt $0 "0x%08X" $0
   WriteRegDWORD SHCTX "${PRODUCT_UNINST_KEY}" "EstimatedSize" "$0"
+
+  ; Open the post-installation page
+  Push "http://www.frepple.com/post-install/?version=${PRODUCT_VERSION}"
+  Call openLinkNewWindow
 SectionEnd
 
 
@@ -578,11 +556,12 @@ Section Uninstall
   ; Remove the entries from the start menu
   Delete "$SMPROGRAMS\${PRODUCT_NAME} ${PRODUCT_VERSION}\Uninstall.lnk"
   Delete "$SMPROGRAMS\${PRODUCT_NAME} ${PRODUCT_VERSION}\Documentation.lnk"
-  Delete "$SMPROGRAMS\${PRODUCT_NAME} ${PRODUCT_VERSION}\Run server.lnk"
+  Delete "$SMPROGRAMS\${PRODUCT_NAME} ${PRODUCT_VERSION}\Start frePPLe server.lnk"
   Delete "$SMPROGRAMS\${PRODUCT_NAME} ${PRODUCT_VERSION}\frePPLe web site.lnk"
   Delete "$SMPROGRAMS\${PRODUCT_NAME} ${PRODUCT_VERSION}\Start service.lnk"
   Delete "$SMPROGRAMS\${PRODUCT_NAME} ${PRODUCT_VERSION}\Stop service.lnk"
-  Delete "$SMPROGRAMS\${PRODUCT_NAME} ${PRODUCT_VERSION}\Open customization folder.lnk"
+  Delete "$SMPROGRAMS\${PRODUCT_NAME} ${PRODUCT_VERSION}\Open configuration folder.lnk"
+  Delete "$SMPROGRAMS\${PRODUCT_NAME} ${PRODUCT_VERSION}\Open log folder.lnk"
 
   ; Remove the folder in start menu
   RMDir "$SMPROGRAMS\${PRODUCT_NAME} ${PRODUCT_VERSION}"
@@ -590,8 +569,8 @@ Section Uninstall
   ; Remove the log directory
   ; Version subdirectory is always removed.
   ; FrePPLe subdirectory is removed if it is empty.
-  RMDir /r "$APPDATA\${PRODUCT_NAME}\${PRODUCT_VERSION}"
-  RMDir "$APPDATA\${PRODUCT_NAME}"
+  RMDir /r "$LOCALAPPDATA\${PRODUCT_NAME}\${PRODUCT_VERSION}"
+  RMDir "$LOCALAPPDATA\${PRODUCT_NAME}"
 
   ; Remove the installation directory
   RMDir /r "$INSTDIR"
@@ -607,8 +586,7 @@ Section Uninstall
   ; Do not automatically close the window
   SetAutoClose false
 
-  ; Open the post-installation page
+  ; Open the post-uninstallation page
   Push "http://www.frepple.com/post-uninstall/?version=${PRODUCT_VERSION}"
   Call un.openLinkNewWindow
-
 SectionEnd

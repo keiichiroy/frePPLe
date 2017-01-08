@@ -1,6 +1,6 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 #
-# Copyright (C) 2007 by Johan De Taeye, frePPLe bvba
+# Copyright (C) 2007 by frePPLe bvba
 #
 # This library is free software; you can redistribute it and/or modify it
 # under the terms of the GNU Affero General Public License as published
@@ -15,7 +15,6 @@
 # You should have received a copy of the GNU Affero General Public
 # License along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
-from __future__ import print_function
 import os, sys, random
 
 runtimes = {}
@@ -65,7 +64,7 @@ for counter in [500,1000,1500,2000]:
   print('</demands>\n' +
     '<?python\n' +
     'import frepple\n' +
-    'frepple.solver_mrp(name="MRP",constraints=0).solve()\n' +
+    'frepple.solver_mrp(constraints=0).solve()\n' +
     'frepple.saveXMLfile("output.xml")\n' +
     '?>\n' +
     '</plan>', file=out)

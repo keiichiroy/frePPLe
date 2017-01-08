@@ -142,11 +142,12 @@
   </operations>
   <operationplans>
     <!-- This supply of component A is later than the effective end date. -->
-    <operationplan id="2001" operation="2. supply component A">
+    <operationplan id="2001">
+      <operation name="2. supply component A"/>
       <start>2009-02-12T00:00:00</start>
       <end>2009-02-12T00:00:00</end>
       <quantity>25</quantity>
-      <locked>true</locked>
+      <status>confirmed</status>
     </operationplan>
   </operationplans>
   <items>
@@ -236,12 +237,11 @@
   </demands>
 
 <?python
-from __future__ import print_function
 print("CREATING CONSTRAINED PLAN")
-frepple.solver_mrp(name="MRP", plantype=1, constraints=15, loglevel=2).solve()
+frepple.solver_mrp(plantype=1, constraints=15, loglevel=2).solve()
 frepple.saveplan("output.1.xml")
 print("CREATING UNCONSTRAINED PLAN")
-frepple.solver_mrp(name="MRP", plantype=2, constraints=15, loglevel=2).solve()
+frepple.solver_mrp(plantype=2, constraints=15, loglevel=2).solve()
 frepple.saveplan("output.2.xml")
 ?>
 

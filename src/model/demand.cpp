@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba                 *
+ * Copyright (C) 2007-2015 by frePPLe bvba                                 *
  *                                                                         *
  * This library is free software; you can redistribute it and/or modify it *
  * under the terms of the GNU Affero General Public License as published   *
@@ -28,11 +28,16 @@ template<class Demand> DECLARE_EXPORT Tree utils::HasName<Demand>::st;
 DECLARE_EXPORT const MetaCategory* Demand::metadata;
 DECLARE_EXPORT const MetaClass* DemandDefault::metadata;
 
+DECLARE_EXPORT OperationFixedTime *Demand::uninitializedDelivery = NULL;
+
 
 int Demand::initialize()
 {
   // Initialize the metadata
-  metadata = new MetaCategory("demand", "demands", reader, writer);
+  metadata = MetaCategory::registerCategory<Demand>("demand", "demands", reader, finder);
+  registerFields<Demand>(const_cast<MetaCategory*>(metadata));
+
+  uninitializedDelivery = new OperationFixedTime();
 
   // Initialize the Python class
   return FreppleCategory<Demand>::initialize();
@@ -42,10 +47,10 @@ int Demand::initialize()
 int DemandDefault::initialize()
 {
   // Initialize the metadata
-  DemandDefault::metadata = new MetaClass(
+  DemandDefault::metadata = MetaClass::registerClass<DemandDefault>(
     "demand",
     "demand_default",
-    Object::createString<DemandDefault>, true);
+    Object::create<DemandDefault>, true);
 
   // Initialize the Python class
   return FreppleClass<DemandDefault,Demand>::initialize();
@@ -66,15 +71,11 @@ DECLARE_EXPORT void Demand::setQuantity(double f)
 
 DECLARE_EXPORT Demand::~Demand()
 {
-  // Reset the motive on all operationplans marked with this demand.
-  // This loop is linear with the model size. It doesn't scale well, but
-  // deleting a demand is not too common.
-  for (OperationPlan::iterator i; i != OperationPlan::end(); i++)
-    if (i->getMotive() == this) i->setMotive(NULL);
-
   // Remove the delivery operationplans
   deleteOperationPlans(true);
 }
+
+
 DECLARE_EXPORT void Demand::deleteOperationPlans
 (bool deleteLocked, CommandManager* cmds)
 {
@@ -85,7 +86,7 @@ DECLARE_EXPORT void Demand::deleteOperationPlans
   {
     // Find a candidate to delete
     OperationPlan *candidate = NULL;
-    for (OperationPlan_list::iterator i = deli.begin(); i!=deli.end(); ++i)
+    for (OperationPlanList::iterator i = deli.begin(); i!=deli.end(); ++i)
       if (deleteLocked || !(*i)->getLocked())
       {
         candidate = *i;
@@ -120,7 +121,7 @@ DECLARE_EXPORT void Demand::removeDelivery(OperationPlan * o)
   o->setDemand(NULL);
 
   // Find in the list of deliveries
-  OperationPlan_list::iterator j = deli.begin();
+  OperationPlanList::iterator j = deli.begin();
   while (j!=deli.end() && *j!=o) ++j;
 
   // Check that the operation is found
@@ -136,7 +137,7 @@ DECLARE_EXPORT void Demand::removeDelivery(OperationPlan * o)
 }
 
 
-DECLARE_EXPORT const Demand::OperationPlan_list& Demand::getDelivery() const
+DECLARE_EXPORT const Demand::OperationPlanList& Demand::getDelivery() const
 {
   // We need to check the sorting order of the list first! It could be disturbed
   // when operationplans are being moved around.
@@ -145,9 +146,9 @@ DECLARE_EXPORT const Demand::OperationPlan_list& Demand::getDelivery() const
   // disturbed very often.
   for (bool swapped(!deli.empty()); swapped; swapped=false)
   {
-    OperationPlan_list::iterator j = const_cast<Demand*>(this)->deli.begin();
+    OperationPlanList::iterator j = const_cast<Demand*>(this)->deli.begin();
     ++j;
-    for (OperationPlan_list::iterator i =
+    for (OperationPlanList::iterator i =
         const_cast<Demand*>(this)->deli.begin();
         j!=const_cast<Demand*>(this)->deli.end(); ++j)
     {
@@ -155,8 +156,6 @@ DECLARE_EXPORT const Demand::OperationPlan_list& Demand::getDelivery() const
       {
         // Oh yes, the ordering was disrupted indeed...
         iter_swap(i,j);
-        // The Borland compiler doesn't understand that this variable is used.
-        // It gives a incorrect warning message...
         swapped = true;
         break;
       }
@@ -170,16 +169,16 @@ DECLARE_EXPORT const Demand::OperationPlan_list& Demand::getDelivery() const
 
 DECLARE_EXPORT OperationPlan* Demand::getLatestDelivery() const
 {
-  const Demand::OperationPlan_list& l = getDelivery();
+  const Demand::OperationPlanList& l = getDelivery();
   return l.empty() ? NULL : *(l.begin());
 }
 
 
 DECLARE_EXPORT OperationPlan* Demand::getEarliestDelivery() const
 {
-  const Demand::OperationPlan_list& l = getDelivery();
+  const Demand::OperationPlanList& l = getDelivery();
   OperationPlan *last = NULL;
-  for (Demand::OperationPlan_list::const_iterator i = l.begin(); i!=l.end(); ++i)
+  for (Demand::OperationPlanList::const_iterator i = l.begin(); i!=l.end(); ++i)
     last = *i;
   return last;
 }
@@ -193,7 +192,7 @@ DECLARE_EXPORT void Demand::addDelivery (OperationPlan * o)
   // Check if it is already in the list.
   // If it is, simply exit the function. No need to give a warning message
   // since it's harmless.
-  for (OperationPlan_list::iterator i = deli.begin(); i!=deli.end(); ++i)
+  for (OperationPlanList::iterator i = deli.begin(); i!=deli.end(); ++i)
     if (*i == o) return;
 
   // Add to the list of delivery operationplans. The insertion is such
@@ -203,7 +202,7 @@ DECLARE_EXPORT void Demand::addDelivery (OperationPlan * o)
   // method. Operation plans dates could have changed, thus disturbing the
   // original order.
   getDelivery();
-  OperationPlan_list::iterator j = deli.begin();
+  OperationPlanList::iterator j = deli.begin();
   while (j!=deli.end() && (*j)->getDates().getEnd()>o->getDates().getEnd()) ++j;
   deli.insert(j, o);
 
@@ -224,11 +223,84 @@ DECLARE_EXPORT void Demand::addDelivery (OperationPlan * o)
 
 DECLARE_EXPORT Operation* Demand::getDeliveryOperation() const
 {
-  // Operation can be specified on the demand itself,
-  if (oper) return oper;
-  // ... or on the item,
-  if (it) return it->getOperation();
-  // ... or it doesn't exist at all
+  // Case 1: Operation specified on the demand itself,
+  // or the delivery operation was computed earlier.
+  if (oper && oper != uninitializedDelivery)
+    return oper;
+
+  // Case 2: Operation specified on the item.
+  // Note that we don't accept a delivery operation at the parent level
+  // as a valid operation to plan the demand.
+  if (it && it->getOperation())
+    return it->getOperation();
+
+  // Case 3: Create a delivery operation automatically
+  Location *l = getLocation();
+  if (!l)
+  {
+    // Single location only?
+    Location::iterator l_iter = Location::begin();
+    if (l_iter != Location::end())
+    {
+      l = &*l_iter;
+      if (++l_iter != Location::end())
+        // No, multiple locations
+        l = NULL;
+    }
+  }
+  if (l)
+  {
+    // Search for buffers for the requested item and location.
+    bool ok = true;
+    Buffer* buf = NULL;
+    Item::bufferIterator buf_iter(getItem());
+    while (Buffer* tmpbuf = buf_iter.next())
+    {
+      if (tmpbuf->getLocation() == l)
+      {
+        if (buf)
+        {
+          // Second buffer found. We don't know which one to pick - abort.
+          ok = false;
+          break;
+        }
+        else
+          buf = tmpbuf;
+      }
+    }
+
+    if (ok)
+    {
+      if (!buf)
+      {
+        // Create a new buffer
+        buf = new BufferDefault();
+        buf->setItem(getItem());
+        buf->setLocation(l);
+        stringstream o;
+        o << getItem() << " @ " << l;
+        buf->setName(o.str());
+      }
+
+      // Find an existing operation consuming from this buffer
+      stringstream o;
+      o << "Ship " << buf;
+      const_cast<Demand*>(this)->oper = Operation::find(o.str());
+      if (!oper)
+      {
+        const_cast<Demand*>(this)->oper = new OperationFixedTime();
+        oper->setName(o.str());
+        oper->setHidden(true);
+        FlowStart* fl = new FlowStart(oper, buf, -1);
+      }
+
+      // Success!
+      return oper;
+    }
+  }
+
+  // Case 4: Tough luck. Not possible to ship this demand.
+  const_cast<Demand*>(this)->oper = NULL;
   return NULL;
 }
 
@@ -236,265 +308,21 @@ DECLARE_EXPORT Operation* Demand::getDeliveryOperation() const
 DECLARE_EXPORT double Demand::getPlannedQuantity() const
 {
   double delivered(0.0);
-  for (OperationPlan_list::const_iterator i=deli.begin(); i!=deli.end(); ++i)
+  for (OperationPlanList::const_iterator i=deli.begin(); i!=deli.end(); ++i)
     delivered += (*i)->getQuantity();
   return delivered;
 }
 
 
-DECLARE_EXPORT void Demand::writeElement(XMLOutput *o, const Keyword& tag, mode m) const
+DECLARE_EXPORT PeggingIterator Demand::getPegging() const
 {
-  // Writing a reference
-  if (m == REFERENCE)
-  {
-    o->writeElement(tag, Tags::tag_name, getName());
-    return;
-  }
-
-  // Write the head
-  if (m != NOHEAD && m != NOHEADTAIL)
-    o->BeginObject(tag, Tags::tag_name, XMLEscape(getName()));
-
-  // Write the fields
-  HasDescription::writeElement(o, tag);
-  HasHierarchy<Demand>::writeElement(o, tag);
-  o->writeElement(Tags::tag_operation, oper);
-  o->writeElement(Tags::tag_customer, cust);
-  Plannable::writeElement(o, tag);
-
-  o->writeElement(Tags::tag_quantity, qty);
-  o->writeElement(Tags::tag_item, it);
-  o->writeElement(Tags::tag_due, dueDate);
-  if (getPriority()) o->writeElement(Tags::tag_priority, getPriority());
-  if (getMaxLateness() != TimePeriod::MAX)
-    o->writeElement(Tags::tag_maxlateness, getMaxLateness());
-  if (getMinShipment() != 1.0)
-    o->writeElement(Tags::tag_minshipment, getMinShipment());
-
-  // Write extra plan information
-  if (o->getContentType() == XMLOutput::PLAN
-      || o->getContentType() == XMLOutput::PLANDETAIL)
-  {
-    if (!deli.empty())
-    {
-      o->BeginObject(Tags::tag_operationplans);
-      for (OperationPlan_list::const_iterator i=deli.begin(); i!=deli.end(); ++i)
-        o->writeElement(Tags::tag_operationplan, *i, FULL);
-      o->EndObject(Tags::tag_operationplans);
-    }
-    bool first = true;
-    for (Problem::const_iterator j = Problem::begin(const_cast<Demand*>(this), true); j!=Problem::end(); ++j)
-    {
-      if (first)
-      {
-        first = false;
-        o->BeginObject(Tags::tag_problems);
-      }
-      o->writeElement(Tags::tag_problem, *j, FULL);
-    }
-    if (!first) o->EndObject(Tags::tag_problems);
-    if (!constraints.empty())
-    {
-      o->BeginObject(Tags::tag_constraints);
-      for (Problem::const_iterator i = constraints.begin(); i != constraints.end(); ++i)
-        o->writeElement(Tags::tag_problem, *i, FULL);
-      o->EndObject(Tags::tag_constraints);
-    }
-  }
-
-  // Write the tail
-  if (m != NOHEADTAIL && m != NOTAIL) o->EndObject(tag);
+  return PeggingIterator(this);
 }
 
 
-DECLARE_EXPORT void Demand::beginElement(XMLInput& pIn, const Attribute& pAttr)
+DECLARE_EXPORT Problem::List::iterator Demand::getConstraintIterator() const
 {
-  if (pAttr.isA (Tags::tag_item))
-    pIn.readto( Item::reader(Item::metadata,pIn.getAttributes()) );
-  else if (pAttr.isA (Tags::tag_operation))
-    pIn.readto( Operation::reader(Operation::metadata,pIn.getAttributes()) );
-  else if (pAttr.isA (Tags::tag_customer))
-    pIn.readto( Customer::reader(Customer::metadata,pIn.getAttributes()) );
-  else if (pAttr.isA(Tags::tag_operationplan))
-    pIn.readto(OperationPlan::createOperationPlan(OperationPlan::metadata,pIn.getAttributes()));
-  else
-    HasHierarchy<Demand>::beginElement(pIn, pAttr);
-}
-
-
-DECLARE_EXPORT void Demand::endElement(XMLInput& pIn, const Attribute& pAttr, const DataElement& pElement)
-{
-  if (pAttr.isA (Tags::tag_quantity))
-    setQuantity (pElement.getDouble());
-  else if (pAttr.isA (Tags::tag_priority))
-    setPriority (pElement.getInt());
-  else if (pAttr.isA (Tags::tag_due))
-    setDue(pElement.getDate());
-  else if (pAttr.isA (Tags::tag_operation))
-  {
-    Operation *o = dynamic_cast<Operation*>(pIn.getPreviousObject());
-    if (o) setOperation(o);
-    else throw LogicException("Incorrect object type during read operation");
-  }
-  else if (pAttr.isA (Tags::tag_customer))
-  {
-    Customer *c = dynamic_cast<Customer*>(pIn.getPreviousObject());
-    if (c) setCustomer(c);
-    else throw LogicException("Incorrect object type during read operation");
-  }
-  else if (pAttr.isA (Tags::tag_item))
-  {
-    Item *i = dynamic_cast<Item*>(pIn.getPreviousObject());
-    if (i) setItem(i);
-    else throw LogicException("Incorrect object type during read operation");
-  }
-  else if (pAttr.isA (Tags::tag_maxlateness))
-    setMaxLateness(pElement.getTimeperiod());
-  else if (pAttr.isA (Tags::tag_minshipment))
-    setMinShipment(pElement.getDouble());
-  else if (pAttr.isA(Tags::tag_operationplan))
-  {
-    OperationPlan* opplan
-      = dynamic_cast<OperationPlan*>(pIn.getPreviousObject());
-    if (opplan) addDelivery(opplan);
-    else throw LogicException("Incorrect object type during read operation");
-  }
-  else
-  {
-    Plannable::endElement(pIn, pAttr, pElement);
-    HasDescription::endElement(pIn, pAttr, pElement);
-    HasHierarchy<Demand>::endElement (pIn, pAttr, pElement);
-  }
-}
-
-
-DECLARE_EXPORT PyObject* Demand::getattro(const Attribute& attr)
-{
-  if (attr.isA(Tags::tag_name))
-    return PythonObject(getName());
-  if (attr.isA(Tags::tag_quantity))
-    return PythonObject(getQuantity());
-  if (attr.isA(Tags::tag_due))
-    return PythonObject(getDue());
-  if (attr.isA(Tags::tag_priority))
-    return PythonObject(getPriority());
-  if (attr.isA(Tags::tag_owner))
-    return PythonObject(getOwner());
-  if (attr.isA(Tags::tag_item))
-    return PythonObject(getItem());
-  if (attr.isA(Tags::tag_customer))
-    return PythonObject(getCustomer());
-  if (attr.isA(Tags::tag_operation))
-    return PythonObject(getOperation());
-  if (attr.isA(Tags::tag_description))
-    return PythonObject(getDescription());
-  if (attr.isA(Tags::tag_category))
-    return PythonObject(getCategory());
-  if (attr.isA(Tags::tag_subcategory))
-    return PythonObject(getSubCategory());
-  if (attr.isA(Tags::tag_minshipment))
-    return PythonObject(getMinShipment());
-  if (attr.isA(Tags::tag_maxlateness))
-    return PythonObject(getMaxLateness());
-  if (attr.isA(Tags::tag_hidden))
-    return PythonObject(getHidden());
-  if (attr.isA(Tags::tag_operationplans))
-    return new DemandPlanIterator(this);
-  if (attr.isA(Tags::tag_pegging))
-    return new PeggingIterator(this);
-  if (attr.isA(Tags::tag_constraints))
-    return new ProblemIterator(*(constraints.begin()));
-  if (attr.isA(Tags::tag_members))
-    return new DemandIterator(this);
-  return NULL;
-}
-
-
-DECLARE_EXPORT int Demand::setattro(const Attribute& attr, const PythonObject& field)
-{
-  if (attr.isA(Tags::tag_name))
-    setName(field.getString());
-  else if (attr.isA(Tags::tag_priority))
-    setPriority(field.getInt());
-  else if (attr.isA(Tags::tag_quantity))
-    setQuantity(field.getDouble());
-  else if (attr.isA(Tags::tag_due))
-    setDue(field.getDate());
-  else if (attr.isA(Tags::tag_item))
-  {
-    if (!field.check(Item::metadata))
-    {
-      PyErr_SetString(PythonDataException, "demand item must be of type item");
-      return -1;
-    }
-    Item* y = static_cast<Item*>(static_cast<PyObject*>(field));
-    setItem(y);
-  }
-  else if (attr.isA(Tags::tag_customer))
-  {
-    if (!field.check(Customer::metadata))
-    {
-      PyErr_SetString(PythonDataException, "demand customer must be of type customer");
-      return -1;
-    }
-    Customer* y = static_cast<Customer*>(static_cast<PyObject*>(field));
-    setCustomer(y);
-  }
-  else if (attr.isA(Tags::tag_description))
-    setDescription(field.getString());
-  else if (attr.isA(Tags::tag_category))
-    setCategory(field.getString());
-  else if (attr.isA(Tags::tag_subcategory))
-    setSubCategory(field.getString());
-  else if (attr.isA(Tags::tag_minshipment))
-    setMinShipment(field.getDouble());
-  else if (attr.isA(Tags::tag_maxlateness))
-    setMaxLateness(field.getTimeperiod());
-  else if (attr.isA(Tags::tag_owner))
-  {
-    if (!field.check(Demand::metadata))
-    {
-      PyErr_SetString(PythonDataException, "demand owner must be of type demand");
-      return -1;
-    }
-    Demand* y = static_cast<Demand*>(static_cast<PyObject*>(field));
-    setOwner(y);
-  }
-  else if (attr.isA(Tags::tag_operation))
-  {
-    if (!field.check(Operation::metadata))
-    {
-      PyErr_SetString(PythonDataException, "demand operation must be of type operation");
-      return -1;
-    }
-    Operation* y = static_cast<Operation*>(static_cast<PyObject*>(field));
-    setOperation(y);
-  }
-  else if (attr.isA(Tags::tag_hidden))
-    setHidden(field.getBool());
-  else
-    return -1;  // Error
-  return 0;  // OK
-}
-
-
-int DemandPlanIterator::initialize()
-{
-  // Initialize the type
-  PythonType& x = PythonExtension<DemandPlanIterator>::getType();
-  x.setName("demandplanIterator");
-  x.setDoc("frePPLe iterator for demand delivery operationplans");
-  x.supportiter();
-  return x.typeReady();
-}
-
-
-PyObject* DemandPlanIterator::iternext()
-{
-  if (i == dem->getDelivery().end()) return NULL;
-  PyObject* result = const_cast<OperationPlan*>(&**(i++));
-  Py_INCREF(result);
-  return result;
+  return constraints.begin();
 }
 
 } // end namespace

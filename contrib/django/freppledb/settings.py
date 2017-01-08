@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba
+# Copyright (C) 2007-2013 by frePPLe bvba
 #
 # This library is free software; you can redistribute it and/or modify it
 # under the terms of the GNU Affero General Public License as published
@@ -22,28 +22,33 @@ It is recommended not to edit this file!
 Instead put all your settings in the file FREPPLE_CONFDIR/djangosettings.py.
 
 '''
-from __future__ import print_function
-import os, sys, locale
+import locale
+import os
+import sys
+import types
 import freppledb
 
 # FREPPLE_APP directory
 if 'FREPPLE_APP' in os.environ:
   FREPPLE_APP = os.environ['FREPPLE_APP']
 else:
-  FREPPLE_APP = os.path.abspath(os.path.join(os.path.dirname(freppledb.__file__),'..'))
+  FREPPLE_APP = os.path.abspath(os.path.join(os.path.dirname(freppledb.__file__), '..'))
 
 # FREPPLE_HOME directory
 if 'FREPPLE_HOME' in os.environ:
   FREPPLE_HOME = os.environ['FREPPLE_HOME']
 elif os.sep == '/' and os.path.isfile('/usr/share/frepple/frepple.xsd'):
-  # Linux installation layout
+  # Linux installation layout with prefix /usr
   FREPPLE_HOME = '/usr/share/frepple'
-elif os.path.isfile(os.path.abspath(os.path.join(FREPPLE_APP,'..','frepple.xsd'))):
+elif os.sep == '/' and os.path.isfile('/usr/local/share/frepple/frepple.xsd'):
+  # Linux installation layout with prefix /usr/local
+  FREPPLE_HOME = '/usr/local/share/frepple'
+elif os.path.isfile(os.path.abspath(os.path.join(FREPPLE_APP, '..', 'frepple.xsd'))):
   # Py2exe layout
-  FREPPLE_HOME = os.path.abspath(os.path.join(FREPPLE_APP,'..'))
-elif os.path.isfile(os.path.abspath(os.path.join(FREPPLE_APP,'..','..','bin','frepple.xsd'))):
+  FREPPLE_HOME = os.path.abspath(os.path.join(FREPPLE_APP, '..'))
+elif os.path.isfile(os.path.abspath(os.path.join(FREPPLE_APP, '..', '..', 'bin', 'frepple.xsd'))):
   # Development layout
-  FREPPLE_HOME = os.path.abspath(os.path.join(FREPPLE_APP,'..','..','bin'))
+  FREPPLE_HOME = os.path.abspath(os.path.join(FREPPLE_APP, '..', '..', 'bin'))
 else:
   print("Error: Can't locate frepple.xsd")
   sys.exit(1)
@@ -84,7 +89,7 @@ except:
 # will match example.com, www.example.com, and any other subdomain of example.com.
 # A value of '*' will match anything, effectively disabling this feature.
 # This option is only active when DEBUG = false.
-ALLOWED_HOSTS = [ '*' ]
+ALLOWED_HOSTS = ['*']
 
 # Local time zone for this installation. Choices can be found here:
 # http://en.wikipedia.org/wiki/List_of_tz_zones_by_name
@@ -95,16 +100,29 @@ ALLOWED_HOSTS = [ '*' ]
 # system time zone.
 TIME_ZONE = 'Europe/Brussels'
 
-# Internationalization is switched on by default.
-# Language code for this installation. All choices can be found here:
-# http://www.w3.org/TR/REC-html40/struct/dirlang.html#langcodes
-# http://blogs.law.harvard.edu/tech/stories/storyReader$15
+# Supported language codes, sorted by language code.
+# Language names and codes should match the ones in Django.
+# You can see the list supported by Django at:
+#    https://github.com/django/django/blob/master/django/conf/global_settings.py
 ugettext = lambda s: s
 LANGUAGES = (
+  # Translators: Translation included with Django
   ('en', ugettext('English')),
+  # Translators: Translation included with Django
   ('fr', ugettext('French')),
+  # Translators: Translation included with Django
   ('it', ugettext('Italian')),
+  # Translators: Translation included with Django
+  ('jp', ugettext('Japanese')),
+  # Translators: Translation included with Django
   ('nl', ugettext('Dutch')),
+  # Translators: Translation included with Django
+  ('pt', ugettext('Portuguese')),
+  # Translators: Translation included with Django
+  ('pt-br', ugettext('Brazilian Portuguese')),
+  # Translators: Translation included with Django
+  ('zh-cn', ugettext('Simplified Chinese')),
+  # Translators: Translation included with Django
   ('zh-tw', ugettext('Traditional Chinese')),
 )
 
@@ -115,10 +133,15 @@ APPEND_SLASH = False
 
 WSGI_APPLICATION = 'freppledb.wsgi.application'
 ROOT_URLCONF = 'freppledb.urls'
-STATIC_ROOT = os.path.normpath(os.path.join(FREPPLE_APP,'static'))
+if os.sep == '/' and os.path.isdir('/usr/share/frepple/frepple.xsd'):
+  # Standard Linux installation
+  STATIC_ROOT = '/usr/share/frepple/static'
+else:
+  # All other layout types
+  STATIC_ROOT = os.path.normpath(os.path.join(FREPPLE_APP, 'static'))
 STATIC_URL = '/static/'
-USE_L10N=True        # Represent data in the local format
-USE_I18N=True        # Use translated strings
+USE_L10N = True        # Represent data in the local format
+USE_I18N = True        # Use translated strings
 
 TEMPLATE_CONTEXT_PROCESSORS = (
     'django.core.context_processors.request',
@@ -131,13 +154,15 @@ TEMPLATE_CONTEXT_PROCESSORS = (
 # Sessions
 SESSION_ENGINE = 'django.contrib.sessions.backends.signed_cookies'
 SESSION_COOKIE_NAME = 'sessionid'         # Cookie name. This can be whatever you want.
-SESSION_COOKIE_AGE = 60 * 60 * 24 *  2    # Age of cookie, in seconds: 2 days
+SESSION_COOKIE_AGE = 60 * 60 * 24 * 2     # Age of cookie, in seconds: 2 days
 SESSION_COOKIE_DOMAIN = None              # A string, or None for standard domain cookie.
 SESSION_SAVE_EVERY_REQUEST = True         # Whether to save the session data on every request.
                                           # Needs to be True to have the breadcrumbs working correctly!
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True    # Whether sessions expire when a user closes his browser.
 
 MESSAGE_STORAGE = 'django.contrib.messages.storage.fallback.SessionStorage'
+
+TEST_RUNNER = 'django.test.runner.DiscoverRunner'
 
 # Mail settings
 #DEFAULT_FROM_EMAIL #if not pass from_email to send_mail func.
@@ -159,7 +184,7 @@ AUTH_USER_MODEL = 'common.User'
 
 # IP address of the machine you are browsing from. When logging in from this
 # machine additional debugging statements can be shown.
-INTERNAL_IPS = ( '127.0.0.1', )
+INTERNAL_IPS = ('127.0.0.1',)
 
 # Default charset to use for all ``HttpResponse`` objects, if a MIME type isn't
 # manually specified.
@@ -174,74 +199,37 @@ DEFAULT_CHARSET = 'utf-8'
 CSV_CHARSET = locale.getdefaultlocale()[1]
 
 # A list of available user interface themes.
-# The current selection is nothing but the pack of standard themes of JQuery UI.
-# Check out http://jqueryui.com/themeroller/ to roll your own theme.
-THEMES = [ (i,i) for i in (
-  'black-tie', 'blitzer', 'cupertino', 'dark-hive', 'dot-luv', 'eggplant',
-  'excite-bike', 'flick', 'hot-sneaks', 'humanity', 'le-frog', 'mint-choc',
-  'overcast', 'pepper-grinder', 'redmond', 'smoothness', 'south-street', 'start',
-  'sunny', 'swanky-purse', 'trontastic', 'ui-darkness', 'ui-lightness', 'vader'
-  )]
+# If multiple themes are configured in this list, the user's can change their
+# preferences among the ones listed here.
+# If the list contains only a single value, the preferences screen will not
+# display users an option to choose the theme.
+THEMES = [
+  'earth', 'grass', 'lemon', 'snow', 'strawberry', 'water'
+  ]
+
+# A default user-group to which new users are automatically added
+DEFAULT_USER_GROUP = None
 
 # The default user interface theme
-DEFAULT_THEME = 'sunny'
+DEFAULT_THEME = 'grass'
 
 # The default number of records to pull from the server as a page
 DEFAULT_PAGESIZE = 100
 
-# The size of the "name" key field of the database models
-NAMESIZE = 60
-
-# The size of the "description" field of the database models
-DESCRIPTIONSIZE = 200
-
-# The size of the "category" and "subcategory" fields of the database models
-CATEGORYSIZE = 20
-
-# The number of digits for a number in the database models
-MAX_DIGITS = 15
-
-# The number of decimal places for a number in the database models
-DECIMAL_PLACES = 4
-
-# The maximum allowed length of a comment
-COMMENT_MAX_LENGTH = 3000
-
 # Port number for the CherryPy web server
 PORT = 8000
 
-# Override any of the above settings from a seperate file
-if os.access(os.path.join(FREPPLE_CONFIGDIR,'djangosettings.py'), os.R_OK):
-  exec open(os.path.join(FREPPLE_CONFIGDIR,'djangosettings.py')) in globals()
+# Override any of the above settings from a separate file
+if os.access(os.path.join(FREPPLE_CONFIGDIR, 'djangosettings.py'), os.R_OK):
+  with open(os.path.join(FREPPLE_CONFIGDIR, 'djangosettings.py')) as mysettingfile:
+    exec(mysettingfile.read(), globals())
+  if DEBUG:
+    # Add a dummy module to sys.modules to make the development server
+    # autoreload when the configuration file changes.
+    module = types.ModuleType('djangosettings')
+    module.__file__ = os.path.join(FREPPLE_CONFIGDIR, 'djangosettings.py')
+    sys.modules['djangosettings'] = module
 
 # Some Django settings we don't like to be overriden
 TEMPLATE_DEBUG = DEBUG
 MANAGERS = ADMINS
-
-# Extra database parameters
-for param in DATABASES.values():
-  if param['ENGINE'] == 'django.db.backends.sqlite3':
-    # Path to the sqlite3 test database file
-    param['TEST_NAME'] = os.path.join(FREPPLE_LOGDIR,'test_%s.sqlite' % param['NAME'])
-    # Path to sqlite3 database file
-    param['NAME'] = os.path.join(FREPPLE_LOGDIR,'%s.sqlite' % param['NAME'])
-    # Extra default settings for SQLITE
-    if len(param['OPTIONS']) == 0:
-      param['OPTIONS'] = {"timeout": 10, "check_same_thread": False}
-  elif param['ENGINE'] == 'django.db.backends.mysql':
-    # Extra default settings for MYSQL
-    # InnoDB has the proper support for transactions that is required for
-    # frePPLe in a production environment.
-    if len(param['OPTIONS']) == 0:
-      param['OPTIONS'] = {"init_command": "SET storage_engine=INNODB, SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED"}
-    param['TEST_NAME'] = 'test_%s' % param['NAME']
-  elif param['ENGINE'] == 'django.db.backends.oracle':
-    param['TEST_NAME'] = param['NAME']
-    param['TEST_USER'] = 'test_%s' % param['USER']
-    param['TEST_PASSWD'] = param['PASSWORD']
-    param['OPTIONS'] = {'threaded': True,}
-  elif param['ENGINE'] == 'django.db.backends.postgresql_psycopg2':
-    param['TEST_NAME'] = 'test_%s' % param['NAME']
-  else:
-    print('Error: Unsupported database engine %s' % param['ENGINE'])
-    sys.exit(1)

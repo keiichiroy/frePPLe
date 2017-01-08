@@ -1,31 +1,27 @@
 {% extends "admin/base_site_gridpivot.html" %}
 {% load i18n %}
 
-{% block contextmenus %}
-{% include "operationcontext.html" %}
-{% include "locationcontext.html" %}
-<div id="detail0context" class="ContextMenu"><ul class="ui-menu ui-widget ui-widget-content ui-corner-all ui-state-default">
-<li class="ui-menu-item"><a id="{{request.prefix}}/operationplan/{value}/?startdate__gte={startdate}&amp;startdate__lt={enddate}&amp;locked=1">{% trans 'Detail' %}</a></li>
-<li class="ui-menu-item"><a id="{{request.prefix}}/operationpegging/?operation={value}&amp;startdate__gte={startdate}&amp;startdate__lt={enddate}&amp;locked=1">{% trans 'Pegging' %}</a></li>
-</ul></div>
-<div id="detail1context" class="ContextMenu"><ul class="ui-menu ui-widget ui-widget-content ui-corner-all ui-state-default">
-<li class="ui-menu-item"><a id="{{request.prefix}}/operationplan/{value}/?startdate__gte={startdate}&amp;startdate__lt={enddate}">{% trans 'Detail' %}</a></li>
-<li class="ui-menu-item"><a id="{{request.prefix}}/operationpegging/?operation={value}&amp;startdate__gte={startdate}&amp;startdate__lt={enddate}">{% trans 'Pegging' %}</a></li>
-</ul></div>
-<div id="detail2context" class="ContextMenu"><ul class="ui-menu ui-widget ui-widget-content ui-corner-all ui-state-default">
-<li class="ui-menu-item"><a id="{{request.prefix}}/operationplan/{value}/?enddate__gte={startdate}&amp;enddate__lt={enddate}&amp;locked=1">{% trans 'Detail' %}</a></li>
-<li class="ui-menu-item"><a id="{{request.prefix}}/operationpegging/?operation={value}&amp;enddate__gte={startdate}&amp;enddate__lt={enddate}&amp;locked=1">{% trans 'Pegging' %}</a></li>
-</ul></div>
-<div id="detail3context" class="ContextMenu"><ul class="ui-menu ui-widget ui-widget-content ui-corner-all ui-state-default">
-<li class="ui-menu-item"><a id="{{request.prefix}}/operationplan/{value}/?enddate__gte={startdate}&amp;enddate__lt={enddate}">{% trans 'Detail' %}</a></li>
-<li class="ui-menu-item"><a id="{{request.prefix}}/operationpegging/?operation={value}&amp;enddate__gte={startdate}&amp;enddate__lt={enddate}">{% trans 'Pegging' %}</a></li>
-</ul></div>
+{% block extrahead %}{{block.super}}
+{% if mode == "graph" and not args.0 %}<script type="text/javascript">
+$(function(){ graph.header(); })
+</script>{% endif %}
 {% endblock %}
 
-{% block tools %}{% if args.0 %}
-{% include "operationtabs.html" %}
-{% endif %}{{block.super}}
-{% endblock %}
+{% block contextmenus %}
+<div id="detail0context" class="ContextMenu"><ul class="ui-menu ui-widget ui-widget-content ui-corner-all ui-state-default">
+<li class="ui-menu-item"><a id="{{request.prefix}}/operationplan/{value}/?startdate__gte={startdate}&amp;startdate__lt={enddate}&amp;locked=1">{% trans 'detail'|capfirst %}</a></li>
+</ul></div>
+<div id="detail1context" class="ContextMenu"><ul class="ui-menu ui-widget ui-widget-content ui-corner-all ui-state-default">
+<li class="ui-menu-item"><a id="{{request.prefix}}/operationplan/{value}/?startdate__gte={startdate}&amp;startdate__lt={enddate}">{% trans 'detail'|capfirst %}</a></li>
+</ul></div>
+<div id="detail2context" class="ContextMenu"><ul class="ui-menu ui-widget ui-widget-content ui-corner-all ui-state-default">
+<li class="ui-menu-item"><a id="{{request.prefix}}/operationplan/{value}/?enddate__gte={startdate}&amp;enddate__lt={enddate}&amp;locked=1">{% trans 'detail'|capfirst %}</a></li>
+</ul></div>
+<div id="detail3context" class="ContextMenu"><ul class="ui-menu ui-widget ui-widget-content ui-corner-all ui-state-default">
+<li class="ui-menu-item"><a id="{{request.prefix}}/operationplan/{value}/?enddate__gte={startdate}&amp;enddate__lt={enddate}">{% trans 'detail'|capfirst %}</a></li>
+</ul></div>{% endblock %}
+
+{% block tools %}{% if args.0 %}{% tabs "input.operation" %}{% endif %}{{block.super}}{% endblock %}
 
 {% block before_table %}{% if args.0 %}
 <div id="graph" style="clear: both; height: 400px; padding: 10px; "></div>
@@ -38,117 +34,311 @@
   $("#graph").width($(window).width()-55).height(h>800 || h<480 ? 400 : h-380);
 });{% endif %}
 
+{% if args.0 or mode == "graph" %}
 function drawGraphs(jsondata)
 {
-  var cols = jQuery("#grid").jqGrid('getGridParam', 'colModel');
-  var x_major = [];
-  var x_minor = [];
-  var first = true;
-  var ticks = Math.ceil((cols.length-4)/20.0);
+  {% if args.0 %}var margin = {top: 0, right: 100, bottom: 30, left: 50};
+  {% else %}var margin = {top: 0, right: 0, bottom: 0, left: 50};
+  {% endif %}var width = $({% if args.0 %}"#graph"{% else %}"#grid_graph"{% endif %}).width() - margin.left - margin.right;
+  var height = {% if args.0 %}$("#graph").height(){% else %}80{% endif %} - margin.top - margin.bottom;
 
-  // Loop over all graph cells
-  $("#grid_frozen").find(".graph").each(function(index)
+  // Define X-axis
+  var domain_x = [];
+  var bucketnamelength = 0;
+  for (var i in timebuckets)
   {
-    // Collect the graph data
-    var d1=[], d2=[];
-    var j = 0;
-    for (var i in cols)
-    {
-       if ('startdate' in cols[i])
-       {
-          if (first)
-          {
-            x_minor.push([j,cols[i]['name']]);
-            if (j % ticks == 0) x_major.push([j,cols[i]['name']]);
-          }
-          var data = jsondata['rows'][index][cols[i]['name']];
-          {% if args.0 %}d1.push([j-0.25,data[1]]);
-          d2.push([j+0.25,data[3]]);
-          {% else %}d1.push([j,data[1]]);
-          {% endif %}j = j + 1;
-       }
-    }
-    first = false;
+    domain_x.push(timebuckets[i]['name']);
+    bucketnamelength = Math.max(timebuckets[i]['name'].length, bucketnamelength);
+  }
+  var x = d3.scale.ordinal()
+    .domain(domain_x)
+    .rangeRoundBands([0, width], .1);
+  var x_width = x.rangeBand();
 
-    // Draw the graph
-    {% if not args.0 %}$(this).height($(this).parent().height());{% endif %}
-    Flotr.draw({% if args.0 %}$("#graph").get(0){% else %}this{% endif %},[
-      { data:d1, label:"{{_("total starts")|capfirst}}" }{% if args.0 %},
-      { data:d2, label:"{{_("total ends")|capfirst}}" }{% endif %}
-      ], {
-      HtmlText: false,
-      bars : {
-        show : true,
-        fillOpacity: 1,
-        barWidth : {% if args.0 %}0.45{% else %}0.9{% endif %},
-        lineWidth : 1,
-        shadowSize : 0
-      },
-      {% if args.0 %}
-      legend : {
-        position: 'ne',
-        backgroundOpacity: 1,
-        },
-      grid : {
-        verticalLines : false,
-        horizontalLines : true,
-        },
-      xaxis: {
-        ticks: x_major,
-        },
-      yaxis: {
-        title: '{{_("units")|capfirst}}',
-        titleAngle: 90
-        },
-      {% else %}
-      legend: {
-        show: false
-        },
-      grid : {
-        verticalLines : false,
-        horizontalLines : false,
-        outlineWidth: 0
-        },
-      xaxis: {
-        showLabels: false
-        },
-      yaxis: {
-        showLabels: false
-        },
-      {% endif %}
-      mouse : {
-        track : true,
-        relative : true,
-        trackFormatter: function(obj) {
-          return x_minor[Math.round(obj.x)][1] + "<br/>" + obj.y; // TODO not good JSON.stringify(obj);
-          }
-        },
-      colors: ['#2B95EC','#F6BD0F'],
-      parseFloat: false
+  // Define Y-axis
+  var y = d3.scale.linear().rangeRound([height, 0]);
+
+  // Draw all graphs
+  $("#grid"){% if not args.0 %}.find(".graph"){% endif %}.each(function(index)
+  {
+    // Create a new SVG element
+    $({% if args.0 %}$("#graph").get(0){% else %}this{% endif %}).html("");
+    var svg = d3.select({% if args.0 %}$("#graph").get(0){% else %}this{% endif %})
+      .append("svg")
+      .attr("class","graphcell")
+      .attr("width", width + margin.left + margin.right)
+      .attr("height", height + margin.top + margin.bottom)
+      .append("g")
+      .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+    // Build the data for d3
+    var max_y = 0;
+    var data = [];
+    for (var bckt in timebuckets)
+    {
+      var tmp = jsondata['rows'][index][timebuckets[bckt]['name']];
+      data.push({
+        'operation': jsondata['rows'][index]['operation'],
+        'bucket': bckt,
+        'locked_start': tmp[0],
+        'total_start': tmp[1],
+        'locked_end': tmp[2],
+        'total_end': tmp[3]
+        });
+      if (tmp[1] > max_y) max_y = tmp[1] ;
+      if (tmp[3] > max_y) max_y = tmp[3] ;
+    }
+
+    // Update the scale of the Y-axis by looking for the max value
+    y.domain([0,max_y]);
+
+    // D3 visualization
+    svg.selectAll("g")
+      .data(data)
+      .enter()
+      .append("g")
+      .attr("transform", function(d) { return "translate(" + x(timebuckets[d['bucket']]['name']) + ",0)"; })
+      .on("click", function(d) {
+          if (d3.event.defaultPrevented || d['total_start'] == 0) return;
+          d3.select("#tooltip").style('display', 'none');
+          contextMenu = $("#detail1context");
+          contextMenu.find('a').each( function() {
+              $(this).attr(
+                'href',
+                $(this).attr('id')
+                  .replace(/{value}/g, admin_escape(d['operation']))
+                  .replace(/{enddate}/g, timebuckets[d['bucket']]['enddate'])
+                  .replace(/{startdate}/g, timebuckets[d['bucket']]['startdate'])
+                );
+            });
+          var coord = d3.mouse(document.body);
+          contextMenu.css({
+            left: coord[0],
+            top: coord[1],
+            display: 'block'
+            });
+          d3.event.stopPropagation();
+        })
+      .on("mouseenter", function(d) {
+        graph.showTooltip(
+          '<div style="text-align:center; font-weight:bold">'
+          + timebuckets[d['bucket']]['name'] + '</div>'
+          + '<table><tr><td>{{_('locked starts')|capfirst}}</td><td style="text-align:center">'
+          + (Math.round(d['locked_start']*10)/10)
+          + '</td></tr><tr><td>{{_('total starts')|capfirst}}</td><td style="text-align:center">'
+          + (Math.round(d['total_start']*10)/10)
+          + '</td></tr><tr><td>{{_('locked ends')|capfirst}}</td><td style="text-align:center">'
+          + (Math.round(d['locked_end']*10)/10)
+          + '</td></tr><tr><td>{{_('total ends')|capfirst}}</td><td style="text-align:center">'
+          + (Math.round(d['total_end']*10)/10)
+          + '</td></tr></table>'
+          );
+        })
+      .on("mouseleave", graph.hideTooltip)
+      .on("mousemove", graph.moveTooltip)
+      .each(function(d) {
+        var bucket = d3.select(this);
+        var top = y(0);
+        if (d['locked_start'] > 0)
+        {
+          top = y(d['locked_start']);
+          bucket.append("rect")
+            .attr("width", x_width/2)
+            .attr("x", x_width/2)
+            .attr("y", top)
+            .attr("height", y(0) - top)
+            .style("fill","#113C5E")
+            .on("click", function(d) {
+                if (d3.event.defaultPrevented || d['total_start'] == 0) return;
+                d3.select("#tooltip").style('display', 'none');
+                contextMenu = $("#detail1context");
+                contextMenu.find('a').each( function() {
+                    $(this).attr(
+                      'href',
+                      $(this).attr('id')
+                        .replace(/{value}/g, admin_escape(d['operation']))
+                        .replace(/{enddate}/g, timebuckets[d['bucket']]['enddate'])
+                        .replace(/{startdate}/g, timebuckets[d['bucket']]['startdate'])
+                      );
+                  });
+                var coord = d3.mouse(document.body);
+                contextMenu.css({
+                  left: coord[0],
+                  top: coord[1],
+                  display: 'block'
+                  });
+                d3.event.stopPropagation();
+              });
+        }
+        if (d['total_start'] > d['locked_start'])
+        {
+          var newtop = y(d['total_start']);
+          bucket.append("rect")
+            .attr("width", x_width/2)
+            .attr("x", x_width/2)
+            .attr("y", newtop)
+            .attr("height", top - newtop)
+            .style("fill","#2B95EC")
+            .on("click", function(d) {
+                if (d3.event.defaultPrevented || d['total_start'] == 0) return;
+                d3.select("#tooltip").style('display', 'none');
+                contextMenu = $("#detail1context");
+                contextMenu.find('a').each( function() {
+                    $(this).attr(
+                      'href',
+                      $(this).attr('id')
+                        .replace(/{value}/g, admin_escape(d['operation']))
+                        .replace(/{enddate}/g, timebuckets[d['bucket']]['enddate'])
+                        .replace(/{startdate}/g, timebuckets[d['bucket']]['startdate'])
+                      );
+                  });
+                var coord = d3.mouse(document.body);
+                contextMenu.css({
+                  left: coord[0],
+                  top: coord[1],
+                  display: 'block'
+                  });
+                d3.event.stopPropagation();
+              });
+        }
+        top = y(0);
+        if (d['locked_end'] > 0)
+        {
+          top = y(d['locked_end']);
+          bucket.append("rect")
+            .attr("width", x_width/2)
+            .attr("y", top)
+            .attr("height", y(0) - top)
+            .style("fill","#7B5E08")
+            .on("click", function(d) {
+                if (d3.event.defaultPrevented || d['total_end'] == 0) return;
+                d3.select("#tooltip").style('display', 'none');
+                contextMenu = $("#detail3context");
+                contextMenu.find('a').each( function() {
+                    $(this).attr(
+                      'href',
+                      $(this).attr('id')
+                        .replace(/{value}/g, admin_escape(d['operation']))
+                        .replace(/{enddate}/g, timebuckets[d['bucket']]['enddate'])
+                        .replace(/{startdate}/g, timebuckets[d['bucket']]['startdate'])
+                      );
+                  });
+                var coord = d3.mouse(document.body);
+                contextMenu.css({
+                  left: coord[0],
+                  top: coord[1],
+                  display: 'block'
+                  });
+                d3.event.stopPropagation();
+              });
+        }
+        if (d['total_end'] > d['locked_end'])
+        {
+          var newtop = y(d['total_end']);
+          bucket.append("rect")
+            .attr("width", x_width/2)
+            .attr("y", newtop)
+            .attr("height", top - newtop)
+            .style("fill","#F6BD0F")
+            .on("click", function(d) {
+                if (d3.event.defaultPrevented || d['total_end'] == 0) return;
+                d3.select("#tooltip").style('display', 'none');
+                contextMenu = $("#detail3context");
+                contextMenu.find('a').each( function() {
+                    $(this).attr(
+                      'href',
+                      $(this).attr('id')
+                        .replace(/{value}/g, admin_escape(d['operation']))
+                        .replace(/{enddate}/g, timebuckets[d['bucket']]['enddate'])
+                        .replace(/{startdate}/g, timebuckets[d['bucket']]['startdate'])
+                      );
+                  });
+                var coord = d3.mouse(document.body);
+                contextMenu.css({
+                  left: coord[0],
+                  top: coord[1],
+                  display: 'block'
+                  });
+                d3.event.stopPropagation();
+              });
+        }
       });
+
+    // Display Y-Axis
+    var yAxis = d3.svg.axis()
+      .scale(y)
+      .orient("left");
+    {% if not args.0 %}
+    svg.append("g")
+      .attr("class", "miniaxis")
+      .call(graph.miniAxis.bind(yAxis));
+    {% else %}
+    svg.append("g")
+      .attr("class", "y axis")
+      .call(yAxis);
+
+    // Display X-axis for a single operation
+    var nth = Math.ceil(timebuckets.length / width * bucketnamelength * 10);
+    var myticks = [];
+    for (var i in timebuckets)
+      if (i % nth == 0) myticks.push(timebuckets[i]['name']);
+    var xAxis = d3.svg.axis()
+      .scale(x)
+      .tickValues(myticks)
+      .orient("bottom");
+    svg.append("g")
+      .attr("class", "x axis")
+      .attr("transform", "translate(0," + height + ")")
+      .call(xAxis);
+
+    // Display legend
+    var legend = svg.append("g");
+    var codes = [
+      [1, "{{_('locked starts')|capfirst}}", "#113C5E"],
+      [2, "{{_('new starts')|capfirst}}", "#2B95EC"],
+      [3, "{{_('locked ends')|capfirst}}", "#7B5E08"],
+      [4, "{{_('new ends')|capfirst}}", "#F6BD0F"],
+      ];
+    for (var i in codes)
+    {
+      legend.append("rect")
+        .attr("x", width + 82)
+        .attr("width", 18)
+        .attr("height", 18)
+        .style("fill", codes[i][2])
+        .attr("transform", "translate(0," + (i*20+10) + ")");
+      legend.append("text")
+        .attr("x", width + 76)
+        .attr("y", 9)
+        .attr("dy", ".35em")
+        .style("text-anchor", "end")
+        .text(codes[i][1])
+        .attr("transform", "translate(0," + (i*20+10) + ")");
+    }{% endif %}
     });
 }
-
+{% endif %}
+{% if args.0 or mode == "table" %}
 function crosses (cellvalue, options, rowdata) {
   if (cellvalue[0] != 0.0)
-    var result = cellvalue[0] + "<span class='context cross ui-icon ui-icon-triangle-1-e' role='detail0'></span><br/>";
+    var result = cellvalue[0] + "<span class='context cross fa fa-caret-right' role='detail0'></span><br/>";
   else
     result = '0.0<br/>';
   if (cellvalue[1] != 0.0)
-    result += cellvalue[1] + "<span class='context cross ui-icon ui-icon-triangle-1-e' role='detail1'></span><br/>";
+    result += cellvalue[1] + "<span class='context cross fa fa-caret-right' role='detail1'></span><br/>";
   else
     result += '0.0<br/>';
   if (cellvalue[2] != 0.0)
-    result += cellvalue[2] + "<span class='context cross ui-icon ui-icon-triangle-1-e' role='detail2'></span><br/>";
+    result += cellvalue[2] + "<span class='context cross fa fa-caret-right' role='detail2'></span><br/>";
   else
     result += '0.0<br/>';
   if (cellvalue[3] != 0.0)
-    result += cellvalue[3] + "<span class='context cross ui-icon ui-icon-triangle-1-e' role='detail3'></span>";
+    result += cellvalue[3] + "<span class='context cross fa fa-caret-right' role='detail3'></span>";
   else
     result += cellvalue[3];
   return result;
 };
-{% endblock %}
+{% endif %}{% endblock %}
 
-{% block extra_grid %}loadComplete: drawGraphs,
-{% endblock %}
+{% block extra_grid %}{% if args.0 or mode == "graph" %}loadComplete: drawGraphs,
+{% endif %}{% endblock %}

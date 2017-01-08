@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba
+# Copyright (C) 2007-2013 by frePPLe bvba
 #
 # This library is free software; you can redistribute it and/or modify it
 # under the terms of the GNU Affero General Public License as published
@@ -14,25 +14,37 @@
 # You should have received a copy of the GNU Affero General Public
 # License along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
-from __future__ import print_function
 from datetime import datetime
+import logging
 
-from django.db import models, DEFAULT_DB_ALIAS, connections, transaction
-from django.contrib.contenttypes import generic
-from django.contrib.contenttypes.models import ContentType
-from django.utils.translation import ugettext_lazy as _
 from django.conf import settings
-from django.contrib.auth.models import AbstractUser
+from django.contrib.admin.utils import quote
+from django.contrib.auth.models import AbstractUser, Group
+from django.contrib.contenttypes.fields import GenericForeignKey
+from django.contrib.contenttypes.models import ContentType
+from django.core.exceptions import PermissionDenied
+from django.core.urlresolvers import NoReverseMatch, reverse
+from django.db import models, DEFAULT_DB_ALIAS, connections, transaction
+from django.db.models.signals import pre_delete
+from django.dispatch.dispatcher import receiver
+from django.utils import timezone
+from django.utils.translation import ugettext_lazy as _
+from django.utils.text import capfirst
+
+
+
+logger = logging.getLogger(__name__)
 
 
 class HierarchyModel(models.Model):
-  lft = models.PositiveIntegerField(db_index = True, editable=False, null=True, blank=True)
+  lft = models.PositiveIntegerField(db_index=True, editable=False, null=True, blank=True)
   rght = models.PositiveIntegerField(null=True, editable=False, blank=True)
   lvl = models.PositiveIntegerField(null=True, editable=False, blank=True)
-  name = models.CharField(_('name'), max_length=settings.NAMESIZE, primary_key=True,
-    help_text=_('Unique identifier'))
-  owner = models.ForeignKey('self', verbose_name=_('owner'), null=True, blank=True, related_name='xchildren',
-    help_text=_('Hierarchical parent'))
+  # Translators: Translation included with Django
+  name = models.CharField(_('name'), max_length=300, primary_key=True,
+                          help_text=_('Unique identifier'))
+  owner = models.ForeignKey('self', verbose_name=_('owner'), null=True, blank=True,
+                            related_name='xchildren', help_text=_('Hierarchical parent'))
 
   def save(self, *args, **kwargs):
     # Trigger recalculation of the hieracrhy
@@ -47,34 +59,26 @@ class HierarchyModel(models.Model):
     abstract = True
 
   @classmethod
-  def rebuildHierarchy(cls, database = DEFAULT_DB_ALIAS):
+  def rebuildHierarchy(cls, database=DEFAULT_DB_ALIAS):
 
     # Verify whether we need to rebuild or not.
     # We search for the first record whose lft field is null.
     if len(cls.objects.using(database).filter(lft__isnull=True)[:1]) == 0:
       return
 
-    tmp_debug = settings.DEBUG
-    settings.DEBUG = False
     nodes = {}
-    transaction.enter_transaction_management(using=database)
-    cursor = connections[database].cursor()
+    children = {}
+    updates = []
 
     def tagChildren(me, left, level):
       right = left + 1
-      # get all children of this node
-      for i, j in keys:
-        if j == me:
-          # Recursive execution of this function for each child of this node
-          right = tagChildren(i, right, level + 1)
+      # Get all children of this node
+      for i in children.get(me, []):
+        # Recursive execution of this function for each child of this node
+        right = tagChildren(i, right, level + 1)
 
       # After processing the children of this node now know its left and right values
-      cursor.execute(
-        'update %s set lft=%d, rght=%d, lvl=%d where name = %%s' % (
-          connections[database].ops.quote_name(cls._meta.db_table), left, right, level
-          ),
-        [me]
-        )
+      updates.append( (left, right, level, me) )
 
       # Remove from node list (to mark as processed)
       del nodes[me]
@@ -83,19 +87,23 @@ class HierarchyModel(models.Model):
       return right + 1
 
     # Load all nodes in memory
-    for i in cls.objects.using(database).values('name','owner'):
+    for i in cls.objects.using(database).values('name', 'owner'):
       if i['name'] == i['owner']:
-        print("Data error: '%s' points to itself as owner" % i['name'])
+        logging.error("Data error: '%s' points to itself as owner" % i['name'])
         nodes[i['name']] = None
       else:
         nodes[i['name']] = i['owner']
+        if i['owner']:
+          if not i['owner'] in children:
+            children[i['owner']] = set()
+          children[i['owner']].add(i['name'])
     keys = sorted(nodes.items())
 
     # Loop over nodes without parent
     cnt = 1
     for i, j in keys:
-      if j == None:
-        cnt = tagChildren(i,cnt,0)
+      if j is None:
+        cnt = tagChildren(i, cnt, 0)
 
     if nodes:
       # If the nodes dictionary isn't empty, it is an indication of an
@@ -116,19 +124,32 @@ class HierarchyModel(models.Model):
             # If none of the bad keys points to me as a parent, I am unguilty
             del bad[i]
             updated = True
-      print("Data error: Hierarchy loops among %s" % sorted(bad.keys()))
+      logging.error("Data error: Hierarchy loops among %s" % sorted(bad.keys()))
       for i, j in sorted(bad.items()):
         nodes[i] = None
 
       # Continue loop over nodes without parent
       keys = sorted(nodes.items())
       for i, j in keys:
-        if j == None:
-          cnt = tagChildren(i,cnt,0)
+        if j is None:
+          cnt = tagChildren(i, cnt, 0)
 
-    transaction.commit(using=database)
-    settings.DEBUG = tmp_debug
-    transaction.leave_transaction_management(using=database)
+    # Write all results to the database
+    with transaction.atomic(using=database):
+      connections[database].cursor().executemany(
+        'update %s set lft=%%s, rght=%%s, lvl=%%s where name = %%s' % connections[database].ops.quote_name(cls._meta.db_table),
+        updates
+        )
+
+
+class MultiDBManager(models.Manager):
+  def get_queryset(self):
+    from freppledb.common.middleware import _thread_locals
+    req = getattr(_thread_locals, 'request', None)
+    if req:
+      return super(MultiDBManager, self).get_queryset().using(getattr(req, 'database', DEFAULT_DB_ALIAS))
+    else:
+      return super(MultiDBManager, self).get_queryset().using(DEFAULT_DB_ALIAS)
 
 
 class AuditModel(models.Model):
@@ -139,8 +160,10 @@ class AuditModel(models.Model):
     - a string intended to describe the source system that supplied the record
   '''
   # Database fields
-  source = models.CharField(_('source'), db_index=True, max_length=settings.CATEGORYSIZE, null=True, blank=True)
-  lastmodified = models.DateTimeField(_('last modified'), editable=False, db_index=True, default=datetime.now())
+  source = models.CharField(_('source'), db_index=True, max_length=300, null=True, blank=True)
+  lastmodified = models.DateTimeField(_('last modified'), editable=False, db_index=True, default=timezone.now)
+
+  objects = MultiDBManager()  # The default manager.
 
   def save(self, *args, **kwargs):
     # Update the field with every change
@@ -155,11 +178,13 @@ class AuditModel(models.Model):
 
 class Parameter(AuditModel):
   # Database fields
-  name = models.CharField(_('name'), max_length=settings.NAMESIZE, primary_key=True)
-  value = models.CharField(_('value'), max_length=settings.NAMESIZE, null=True, blank=True)
-  description = models.CharField(_('description'), max_length=settings.DESCRIPTIONSIZE, null=True, blank=True)
+  # Translators: Translation included with Django
+  name = models.CharField(_('name'), max_length=60, primary_key=True)
+  value = models.CharField(_('value'), max_length=1000, null=True, blank=True)
+  description = models.CharField(_('description'), max_length=1000, null=True, blank=True)
 
-  def __unicode__(self): return self.name
+  def __str__(self):
+    return self.name
 
   class Meta(AuditModel.Meta):
     db_table = 'common_parameter'
@@ -167,33 +192,181 @@ class Parameter(AuditModel):
     verbose_name_plural = _('parameters')
 
   @staticmethod
-  def getValue(key, database = DEFAULT_DB_ALIAS, default = None):
+  def getValue(key, database=DEFAULT_DB_ALIAS, default=None):
     try:
       return Parameter.objects.using(database).get(pk=key).value
     except:
       return default
 
 
-class User(AbstractUser):
-  csvOutputType = (
-    ('table',_('Table')),
-    ('list',_('List')),
+class Scenario(models.Model):
+  scenarioStatus = (
+    ('free', _('Free')),
+    ('in use', _('In use')),
+    ('busy', _('Busy')),
   )
-  languageList = tuple( [ ('auto',_('Detect automatically')), ] + list(settings.LANGUAGES) )
-  language = models.CharField(_('language'), max_length=10, choices=languageList,
-    default='auto')
-  theme = models.CharField(_('theme'), max_length=20, default=settings.DEFAULT_THEME,
-    choices=settings.THEMES)
+
+  # Database fields
+  # Translators: Translation included with Django
+  name = models.CharField(_('name'), max_length=300, primary_key=True)
+  description = models.CharField(_('description'), max_length=500, null=True, blank=True)
+  status = models.CharField(
+    _('status'), max_length=10,
+    null=False, blank=False, choices=scenarioStatus
+    )
+  lastrefresh = models.DateTimeField(_('last refreshed'), null=True, editable=False)
+
+  def __str__(self):
+    return self.name
+
+  @staticmethod
+  def syncWithSettings():
+    try:
+      # Bring the scenario table in sync with settings.databases
+      with transaction.atomic(savepoint=False):
+        dbs = [ i for i, j in settings.DATABASES.items() if j['NAME'] ]
+        for sc in Scenario.objects.all():
+          if sc.name not in dbs:
+            sc.delete()
+        scs = [sc.name for sc in Scenario.objects.all()]
+        for db in dbs:
+          if db not in scs:
+            if db == DEFAULT_DB_ALIAS:
+              Scenario(name=db, status="In use", description='Production database').save()
+            else:
+              Scenario(name=db, status="Free").save()
+    except Exception as e:
+      logger.error("Error synchronizing the scenario table with the settings: %s" % e)
+
+  class Meta:
+    db_table = "common_scenario"
+    permissions = (
+        ("copy_scenario", "Can copy a scenario"),
+        ("release_scenario", "Can release a scenario"),
+       )
+    verbose_name_plural = _('scenarios')
+    verbose_name = _('scenario')
+    ordering = ['name']
+
+
+class User(AbstractUser):
+  languageList = tuple( [ ('auto', _('Detect automatically')), ] + list(settings.LANGUAGES) )
+  language = models.CharField(
+    _('language'), max_length=10, choices=languageList,
+    default='auto'
+    )
+  theme = models.CharField(
+    _('theme'), max_length=20, default=settings.DEFAULT_THEME,
+    choices=[ (i, capfirst(i)) for i in settings.THEMES ]
+    )
   pagesize = models.PositiveIntegerField(_('page size'), default=settings.DEFAULT_PAGESIZE)
-  horizonbuckets = models.CharField(max_length=settings.NAMESIZE, blank=True, null=True)
+  horizonbuckets = models.CharField(max_length=300, blank=True, null=True)
   horizonstart = models.DateTimeField(blank=True, null=True)
   horizonend = models.DateTimeField(blank=True, null=True)
   horizontype = models.BooleanField(blank=True, default=True)
   horizonlength = models.IntegerField(blank=True, default=6, null=True)
-  horizonunit = models.CharField(blank=True, max_length=5, default='month', null=True,
-    choices=(("day","day"),("week","week"),("month","month")))
-  lastmodified = models.DateTimeField(_('last modified'), auto_now=True, null=True, blank=True,
-    editable=False, db_index=True)
+  horizonunit = models.CharField(
+    blank=True, max_length=5, default='month', null=True,
+    choices=(("day", "day"), ("week", "week"), ("month", "month"))
+    )
+  lastmodified = models.DateTimeField(
+    _('last modified'), auto_now=True, null=True, blank=True,
+    editable=False, db_index=True
+    )
+
+
+  def save(self, force_insert=False, force_update=False, using=DEFAULT_DB_ALIAS, update_fields=None):
+    '''
+    Every change to a user model is saved to all active scenarios.
+
+    The is_superuser and is_active fields can be different in each scenario.
+    All other fields are expected to be identical in each database.
+
+    Because of the logic in this method creating users directly in the
+    database tables is NOT a good idea!
+    '''
+    # We want to automatically give access to the django admin to all users
+    self.is_staff = True
+
+    scenarios = [ i['name'] for i in Scenario.objects.filter(status='In use').values('name') ]
+
+    # The same id of a new user MUST be identical in all databases.
+    # We manipulate the sequences, and correct if required.
+    newuser = False
+    tmp_is_active = self.is_active
+    tmp_is_superuser = self.is_superuser
+    if self.id is None:
+      newuser = True
+      self.id = 0
+      cur_seq = {}
+      for db in scenarios:
+        cursor = connections[db].cursor()
+        cursor.execute("select nextval('common_user_id_seq')")
+        cur_seq[db] = cursor.fetchone()[0]
+        if cur_seq[db] > self.id:
+          self.id = cur_seq[db]
+      for db in scenarios:
+        if cur_seq[db] != self.id:
+          cursor = connections[db].cursor()
+          cursor.execute("select setval('common_user_id_seq', %s)", [self.id - 1])
+      self.is_active = False
+      self.is_superuser = False
+
+    # Save only specific fields which we want to have identical across
+    # all scenario databases.
+    if not update_fields:
+      update_fields2 = [
+        'username', 'password', 'last_login', 'first_name', 'last_name',
+        'email', 'date_joined', 'language', 'theme', 'pagesize',
+        'horizonbuckets', 'horizonstart', 'horizonend', 'horizonunit',
+        'lastmodified', 'is_staff'
+        ]
+    else:
+      # Important is NOT to save the is_active and is_superuser fields.
+      update_fields2 = update_fields[:]  # Copy!
+      if 'is_active' in update_fields2:
+        update_fields2.remove('is_active')
+      if 'is_superuser' in update_fields:
+        update_fields2.remove('is_superuser')
+    if update_fields2 or newuser:
+      for db in scenarios:
+        if db == using:
+          continue
+        try:
+          with transaction.atomic(using=db, savepoint=True):
+            super(User, self).save(
+              force_insert=force_insert,
+              force_update=force_update,
+              using=db,
+              update_fields=update_fields2 if not newuser else None
+              )
+        except:
+          with transaction.atomic(using=db, savepoint=False):
+            newuser = True
+            self.is_active = False
+            self.is_superuser = False
+            super(User, self).save(
+              force_insert=force_insert,
+              force_update=force_update,
+              using=db
+              )
+            if settings.DEFAULT_USER_GROUP:
+                  grp = Group.objects.all().using(db).get_or_create(name=settings.DEFAULT_USER_GROUP)[0]
+                  self.groups.add(grp.id)  
+
+    # Continue with the regular save, as if nothing happened.
+    self.is_active = tmp_is_active
+    self.is_superuser = tmp_is_superuser
+    usr = super(User, self).save(
+      force_insert=force_insert,
+      force_update=force_update,
+      using=using,
+      update_fields=update_fields
+      )
+    if settings.DEFAULT_USER_GROUP and newuser:
+                  grp = Group.objects.all().using(using).get_or_create(name=settings.DEFAULT_USER_GROUP)[0]
+                  self.groups.add(grp.id)    
+    return usr
 
 
   def joined_age(self):
@@ -210,20 +383,29 @@ class User(AbstractUser):
 
   class Meta:
     db_table = "common_user"
+    # Translators: Translation included with Django
     verbose_name = _('user')
+    # Translators: Translation included with Django
     verbose_name_plural = _('users')
 
 
+@receiver(pre_delete, sender=User)
+def delete_user(sender, instance, **kwargs):
+  raise PermissionDenied
 class Comment(models.Model):
   id = models.AutoField(_('identifier'), primary_key=True)
-  content_type = models.ForeignKey(ContentType,
-          verbose_name=_('content type'),
-          related_name="content_type_set_for_%(class)s")
-  object_pk = models.TextField(_('object ID'))
-  content_object = generic.GenericForeignKey(ct_field="content_type", fk_field="object_pk")
-  comment = models.TextField(_('comment'), max_length=settings.COMMENT_MAX_LENGTH)
+  content_type = models.ForeignKey(
+    # Translators: Translation included with Django
+    ContentType, verbose_name=_('content type'),
+    related_name="content_type_set_for_%(class)s"
+    )
+  # Translators: Translation included with Django
+  object_pk = models.TextField(_('object id'))
+  content_object = GenericForeignKey(ct_field="content_type", fk_field="object_pk")
+  comment = models.TextField(_('comment'), max_length=3000)
+  # Translators: Translation included with Django
   user = models.ForeignKey(User, verbose_name=_('user'), blank=True, null=True, editable=False)
-  lastmodified = models.DateTimeField(_('last modified'), default=datetime.now(), editable=False)
+  lastmodified = models.DateTimeField(_('last modified'), default=timezone.now, editable=False)
 
   class Meta:
       db_table = "common_comment"
@@ -231,19 +413,38 @@ class Comment(models.Model):
       verbose_name = _('comment')
       verbose_name_plural = _('comments')
 
-  def __unicode__(self):
+  def __str__(self):
       return "%s: %s..." % (self.object_pk, self.comment[:50])
+
+  def get_admin_url(self):
+    """
+    Returns the admin URL to edit the object represented by this comment.
+    """
+    if self.content_type and self.object_pk:
+      url_name = 'data:%s_%s_change' % (self.content_type.app_label, self.content_type.model)
+      try:
+        return reverse(url_name, args=(quote(self.object_pk),))
+      except NoReverseMatch:
+        try:
+          url_name = 'admin:%s_%s_change' % (self.content_type.app_label, self.content_type.model)
+          return reverse(url_name, args=(quote(self.object_pk),))
+        except NoReverseMatch:
+          pass
+    return None
 
 
 class Bucket(AuditModel):
   # Create some dummy string for common bucket names to force them to be translated.
-  extra_strings = ( _('day'), _('week'), _('month'), _('quarter'), _('year'), _('telescope') )
+  extra_strings = ( _('day'), _('week'), _('month'), _('quarter'), _('year') )
 
   # Database fields
-  name = models.CharField(_('name'), max_length=settings.NAMESIZE, primary_key=True)
-  description = models.CharField(_('description'), max_length=settings.DESCRIPTIONSIZE, null=True, blank=True)
+  # Translators: Translation included with Django
+  name = models.CharField(_('name'), max_length=300, primary_key=True)
+  description = models.CharField(_('description'), max_length=500, null=True, blank=True)
+  level = models.IntegerField(_('level'), help_text=_('Higher values indicate more granular time buckets'))
 
-  def __unicode__(self): return str(self.name)
+  def __str__(self):
+    return str(self.name)
 
   class Meta:
     verbose_name = _('bucket')
@@ -255,16 +456,17 @@ class BucketDetail(AuditModel):
   # Database fields
   id = models.AutoField(_('identifier'), primary_key=True)
   bucket = models.ForeignKey(Bucket, verbose_name=_('bucket'), db_index=True)
-  name = models.CharField(_('name'), max_length=settings.NAMESIZE)
+  # Translators: Translation included with Django
+  name = models.CharField(_('name'), max_length=300, db_index=True)
   startdate = models.DateTimeField(_('start date'))
   enddate = models.DateTimeField(_('end date'))
 
-  def __unicode__(self): return u"%s %s" % (self.bucket.name or "", self.startdate)
+  def __str__(self):
+    return "%s %s" % (self.bucket.name or "", self.startdate)
 
   class Meta:
     verbose_name = _('bucket date')
     verbose_name_plural = _('bucket dates')
     db_table = 'common_bucketdetail'
     unique_together = (('bucket', 'startdate'),)
-    ordering = ['bucket','startdate']
-
+    ordering = ['bucket', 'startdate']

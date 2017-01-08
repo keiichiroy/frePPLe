@@ -1,5 +1,6 @@
+# -*- coding: utf-8 -*-
 #
-# Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba
+# Copyright (C) 2007-2015 by frePPLe bvba
 #
 # This library is free software; you can redistribute it and/or modify it
 # under the terms of the GNU Affero General Public License as published
@@ -29,53 +30,82 @@ ADMINS = (
     # ('Your Name', 'your_email@domain.com'),
 )
 
-# Make this unique, and don't share it with anybody.
-SECRET_KEY = '%@mzit!i8b*$zc&6oe$t-q^3wev96=kqj7mq(z&-$)#o^k##+_'
-
-# FrePPLe is tested with the following database backends:
-# 'oracle', 'postgresql_psycopg2', 'mysql' and 'sqlite3'.
 # ================= START UPDATED BLOCK BY WINDOWS INSTALLER =================
+# Make this unique, and don't share it with anybody.
+SECRET_KEY = '%@mzit!i8b*$zc&6oev96=RANDOMSTRING'
+
+# FrePPLe only supports the 'postgresql_psycopg2' database.
+# Create additional entries in this dictionary to define scenario schemas.
+
 DATABASES = {
   'default': {
-    'ENGINE': 'django.db.backends.sqlite3',
+    'ENGINE': 'django.db.backends.postgresql_psycopg2',
     'NAME': 'frepple',
     'USER': 'frepple',
     'PASSWORD': 'frepple',
-    'HOST': '',     # Set to empty string for localhost. Not used with sqlite3.
+    'HOST': '',     # Set to empty string for localhost.
     'OPTIONS': {},  # Backend specific configuration parameters.
-    'PORT': '',     # Set to empty string for default. Not used with sqlite3.
+    'PORT': '',     # Set to empty string for default.
+    'TEST': {
+      'NAME': 'test_frepple' # Database name used when running the test suite.
+      }
     },
   'scenario1': {
-    'ENGINE': 'django.db.backends.sqlite3',
+    'ENGINE': 'django.db.backends.postgresql_psycopg2',
     'NAME': 'scenario1',
     'USER': 'frepple',
     'PASSWORD': 'frepple',
-    'HOST': '',     # Set to empty string for localhost. Not used with sqlite3.
+    'HOST': '',     # Set to empty string for localhost.
     'OPTIONS': {},  # Backend specific configuration parameters.
-    'PORT': '',     # Set to empty string for default. Not used with sqlite3.
+    'PORT': '',     # Set to empty string for default.
+    'TEST': {
+      'NAME': 'test_scenario1' # Database name used when running the test suite.
+      }
     },
   'scenario2': {
-    'ENGINE': 'django.db.backends.sqlite3',
+    'ENGINE': 'django.db.backends.postgresql_psycopg2',
     'NAME': 'scenario2',
     'USER': 'frepple',
     'PASSWORD': 'frepple',
-    'HOST': '',     # Set to empty string for localhost. Not used with sqlite3.
+    'HOST': '',     # Set to empty string for localhost.
     'OPTIONS': {},  # Backend specific configuration parameters.
-    'PORT': '',     # Set to empty string for default. Not used with sqlite3.
+    'PORT': '',     # Set to empty string for default.
+    'TEST': {
+      'NAME': 'test_scenario2' # Database name used when running the test suite.
+      }
     },
   'scenario3': {
-    'ENGINE': 'django.db.backends.sqlite3',
+    'ENGINE': 'django.db.backends.postgresql_psycopg2',
     'NAME': 'scenario3',
     'USER': 'frepple',
     'PASSWORD': 'frepple',
-    'HOST': '',     # Set to empty string for localhost. Not used with sqlite3.
+    'HOST': '',     # Set to empty string for localhost.
     'OPTIONS': {},  # Backend specific configuration parameters.
-    'PORT': '',     # Set to empty string for default. Not used with sqlite3.
+    'PORT': '',     # Set to empty string for default.
+    'TEST': {
+      'NAME': 'test_scenario3' # Database name used when running the test suite.
+      }
     },
   }
 
 LANGUAGE_CODE = 'en'
 # ================= END UPDATED BLOCK BY WINDOWS INSTALLER =================
+
+# If passwords are set in this file they will be used instead of the ones set in the database parameters table
+OODO_PASSWORDS = {
+  'default': '',
+  'scenario1': '',
+  'scenario2': '',
+  'scenario3': ''
+  }
+
+# If passwords are set in this file they will be used instead of the ones set in the database parameters table
+OPENBRAVO_PASSWORDS = {
+  'default': '',
+  'scenario1': '',
+  'scenario2': '',
+  'scenario3': ''
+  }
 
 # Keep each database connection alive for 10 minutes.
 CONN_MAX_AGE = 600
@@ -103,21 +133,28 @@ ALLOWED_HOSTS = [ '*' ]
 # system time zone.
 TIME_ZONE = 'Europe/Brussels'
 
-# Internationalization is switched on by default.
-# Language code for this installation. All choices can be found here:
-# http://www.w3.org/TR/REC-html40/struct/dirlang.html#langcodes
-# http://blogs.law.harvard.edu/tech/stories/storyReader$15
+# A boolean that specifies if datetimes will be timezone-aware by default or not.
+# If this is set to True, we will use timezone-aware datetimes internally.
+# Otherwise, we use naive datetimes in local time.
+USE_TZ = False     # TODO Test with this parameter set to True
+
+# Supported language codes, sorted by language code.
+# Language names and codes should match the ones in Django.
+# You can see the list supported by Django at:
+#    https://github.com/django/django/blob/master/django/conf/global_settings.py
 ugettext = lambda s: s
 LANGUAGES = (
   ('en', ugettext('English')),
+  ('es', ugettext('Spanish')),
   ('fr', ugettext('French')),
   ('it', ugettext('Italian')),
+  ('ja', ugettext('Japanese')),
   ('nl', ugettext('Dutch')),
+  ('pt', ugettext('Portuguese')),
+  ('pt-br', ugettext('Brazilian Portuguese')),
+  ('zh-cn', ugettext('Simplified Chinese')),
   ('zh-tw', ugettext('Traditional Chinese')),
 )
-
-# Make this unique, and don't share it with anybody.
-SECRET_KEY = '%@mzit!i8b*$zc&6oe$t-q^3wev96=kqj7mq(z&-$)#o^k##+_'
 
 # List of callables that know how to import templates from various sources.
 TEMPLATE_LOADERS = (
@@ -130,13 +167,11 @@ TEMPLATE_LOADERS = (
 MIDDLEWARE_CLASSES = (
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    # Uncomment for external authentication.
-    # The authentication backend RemoteUserBackend also needs to be activated.
-    #'django.contrib.auth.middleware.RemoteUserMiddleware',
+    'freppledb.common.middleware.MultiDBMiddleware',
     'freppledb.common.middleware.LocaleMiddleware',
-    'freppledb.common.middleware.DatabaseSelectionMiddleware',
     'django.middleware.common.CommonMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
 )
 
 CURRENCY=("","$")    # Prefix and suffix for currency strings
@@ -150,13 +185,66 @@ INSTALLED_APPS = (
     'django.contrib.admin',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'freppledb.boot',
+    'freppledb.odoo',
+    'freppledb.openbravo',
     'freppledb.input',
     'freppledb.output',
     'freppledb.execute',
     'freppledb.common',
-    #'openerp',
+    'rest_framework',
 )
 
+# Custom attribute fields in the database
+# After each change of this setting, the following commands MUST be
+# executed to create the fields in the database(s).
+#   frepplectl makemigrations
+#   frepplectl migrate     OR     frepplectl migrate --database DATABASE
+#
+# The commands will create migration files to keep track of the changes.
+# You MUST use the above commands and the generated migration scripts. Manually
+# changing the database schema will work in simple cases, but will get you
+# in trouble in the long run!
+# You'll need write permissions in the folder where these are stored.
+#
+# See https://docs.djangoproject.com/en/1.8/topics/migrations/ for the
+# details on the migration files. For complex changes to the attributes
+# an administrator may need to edit, delete or extend these files.
+#
+# Supported field types are 'string', 'boolean', 'number', 'integer',
+# 'date', 'datetime', 'duration' and 'time'.
+# Example:
+#  ATTRIBUTES = [
+#    ('freppledb.input.models.Item', [
+#      ('attribute1', ugettext('attribute_1'), 'string'),
+#      ('attribute2', ugettext('attribute_2'), 'boolean'),
+#      ('attribute3', ugettext('attribute_3'), 'date'),
+#      ('attribute4', ugettext('attribute_4'), 'datetime'),
+#      ('attribute5', ugettext('attribute_5'), 'number'),
+#      ]),
+#    ('freppledb.input.models.Operation', [
+#      ('attribute1', ugettext('attribute_1'), 'string'),
+#      ])
+#    ]
+ATTRIBUTES = []
+
+REST_FRAMEWORK = {
+  # Use Django's standard `django.contrib.auth` permissions,
+  # or allow read-only access for unauthenticated users.
+  'DEFAULT_PERMISSION_CLASSES': [
+    'rest_framework.permissions.DjangoModelPermissions'
+  ],
+  'DEFAULT_AUTHENTICATION_CLASSES': (
+    'rest_framework.authentication.BasicAuthentication',
+    'rest_framework.authentication.SessionAuthentication',
+  ),
+  'DEFAULT_RENDERER_CLASSES': (
+    'rest_framework.renderers.JSONRenderer',
+    'freppledb.common.api.renderers.freppleBrowsableAPI',
+  )
+}
+
+import django.contrib.admindocs
 LOCALE_PATHS = (
     os.path.normpath(os.path.join(FREPPLE_HOME,'locale','django')),
     os.path.normpath(os.path.join(FREPPLE_HOME,'locale','auth')),
@@ -165,6 +253,7 @@ LOCALE_PATHS = (
     os.path.normpath(os.path.join(FREPPLE_HOME,'locale','admin')),
     os.path.normpath(os.path.join(FREPPLE_HOME,'locale','messages')),
     os.path.normpath(os.path.join(FREPPLE_APP,'freppledb','locale')),
+    os.path.normpath(os.path.join(os.path.dirname(django.contrib.admindocs.__file__),'locale')),
 )
 
 TEMPLATE_DIRS = (
@@ -229,12 +318,10 @@ LOGGING = {
     }
 }
 
-# To use a customized authentication backend.
+# Backends for user authentication and authorization.
+# FrePPLe currently supports only this custom one.
 AUTHENTICATION_BACKENDS = (
-    # Uncomment for external authentication.
-    # The middleware RemoteUserMiddleware also needs to be activated.
-    #"django.contrib.auth.backends.RemoteUserBackend",
-    "freppledb.common.auth.EmailBackend",
+    "freppledb.common.auth.MultiDBBackend",
 )
 
 # IP address of the machine you are browsing from. When logging in from this
@@ -246,36 +333,53 @@ INTERNAL_IPS = ( '127.0.0.1', )
 DEFAULT_CHARSET = 'utf-8'
 
 # Default characterset for writing and reading CSV files.
-# We are assuming here that the default encoding of clients is the same as the server.
-# If the server is on Linux and the clients are using Windows, this guess will not be good.
-# For Windows clients you should set this to the encoding that is better suited for Excel or
-# other office tools.
-#    Windows - western europe -> 'cp1252'
-CSV_CHARSET = locale.getdefaultlocale()[1]
+# FrePPLe versions < 3 used the default encoding of the server as default.
+# From version 3 onwards the default is UTF-8.
+CSV_CHARSET = 'utf-8' # locale.getdefaultlocale()[1]
+
+# A list of available user interface themes.
+# If multiple themes are configured in this list, the user's can change their
+# preferences among the ones listed here.
+# If the list contains only a single value, the preferences screen will not
+# display users an option to choose the theme.
+THEMES = [
+  'earth', 'grass', 'lemon', 'snow', 'strawberry', 'water'
+  ]
+
+# A default user-group to which new users are automatically added
+DEFAULT_USER_GROUP = None
 
 # The default user interface theme
-DEFAULT_THEME = 'sunny'
+DEFAULT_THEME = 'grass'
 
 # The default number of records to pull from the server as a page
 DEFAULT_PAGESIZE = 100
 
-# The size of the "name" key field of the database models
-NAMESIZE = 60
-
-# The size of the "description" field of the database models
-DESCRIPTIONSIZE = 200
-
-# The size of the "category" and "subcategory" fields of the database models
-CATEGORYSIZE = 20
-
-# The number of digits for a number in the database models
-MAX_DIGITS = 15
-
-# The number of decimal places for a number in the database models
-DECIMAL_PLACES = 4
-
-# The maximum allowed length of a comment
-COMMENT_MAX_LENGTH = 3000
+# Configuration of the default dashboard
+DEFAULT_DASHBOARD = [
+  {'width':'50%', 'widgets':[
+    ("welcome",{}),
+    ("resource_queue",{"limit":20}),
+    ("purchase_queue",{"limit":20}),
+    ("shipping_queue",{"limit":20}),
+  ]},
+  {'width':'25%', 'widgets':[
+    ("recent_actions",{"limit":10}),
+    ("recent_comments",{"limit":10}),
+    ("execute",{}),
+    ("alerts",{}),
+    ("late_orders",{"limit":20}),
+    ("short_orders",{"limit":20}),
+    ("purchase_order_analysis",{"limit":20}),
+  ]},
+  {'width':'25%', 'widgets':[
+    ("news",{}),
+    ('resource_utilization',{"limit":5, "medium": 80, "high": 90}),
+    ("delivery_performance",{"green": 90, "yellow": 80}),
+    ("inventory_by_location",{"limit":5}),
+    ("inventory_by_item",{"limit":10}),
+  ]},
+  ]
 
 # Port number for the CherryPy web server
 PORT = 8000

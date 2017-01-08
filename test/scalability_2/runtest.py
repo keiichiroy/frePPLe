@@ -1,6 +1,6 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 #
-# Copyright (C) 2007 by Johan De Taeye, frePPLe bvba
+# Copyright (C) 2007 by frePPLe bvba
 #
 # This library is free software; you can redistribute it and/or modify it
 # under the terms of the GNU Affero General Public License as published
@@ -36,7 +36,6 @@
 # path parameter.
 # In each cluster a single item is defined, and a parametrizable number of
 # demands is placed on the cluster.
-from __future__ import print_function
 import os, os.path, sys, random
 
 
@@ -99,9 +98,9 @@ def create (cluster, demand, level):
         "</flow></flows></operation>") % (i, i, level+1), file=out)
   print("</operations>\n<operationplans>", file=out)
   for i in range(cluster):
-    print(("<operationplan id=\"%d\" operation=\"Supply C%d\" " +
+    print(("<operationplan id=\"%d\" " +
         "start=\"2007-05-01T00:00:00\" quantity=\"%d\" " +
-        "locked=\"true\" />") % (i+1, i, demand), file=out)
+        "locked=\"true\"><operation name=\"Supply C%d\"/></operationplan>") % (i+2, demand, i), file=out)
   print("</operationplans>", file=out)
 
   # Tail of the output file

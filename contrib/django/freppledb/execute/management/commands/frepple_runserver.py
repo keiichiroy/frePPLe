@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba
+# Copyright (C) 2007-2013 by frePPLe bvba
 #
 # This library is free software; you can redistribute it and/or modify it
 # under the terms of the GNU Affero General Public License as published
@@ -14,8 +14,8 @@
 # You should have received a copy of the GNU Affero General Public
 # License along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
-from __future__ import print_function
-import sys, socket
+import socket
+import sys
 from threading import Thread
 from optparse import make_option
 from cherrypy.wsgiserver import CherryPyWSGIServer
@@ -32,21 +32,24 @@ class Command(BaseCommand):
 
   help = '''
     Runs a multithreaded web server for frePPLe.
-
-    Because of the multithreading it is is more performant than the default
-    development web server bundled with django.
-    However, it should still only be used for configurations with a single user,
-    and is not a full alternative to using Apache + mod_wsgi.
   '''
 
   option_list = BaseCommand.option_list + (
-    make_option("--port", dest="port", type="int",
-                  help="Port number of the server."),
-    make_option("--address", dest="address", type="string",
-                  help="IP address for the server to listen."),
+    make_option(
+      "--port", dest="port", type="int",
+      help="Port number of the server."
+      ),
+    make_option(
+      "--address", dest="address", type="string",
+      help="IP address for the server to listen."
+      ),
+    make_option(
+      "--threads", dest="threads", type="int",
+      help="Number of server threads (default: 25)."
+      ),
     )
 
-  requires_model_validation = False
+  requires_system_checks = False
 
   def get_version(self):
     return VERSION
@@ -57,6 +60,14 @@ class Command(BaseCommand):
       port = int(options['port'] or settings.PORT)
     else:
       port = settings.PORT
+
+    # Determine the number of threads
+    if 'threads' in options:
+      threads = int(options['threads'] or 25)
+      if threads < 1:
+        raise Exception("Invalid number of threads: %s" % threads)
+    else:
+      threads = 25
 
     # Determine the IP-address to listen on:
     # - either as command line argument
@@ -81,7 +92,6 @@ class Command(BaseCommand):
         print('    http://%s:%s/' % (ip, port))
     else:
       print('    http://%s:%s/' % (address, port))
-    print('\nThree users are created by default: "admin", "frepple" and "guest" (the default password is equal to the user name)\n')
     print('Quit the server with CTRL-C.\n')
 
     # Start a separate thread that will check for updates
@@ -89,8 +99,10 @@ class Command(BaseCommand):
     CheckUpdates().start()
 
     # Run the WSGI server
-    server = CherryPyWSGIServer((address, port),
-      StaticFilesHandler(WSGIHandler())
+    server = CherryPyWSGIServer(
+      (address, port),
+      StaticFilesHandler(WSGIHandler()),
+      numthreads=threads
       )
     # Want SSL support? Just set these attributes apparently, but I haven't tested or verified this
     #  server.ssl_certificate = <filename>
@@ -104,16 +116,15 @@ class Command(BaseCommand):
 class CheckUpdates(Thread):
   def run(self):
     try:
-      import urllib
-      import urllib2
+      import urllib.request, urllib.parse
       import re
       values = {
-        'platform' : sys.platform,
-        'executable' : sys.executable,
-        'version' : VERSION,
+        'platform': sys.platform,
+        'executable': sys.executable,
+        'version': VERSION,
         }
-      request = urllib2.Request('http://www.frepple.com/usage.php?' + urllib.urlencode(values))
-      response = urllib2.urlopen(request).read()
+      request = urllib.request.Request('http://www.frepple.com/usage.php?' + urllib.parse.urlencode(values))
+      response = urllib.request.urlopen(request).read()
       match = re.search("<release>(.*)</release>", response)
       release = match.group(1)
       if release > VERSION:

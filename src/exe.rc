@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba                 *
+ * Copyright (C) 2007-2015 by frePPLe bvba                 *
  *                                                                         *
  * This library is free software; you can redistribute it and/or modify it *
  * under the terms of the GNU Affero General Public License as published   *
@@ -28,8 +28,8 @@ IDI_ICON     ICON       "frepple.ico"
 
 // Version
 VS_VERSION_INFO VERSIONINFO
-  FILEVERSION 2,1,0,0
-  PRODUCTVERSION 2,1,0,0
+  FILEVERSION 3,1,0,0
+  PRODUCTVERSION 3,1,0,0
   FILEFLAGSMASK 0x17L
 #ifdef _DEBUG
   FILEFLAGS 0x1L
@@ -46,14 +46,14 @@ BEGIN
     BEGIN
       VALUE "CompanyName", "frePPLe"
       VALUE "FileDescription",
-            "frePPLe - an open source Production Planning solution"
-      VALUE "FileVersion", "2, 1, 0, 0"
+            "frePPLe - open source Production PLanning"
+      VALUE "FileVersion", "3, 1, 0, 0"
       VALUE "InternalName", "frepple.exe"
       VALUE "LegalCopyright",
             "Licensed under AGPL - Affero General Public License"
       VALUE "OriginalFilename", "frepple.exe"
       VALUE "ProductName", "frePPLe"
-      VALUE "ProductVersion", "2, 1, 0, 0"
+      VALUE "ProductVersion", "3, 1, 0, 0"
     END
   END
   BLOCK "VarFileInfo"

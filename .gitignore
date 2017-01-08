@@ -58,14 +58,14 @@ build
 *.out
 *.stackdump
 
-# Extra 
-*.sqlite
+# Extra
 /bin/mod_forecast.xsd
 /bin/mod_lpsolver.xsd
 /doc/html
 /test/*/output.*.xml
 
 # Eclipse
+.settings
 .cproject
 .project
 .pydevproject

@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba                 *
+ * Copyright (C) 2007-2015 by frePPLe bvba                                 *
  *                                                                         *
  * This library is free software; you can redistribute it and/or modify it *
  * under the terms of the GNU Affero General Public License as published   *
@@ -123,7 +123,7 @@ DECLARE_EXPORT PyObject* readXMLdata(PyObject *self, PyObject *args)
 //
 
 
-PyObject* saveXMLfile(PyObject* self, PyObject* args)
+DECLARE_EXPORT PyObject* saveXMLfile(PyObject* self, PyObject* args)
 {
   // Pick up arguments
   char *filename;
@@ -135,19 +135,19 @@ PyObject* saveXMLfile(PyObject* self, PyObject* args)
   Py_BEGIN_ALLOW_THREADS   // Free Python interpreter for other threads
   try
   {
-    XMLOutputFile o(filename);
+    XMLSerializerFile o(filename);
     if (content)
     {
-      if (!strcmp(content,"STANDARD"))
-        o.setContentType(XMLOutput::STANDARD);
-      else if (!strcmp(content,"PLAN"))
-        o.setContentType(XMLOutput::PLAN);
-      else if (!strcmp(content,"PLANDETAIL"))
-        o.setContentType(XMLOutput::PLANDETAIL);
+      if (!strcmp(content, "BASE"))
+        o.setContentType(BASE);
+      else if (!strcmp(content, "PLAN"))
+        o.setContentType(PLAN);
+      else if (!strcmp(content, "DETAIL"))
+        o.setContentType(DETAIL);
       else
         throw DataException("Invalid content type '" + string(content) + "'");
     }
-    o.writeElementWithHeader(Tags::tag_plan, &Plan::instance());
+    o.writeElementWithHeader(Tags::plan, &Plan::instance());
   }
   catch (...)
   {
@@ -191,7 +191,7 @@ DECLARE_EXPORT PyObject* savePlan(PyObject* self, PyObject* args)
             oo=gbuf->getFlowPlans().begin();
             oo!=gbuf->getFlowPlans().end();
             ++oo)
-          if (oo->getType() == 1 && oo->getQuantity() != 0.0)
+          if (oo->getEventType() == 1 && oo->getQuantity() != 0.0)
           {
             textoutput << "BUFFER\t" << *gbuf << '\t'
                 << oo->getDate() << '\t'
@@ -206,10 +206,9 @@ DECLARE_EXPORT PyObject* savePlan(PyObject* self, PyObject* args)
     {
       if (!gdem->getHidden())
       {
-        for (Demand::OperationPlan_list::const_iterator
-            pp = gdem->getDelivery().begin();
-            pp != gdem->getDelivery().end();
-            ++pp)
+        const Demand::OperationPlanList &deli = gdem->getDelivery();
+        for (Demand::OperationPlanList::const_iterator pp = deli.begin();
+            pp != deli.end(); ++pp)
           textoutput << "DEMAND\t" << (*gdem) << '\t'
               << (*pp)->getDates().getEnd() << '\t'
               << (*pp)->getQuantity() << endl;
@@ -225,7 +224,7 @@ DECLARE_EXPORT PyObject* savePlan(PyObject* self, PyObject* args)
             qq=gres->getLoadPlans().begin();
             qq!=gres->getLoadPlans().end();
             ++qq)
-          if (qq->getType() == 1 && qq->getQuantity() != 0.0)
+          if (qq->getEventType() == 1 && qq->getQuantity() != 0.0)
           {
             textoutput << "RESOURCE\t" << *gres << '\t'
                 << qq->getDate() << '\t'
@@ -238,20 +237,26 @@ DECLARE_EXPORT PyObject* savePlan(PyObject* self, PyObject* args)
     for (OperationPlan::iterator rr = OperationPlan::begin();
         rr != OperationPlan::end(); ++rr)
     {
-      if (rr->getOperation()->getHidden()) continue;
+      // TODO if-condition here isn't very clean and generic
+      if (rr->getOperation()->getHidden()
+        && rr->getOperation()->getType() != *OperationItemSupplier::metadata
+        && rr->getOperation()->getType() != *OperationItemDistribution::metadata)
+          continue;
       textoutput << "OPERATION\t" << rr->getOperation() << '\t'
           << rr->getDates().getStart() << '\t'
           << rr->getDates().getEnd() << '\t'
-          << rr->getQuantity() << endl;
+          << rr->getQuantity()
+          << (rr->getLocked() ? "\tlocked" : "")
+          << endl;
     }
 
     // Write the problem summary.
-    for (Problem::const_iterator gprob = Problem::begin();
-        gprob != Problem::end(); ++gprob)
+    Problem::iterator gprob;
+    while (Problem *p = gprob.next())
     {
-      textoutput << "PROBLEM\t" << gprob->getType().type << '\t'
-          << gprob->getDescription() << '\t'
-          << gprob->getDates() << endl;
+      textoutput << "PROBLEM\t" << p->getType().type << '\t'
+          << p->getDescription() << '\t'
+          << p->getDates() << endl;
     }
 
     // Write the constraint summary
@@ -260,12 +265,13 @@ DECLARE_EXPORT PyObject* savePlan(PyObject* self, PyObject* args)
     {
       if (!gdem->getHidden())
       {
-        for (Problem::const_iterator i = gdem->getConstraints().begin();
-            i != gdem->getConstraints().end();
-            ++i)
+        Problem::iterator i = gdem->getConstraints().begin();
+        while (Problem *prob = i.next())
+        {
           textoutput << "DEMAND CONSTRAINT\t" << (*gdem) << '\t'
-              << i->getDescription() << '\t'
-              << i->getDates() << '\t' << endl;
+              << prob->getDescription() << '\t'
+              << prob->getDates() << '\t' << endl;
+        }
       }
     }
 
@@ -390,6 +396,9 @@ DECLARE_EXPORT CommandDeleteOperationPlan::CommandDeleteOperationPlan
     throw DataException("Can't delete a locked operationplan");
   }
 
+  // Deletion always should apply to a top level operationplan
+  opplan = opplan->getTopOwner();
+
   // Delete all flowplans and loadplans, and unregister from operationplan list
   redo();
 }
@@ -409,7 +418,7 @@ DECLARE_EXPORT PyObject* eraseModel(PyObject* self, PyObject* args)
 
   // Validate the argument
   bool deleteStaticModel = false;
-  if (obj) deleteStaticModel = PythonObject(obj).getBool();
+  if (obj) deleteStaticModel = PythonData(obj).getBool();
 
   // Execute and catch exceptions
   Py_BEGIN_ALLOW_THREADS   // Free Python interpreter for other threads
@@ -429,16 +438,21 @@ DECLARE_EXPORT PyObject* eraseModel(PyObject* self, PyObject* args)
       Location::clear();
       Customer::clear();
       Calendar::clear();
-      Solver::clear();
+      Supplier::clear();
       Item::clear();
+      Plan::instance().setName("");
+      Plan::instance().setDescription("");
       // The setup operation is a static singleton and should always be around
-      OperationSetup::setupoperation = Operation::add(new OperationSetup("setup operation"));
+      OperationSetup::setupoperation = new OperationSetup();
+      OperationSetup::setupoperation->setName("setup operation");
     }
     else
+    {
       // Delete the operationplans only
       for (Operation::iterator gop = Operation::begin();
           gop != Operation::end(); ++gop)
         gop->deleteOperationPlans();
+    }
   }
   catch (...)
   {
@@ -462,71 +476,79 @@ DECLARE_EXPORT PyObject* printModelSize(PyObject* self, PyObject* args)
   Py_BEGIN_ALLOW_THREADS
 
   // Execute and catch exceptions
-  size_t count, memsize;
   try
   {
+    size_t count, memsize;
 
     // Intro
     logger << endl << "Size information of frePPLe " << PACKAGE_VERSION
         << " (" << __DATE__ << ")" << endl << endl;
 
-    // Print current locale
-#if defined(HAVE_SETLOCALE) || defined(_MSC_VER)
-    logger << "Locale: " << setlocale(LC_ALL,NULL) << endl << endl;
-#else
-    logger << endl;
-#endif
-
     // Print loaded modules
     Environment::printModules();
 
     // Print the number of clusters
-    logger << "Clusters: " << HasLevel::getNumberOfClusters()
-        << " (hanging: " << HasLevel::getNumberOfHangingClusters() << ")"
-        << endl << endl;
+    logger << "Clusters: " << HasLevel::getNumberOfClusters() << endl << endl;
 
     // Header for memory size
     logger << "Memory usage:" << endl;
-    logger << "Model        \tNumber\tMemory" << endl;
-    logger << "-----        \t------\t------" << endl;
+    logger << "Model             \tCount\tMemory" << endl;
+    logger << "-----             \t-----\t------" << endl;
 
     // Plan
     size_t total = Plan::instance().getSize();
-    logger << "Plan         \t1\t"<< Plan::instance().getSize() << endl;
+    logger << "Plan              \t1\t"<< Plan::instance().getSize() << endl;
 
     // Locations
     memsize = 0;
     for (Location::iterator l = Location::begin(); l != Location::end(); ++l)
       memsize += l->getSize();
-    logger << "Location     \t" << Location::size() << "\t" << memsize << endl;
+    logger << "Location          \t" << Location::size() << "\t" << memsize << endl;
     total += memsize;
 
     // Customers
     memsize = 0;
     for (Customer::iterator c = Customer::begin(); c != Customer::end(); ++c)
       memsize += c->getSize();
-    logger << "Customer     \t" << Customer::size() << "\t" << memsize << endl;
+    logger << "Customer          \t" << Customer::size() << "\t" << memsize << endl;
+    total += memsize;
+
+    // Suppliers and supplier items
+    size_t countItemSuppliers(0), memItemSuppliers(0);
+    memsize = 0;
+    for (Supplier::iterator c = Supplier::begin(); c != Supplier::end(); ++c)
+    {
+      memsize += c->getSize();
+      for (Supplier::itemlist::const_iterator rs = c->getItems().begin();
+          rs != c->getItems().end(); ++rs)
+      {
+        ++countItemSuppliers;
+        memItemSuppliers += rs->getSize();
+      }
+    }
+    logger << "Supplier          \t" << Supplier::size() << "\t" << memsize << endl;
+    logger << "Supplier items    \t" << countItemSuppliers << "\t" << memItemSuppliers << endl;
     total += memsize;
 
     // Buffers
     memsize = 0;
     for (Buffer::iterator b = Buffer::begin(); b != Buffer::end(); ++b)
       memsize += b->getSize();
-    logger << "Buffer       \t" << Buffer::size() << "\t" << memsize << endl;
+    logger << "Buffer            \t" << Buffer::size() << "\t" << memsize << endl;
     total += memsize;
 
     // Setup matrices
     memsize = 0;
     for (SetupMatrix::iterator s = SetupMatrix::begin(); s != SetupMatrix::end(); ++s)
       memsize += s->getSize();
-    logger << "Setup matrix \t" << SetupMatrix::size() << "\t" << memsize << endl;
+    logger << "Setup matrix      \t" << SetupMatrix::size() << "\t" << memsize << endl;
     total += memsize;
 
     // Resources
     memsize = 0;
     for (Resource::iterator r = Resource::begin(); r != Resource::end(); ++r)
       memsize += r->getSize();
-    logger << "Resource     \t" << Resource::size() << "\t" << memsize << endl;
+    logger << "Resource          \t" << Resource::size() << "\t" << memsize << endl;
     total += memsize;
 
     // Skills and resourceskills
@@ -535,14 +557,14 @@ DECLARE_EXPORT PyObject* printModelSize(PyObject* self, PyObject* args)
     for (Skill::iterator sk = Skill::begin(); sk != Skill::end(); ++sk)
     {
       memsize += sk->getSize();
-      for (Skill::resourcelist::const_iterator rs = sk->getResources().begin();
-          rs != sk->getResources().end(); ++rs)
+      Skill::resourcelist::const_iterator iter = sk->getResources();
+      while(ResourceSkill *r = iter.next())
       {
         ++countResourceSkills;
-        memResourceSkills += rs->getSize();
+        memResourceSkills += r->getSize();
       }
     }
-    logger << "Skill     \t" << Skill::size() << "\t" << memsize << endl;
+    logger << "Skill             \t" << Skill::size() << "\t" << memsize << endl;
     logger << "ResourceSkill     \t" << countResourceSkills << "\t" << memResourceSkills << endl;
     total += memsize;
 
@@ -565,23 +587,23 @@ DECLARE_EXPORT PyObject* printModelSize(PyObject* self, PyObject* args)
         memLoads += ld->getSize();
       }
     }
-    logger << "Operation    \t" << Operation::size() << "\t" << memsize << endl;
-    logger << "Flow         \t" << countFlows << "\t" << memFlows  << endl;
-    logger << "Load         \t" << countLoads << "\t" << memLoads  << endl;
+    logger << "Operation         \t" << Operation::size() << "\t" << memsize << endl;
+    logger << "Flow              \t" << countFlows << "\t" << memFlows  << endl;
+    logger << "Load              \t" << countLoads << "\t" << memLoads  << endl;
     total += memsize + memFlows + memLoads;
 
     // Calendars (which includes the buckets)
     memsize = 0;
     for (Calendar::iterator cl = Calendar::begin(); cl != Calendar::end(); ++cl)
       memsize += cl->getSize();
-    logger << "Calendar     \t" << Calendar::size() << "\t" << memsize  << endl;
+    logger << "Calendar          \t" << Calendar::size() << "\t" << memsize  << endl;
     total += memsize;
 
     // Items
     memsize = 0;
     for (Item::iterator i = Item::begin(); i != Item::end(); ++i)
       memsize += i->getSize();
-    logger << "Item         \t" << Item::size() << "\t" << memsize  << endl;
+    logger << "Item              \t" << Item::size() << "\t" << memsize  << endl;
     total += memsize;
 
     // Demands
@@ -590,53 +612,54 @@ DECLARE_EXPORT PyObject* printModelSize(PyObject* self, PyObject* args)
     for (Demand::iterator dm = Demand::begin(); dm != Demand::end(); ++dm)
     {
       memsize += dm->getSize();
-      for (Problem::const_iterator cstrnt(dm->getConstraints().begin());
-        cstrnt != dm->getConstraints().end(); ++cstrnt)
+      Problem::iterator cstrnt_iter(dm->getConstraints().begin());
+      while (Problem *cstrnt = cstrnt_iter.next())
       {
         ++c_count;
         c_memsize += cstrnt->getSize();
       }
     }
-    logger << "Demand       \t" << Demand::size() << "\t" << memsize  << endl;
-    logger << "Constraints  \t" << c_count << "\t" << c_memsize  << endl;
+    logger << "Demand            \t" << Demand::size() << "\t" << memsize  << endl;
+    logger << "Constraints       \t" << c_count << "\t" << c_memsize  << endl;
     total += memsize + c_memsize;
 
     // Operationplans
-    size_t countloadplans(0), countflowplans(0);
+    size_t countloadplans(0), countflowplans(0), memloadplans(0), memflowplans(0);
     memsize = count = 0;
     for (OperationPlan::iterator j = OperationPlan::begin();
         j!=OperationPlan::end(); ++j)
     {
       ++count;
-      memsize += sizeof(*j);
+      memsize += j->getSize();
       countloadplans += j->sizeLoadPlans();
       countflowplans += j->sizeFlowPlans();
     }
     total += memsize;
-    logger << "OperationPlan\t" << count << "\t" << memsize << endl;
+    logger << "OperationPlan     \t" << count << "\t" << memsize << endl;
 
     // Flowplans
     memsize = countflowplans * sizeof(FlowPlan);
     total +=  memsize;
-    logger << "FlowPlan     \t" << countflowplans << "\t" << memsize << endl;
+    logger << "FlowPlan          \t" << countflowplans << "\t" << memsize << endl;
 
     // Loadplans
     memsize = countloadplans * sizeof(LoadPlan);
     total +=  memsize;
-    logger << "LoadPlan     \t" << countloadplans << "\t" << memsize << endl;
+    logger << "LoadPlan          \t" << countloadplans << "\t" << memsize << endl;
 
     // Problems
     memsize = count = 0;
-    for (Problem::const_iterator pr = Problem::begin(); pr!=Problem::end(); ++pr)
+    Problem::iterator piter;
+    while (Problem *pr = piter.next())
     {
       ++count;
       memsize += pr->getSize();
     }
     total += memsize;
-    logger << "Problem      \t" << count << "\t" << memsize << endl;
+    logger << "Problem           \t" << count << "\t" << memsize << endl;
 
     // TOTAL
-    logger << "Total        \t\t" << total << endl << endl;
+    logger << "Total             \t\t" << total << endl << endl;
   }
   catch (...)
   {

@@ -1,26 +1,39 @@
-;(function($){
 /**
- * jqGrid English Translation
+ * jqGrid Indonesian Translation
  * Tony Tomov tony@trirand.com
  * http://trirand.com/blog/ 
  * Dual licensed under the MIT and GPL licenses:
  * http://www.opensource.org/licenses/mit-license.php
  * http://www.gnu.org/licenses/gpl.html
 **/
-$.jgrid = $.jgrid || {};
-$.extend($.jgrid,{
+
+/*jslint white: true */
+/*global jQuery */
+(function($){
+"use strict";
+var locInfo = {
+	isRTL: false,
 	defaults : {
 		recordtext: "Data {0} - {1} dari {2}",
 		emptyrecords: "Tidak ada data",
 		loadtext: "Memuat...",
-		pgtext : "Halaman {0} dari {1}"
+		pgtext : "Halaman {0} dari {1}",
+		pgfirst : "First Page",
+		pglast : "Last Page",
+		pgnext : "Next Page",
+		pgprev : "Previous Page",
+		pgrecs : "Records per Page",
+		showhide: "Toggle Expand Collapse Grid",
+		savetext: "Menyimpan..."
 	},
 	search : {
 		caption: "Pencarian",
 		Find: "Cari !",
 		Reset: "Segarkan",
-		odata: [{ oper:'eq', text:"sama dengan"},{ oper:'ne', text:"tidak sama dengan"},{ oper:'lt', text:"kurang dari"},{ oper:'le', text:"kurang dari atau sama dengan"},{ oper:'gt', text:"lebih besar"},{ oper:'ge', text:"lebih besar atau sama dengan"},{ oper:'bw', text:"dimulai dengan"},{ oper:'bn', text:"tidak dimulai dengan"},{ oper:'in', text:"di dalam"},{ oper:'ni', text:"tidak di dalam"},{ oper:'ew', text:"diakhiri dengan"},{ oper:'en', text:"tidak diakhiri dengan"},{ oper:'cn', text:"mengandung"},{ oper:'nc', text:"tidak mengandung"}],
-		groupOps: [	{ op: "AND", text: "all" },	{ op: "OR",  text: "any" }	]
+		odata: [{ oper:'eq', text:"sama dengan"},{ oper:'ne', text:"tidak sama dengan"},{ oper:'lt', text:"kurang dari"},{ oper:'le', text:"kurang dari atau sama dengan"},{ oper:'gt', text:"lebih besar"},{ oper:'ge', text:"lebih besar atau sama dengan"},{ oper:'bw', text:"dimulai dengan"},{ oper:'bn', text:"tidak dimulai dengan"},{ oper:'in', text:"di dalam"},{ oper:'ni', text:"tidak di dalam"},{ oper:'ew', text:"diakhiri dengan"},{ oper:'en', text:"tidak diakhiri dengan"},{ oper:'cn', text:"mengandung"},{ oper:'nc', text:"tidak mengandung"},{ oper:'nu', text:'is null'},{ oper:'nn', text:'is not null'}],
+		groupOps: [	{ op: "AND", text: "all" },	{ op: "OR",  text: "any" }	],
+		operandTitle : "Click to select search operation.",
+		resetTitle : "Reset Search Value"
 	},
 	edit : {
 		addCaption: "Tambah Data",
@@ -102,7 +115,6 @@ $.extend($.jgrid,{
 			S: function (j) {return j < 11 || j > 13 ? ['st', 'nd', 'rd', 'th'][Math.min((j - 1) % 10, 3)] : 'th';},
 			srcformat: 'Y-m-d',
 			newformat: 'n/j/Y',
-			parseRe : /[Tt\\\/:_;.,\t\s-]/,
 			masks : {
 				// see http://php.net/manual/en/function.date.php for PHP format used in jqGrid
 				// and see http://docs.jquery.com/UI/Datepicker/formatDate
@@ -110,8 +122,6 @@ $.extend($.jgrid,{
 				// one can find on https://github.com/jquery/globalize/tree/master/lib/cultures many
 				// information about date, time, numbers and currency formats used in different countries
 				// one should just convert the information in PHP format
-				ISO8601Long:"Y-m-d H:i:s",
-				ISO8601Short:"Y-m-d",
 				// short date:
 				//    n - Numeric representation of a month, without leading zeros
 				//    j - Day of the month without leading zeros
@@ -149,20 +159,27 @@ $.extend($.jgrid,{
 				//    s - Seconds, with leading zeros
 				//    A - Uppercase Ante meridiem and Post meridiem (AM or PM)
 				LongTime: "g:i:s A", // in jQuery UI Datepicker: "h:mm:ss tt"
-				SortableDateTime: "Y-m-d\\TH:i:s",
-				UniversalSortableDateTime: "Y-m-d H:i:sO",
 				// month with year
 				//    Y - A full numeric representation of a year, 4 digits
 				//    F - A full textual representation of a month
 				YearMonth: "F, Y" // in jQuery UI Datepicker: "MMMM, yyyy"
-			},
-			reformatAfterEdit : false
-		},
-		baseLinkUrl: '',
-		showAction: '',
-		target: '',
-		checkbox : {disabled:true},
-		idName : 'id'
+			}
+		}
+	}
+};
+$.jgrid = $.jgrid || {};
+$.extend(true, $.jgrid, {
+	defaults: {
+		locale: "id"
+	},
+	locales: {
+		// In general the property name is free, but it's recommended to use the names based on
+		// http://www.iana.org/assignments/language-subtag-registry/language-subtag-registry
+		// http://rishida.net/utils/subtags/ and RFC 5646. See Appendix A of RFC 5646 for examples.
+		// One can use the lang attribute to specify language tags in HTML, and the xml:lang attribute for XML
+		// if it exists. See http://www.w3.org/International/articles/language-tags/#extlang
+		id: $.extend({}, locInfo, { name: "Bahasa Indonesia", nameEnglish: "Indonesian" }),
+		"id-ID": $.extend({}, locInfo, { name: "Bahasa Indonesia (Indonesia)", nameEnglish: "Indonesian (Indonesia)" })
 	}
 });
-})(jQuery);
+}(jQuery));

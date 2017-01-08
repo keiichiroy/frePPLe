@@ -4,19 +4,45 @@ This template overrides one of the standard admin ones.
 The changes are:
    - take care of url prefix
    - give the login button a jquery-ui look and feel
+   - check for old versions of Internet Explorer
 {% endcomment %}
 {% load i18n %}
 
-{% block extrastyle %}{{block.super}}<link rel="stylesheet" type="text/css" href="{{STATIC_URL}}admin/css/login.css" />{% endblock %}
+{% block extrastyle %}{{block.super}}<link rel="stylesheet" type="text/css" href="{{STATIC_URL}}admin/css/login.css" />
+<style>
+  #headerbar {
+    background-color: transparent;
+  }
+  #login-form, #content {
+    margin-top: 0px;
+  }
+  body.login {
+    background: white;
+  }
+  .login #container {
+    border: none;
+  }
+  input[type=submit] {
+    background: #838d11;
+    color: #fff;
+    padding: 10px 20px 10px 20px;
+    margin: 0px auto;
+    display:block;
+    margin-top: 13px;
+  }
+</style>
+{% endblock %}
 
-{% block extrahead %}{{block.super}}
+{% block extrahead %}
+<script type="text/javascript" src="{{STATIC_URL}}js/jquery-2.1.4.min.js"></script>
+<script type="text/javascript" src="{{STATIC_URL}}js/jquery-ui-1.10.4.min.js"></script>
 <script type="text/javascript">
 $(function() {
   $('#id_username').focus();
   $("input:submit").button();
 });
 </script>
-<!--[if lte IE 8]>
+<!--[if lte IE 9]>
 <script type="text/javascript">
 $(function() {
   $('#login-form').hide();
@@ -25,6 +51,8 @@ $(function() {
 <![endif]-->
 
 {% endblock %}
+
+{% block branding %}<img style="display:block; margin-left:auto; margin-right:auto" src="{{STATIC_URL}}img/frepple_logo.svg" height="94" width="240" alt="frePPLe&nbsp;{% version %}">{% endblock %}
 
 {% block bodyclass %}login{% endblock %}
 
@@ -37,7 +65,10 @@ $(function() {
 {% block content %}
 {% if form.errors and not form.non_field_errors and not form.this_is_the_login_form.errors %}
 <p class="errornote">
-{% if form.errors.items|length == 1 %}{% trans "Please correct the error below." %}{% else %}{% trans "Please correct the errors below." %}{% endif %}
+{% comment %}Translators: Translation included with Django {% endcomment %}
+{% if form.errors.items|length == 1 %}{% trans "Please correct the error below." %}{% else %}
+{% comment %}Translators: Translation included with Django {% endcomment %}
+{% trans "Please correct the errors below." %}{% endif %}
 </p>
 {% endif %}
 
@@ -53,21 +84,21 @@ $(function() {
 <form action="{{request.prefix}}{{app_path}}" method="post" id="login-form">{% csrf_token %}
   <div class="form-row">
     {% if not form.this_is_the_login_form.errors %}{{ form.username.errors }}{% endif %}
-    <label for="id_username" class="required">{{ form.username.label }}:</label> {{ form.username }}
+    <label for="id_username" class="required">{{ form.username.label }}</label> {{ form.username }}
   </div>
   <div class="form-row">
     {% if not form.this_is_the_login_form.errors %}{{ form.password.errors }}{% endif %}
-    <label for="id_password" class="required">{% trans 'Password:' %}</label> {{ form.password }}
+    {% comment %}Translators: Translation included with Django {% endcomment %}
+    <label for="id_password" class="required">{% trans 'Password'|capfirst %}</label> {{ form.password }}
     <input type="hidden" name="this_is_the_login_form" value="1" />
     <input type="hidden" name="next" value="{{ request.prefix }}{{ next }}" />
-  </div>
-  <div class="submit-row">
-    <label>&nbsp;</label><input type="submit" value="{% trans 'Log in' %}"/>
+    {% comment %}Translators: Translation included with Django {% endcomment %}
+    <input type="submit" value="{% trans 'Log in' %}"/>
   </div>
 </form>
 
-<!--[if lte IE 8]><br/><span style="font-weight: bold">FrePPLe does NOT support Internet Explorer 8!</span><br/><br/>
-Upgrade to Internet Explorer 9 or, even better, use a better browser: Chrome, Firefox, Safari or Opera.
+<!--[if lte IE 9]><br/><span style="font-weight: bold">FrePPLe does NOT support Internet Explorer <= 9!</span><br/><br/>
+Upgrade to Internet Explorer >= 10, or use a better browser: Chrome, Firefox, Safari or Opera.
 <![endif]-->
 
 <script type="text/javascript">
@@ -75,8 +106,8 @@ document.getElementById('id_username').focus()
 </script>
 
 </div>
+{% checkPassword "admin" "admin" as recommend_reset %}{% if recommend_reset %}
+<div id='tourtooltip' class='tourtooltip ui-dialog ui-widget ui-widget-content ui-corner-all ui-front' style='position: relative; top: 20px; font-weight: normal'>
+{% blocktrans %}The user "admin" has password "admin".<br/>
+We suggest changing this password.{% endblocktrans %}</div>{% endif %}
 {% endblock %}
-
-
-
-

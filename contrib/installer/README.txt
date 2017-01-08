@@ -2,12 +2,14 @@
 This is a script for creating a windows installer for frePPLe.
 To create the installer, the following steps are required:
 
-1) Install NSIS v2.41 or higher (Nullsoft Scriptable Install System)
+1) Install NSIS v3.0 or higher (Nullsoft Scriptable Install System)
    This is a free package to create installers.
    Further details on http://nsis.sourceforge.net/
 
-2) Install the AccessControl NSIS plugin.
-   See http://nsis.sourceforge.net/AccessControl_plug-in
+2) Activate the following plugins by copying them from the
+   <NSIS>\plugins\x86-ansi folder to <NSIS>\plugins\:
+     - AccessControl
+     - InstallOptions
 
 3) Install Cygwin environment and run "make dist"
    This is because the creation of the installer starts by making the same
@@ -26,26 +28,19 @@ To create the installer, the following steps are required:
    Adjust the path appropriately, if required.
 
 6) Install the following Python extensions:
-      - py2exe
+      - py2exe, for Python 3, >= 0.9.2.2
       - django (needs patching!)
       - cherrypy
-      - cx_oracle
-      - MySQLdb
       - psycopg2
       - pywin32
    The installer uses py2exe to create a directory containing the Python
-   language (with its libaries and extensions) and the frePPLe web user
+   language (with its libraries and extensions) and the frePPLe web user
    interface.
    As the standalone web server we use WSGIServer that is provided by the
    CherryPy project. It is a bit more scalable and robust than the Django
    development server.
 
-7) Create sample sqlite database
-   The installer will pick up the sqlite database in the file bin\frepple.sqlite.
-   You'll should make sure it is initialized correctly and contains the
-   sample dataset.
-
-8) Before building the installer script you'll need to update the frepple.nsi
+7) Before building the installer script you'll need to update the frepple.nsi
    script to point to the directory where the xerces-c dll is stored.
 
 CONSIDERING ALL THE ABOVE, BUILDING THE INSTALLER ISN'T FOR BEGINNERS.

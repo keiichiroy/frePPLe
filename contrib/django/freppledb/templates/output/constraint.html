@@ -1,27 +1,22 @@
 {% extends "admin/base_site_grid.html" %}
 
-{% block contextmenus %}
-{% include "buffercontext.html" %}
-{% include "demandcontext.html" %}
-{% include "resourcecontext.html" %}
-{% include "operationcontext.html" %}
-{% endblock %}
-
 {% block extrahead %}{{block.super}}
 <script type="text/javascript">
 
-// TODO demand column needs seperate formatter for demand and forecasts
+// TODO demand column needs separate formatter for demand and forecasts
 
 function probfmt(cellvalue, options, row)
 {
   if (row['entity'] == 'material')
-    return cellvalue + "<span class='context ui-icon ui-icon-triangle-1-e' role='buffer'></span>";
-  if (row['entity'] == 'capacity')
-    return cellvalue + "<span class='context ui-icon ui-icon-triangle-1-e' role='resource'></span>";
-  if (row['entity'] == 'demand') // TODO distinguish between forecast and demand
-    return cellvalue + "<span class='context ui-icon ui-icon-triangle-1-e' role='demand'></span>";
+    var role = 'input/buffer';
+  else if (row['entity'] == 'capacity')
+    var role = 'input/resource';
+  else if (row['entity'] == 'demand')
+    var role = 'input/demand';
   else
-    return cellvalue + "<span class='context ui-icon ui-icon-triangle-1-e' role='operation'></span>";
+    var role = 'input/operation';
+  return cellvalue + "<a href='/detail/" + role
+     + "/key/' onclick='opendetail(event)'><span class='leftpadding context fa fa-caret-right' role='" + role + "'></span></a>";
 }
 
 </script>

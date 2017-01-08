@@ -1,0 +1,206 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plan xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<name>Test model for suppliers</name>
+	<description>
+  This test model demonstrates the distribution network modeling features.
+  </description>
+	<current>2015-01-01T00:00:00</current>
+	<locations>
+		<location>
+			<name>Central WH</name>
+		</location>
+		<location>
+			<name>Local DC 1a</name>
+			<owner>
+				<name>Region 1</name>
+			</owner>
+		</location>
+		<location>
+			<name>Local DC 1b</name>
+			<owner>
+				<name>Region 1</name>
+			</owner>
+		</location>
+		<location>
+			<name>Local DC 2a</name>
+			<owner>
+				<name>Region 2</name>
+			</owner>
+		</location>
+		<location>
+			<name>Local DC 2b</name>
+			<owner>
+				<name>Region 2</name>
+			</owner>
+		</location>
+		<location>
+			<name>Region 1</name>
+		</location>
+		<location>
+			<name>Region 2</name>
+		</location>
+		<location>
+			<name>Regional DC 1</name>
+		</location>
+		<location>
+			<name>Regional DC 2</name>
+		</location>
+	</locations>
+	<suppliers>
+		<supplier>
+			<name>Supplier 1</name>
+		</supplier>
+		<supplier>
+			<name>Supplier 2</name>
+		</supplier>
+		<supplier>
+			<name>Supplier 3</name>
+		</supplier>
+	</suppliers>
+	<items>
+		<item>
+			<name>All products</name>
+			<price>1</price>
+			<itemsuppliers>
+				<itemsupplier>
+					<supplier>
+						<name>Supplier 1</name>
+					</supplier>
+					<location>
+						<name>Central WH</name>
+					</location>
+					<leadtime>P7D</leadtime>
+				</itemsupplier>
+				<itemsupplier>
+					<supplier>
+						<name>Supplier 1</name>
+					</supplier>
+					<location>
+						<name>Regional DC 2</name>
+					</location>
+					<leadtime>P7D</leadtime>
+					<priority>2</priority>
+				</itemsupplier>
+			</itemsuppliers>
+			<itemdistributions>
+				<itemdistribution>
+					<origin>
+						<name>Regional DC 2</name>
+					</origin>
+					<destination>
+						<name>Region 2</name>
+					</destination>
+					<leadtime>P3D</leadtime>
+				</itemdistribution>
+				<itemdistribution>
+					<origin>
+						<name>Regional DC 1</name>
+					</origin>
+					<destination>
+						<name>Region 1</name>
+					</destination>
+					<leadtime>P3D</leadtime>
+				</itemdistribution>
+				<itemdistribution>
+					<origin>
+						<name>Central WH</name>
+					</origin>
+					<destination>
+						<name>Regional DC 2</name>
+					</destination>
+					<leadtime>P12D</leadtime>
+				</itemdistribution>
+				<itemdistribution>
+					<origin>
+						<name>Central WH</name>
+					</origin>
+					<destination>
+						<name>Regional DC 1</name>
+					</destination>
+					<leadtime>P10D</leadtime>
+				</itemdistribution>
+			</itemdistributions>
+		</item>
+		<item>
+			<name>product A</name>
+			<owner>
+				<name>All products</name>
+			</owner>
+			<price>2</price>
+		</item>
+	</items>
+	<buffers>
+		<buffer>
+			<name>product A @ Central WH</name>
+			<item>
+				<name>product A</name>
+			</item>
+			<location>
+				<name>Central WH</name>
+			</location>
+			<onhand>10</onhand>
+		</buffer>
+	</buffers>
+	<demands>
+		<demand>
+			<name>order 1a for product A</name>
+			<quantity>50</quantity>
+			<item>
+				<name>product A</name>
+			</item>
+			<location>
+				<name>Local DC 1a</name>
+			</location>
+			<due>2015-01-01T00:00:00</due>
+			<priority>1</priority>
+		</demand>
+		<demand>
+			<name>order 1b for product A</name>
+			<quantity>50</quantity>
+			<item>
+				<name>product A</name>
+			</item>
+			<location>
+				<name>Local DC 1a</name>
+			</location>
+			<due>2015-01-01T00:00:00</due>
+			<priority>1</priority>
+		</demand>
+		<demand>
+			<name>order 2 for product A</name>
+			<quantity>100</quantity>
+			<item>
+				<name>product A</name>
+			</item>
+			<location>
+				<name>Local DC 1b</name>
+			</location>
+			<due>2015-03-01T00:00:00</due>
+			<priority>1</priority>
+		</demand>
+		<demand>
+			<name>order 3 for product A</name>
+			<quantity>100</quantity>
+			<item>
+				<name>product A</name>
+			</item>
+			<location>
+				<name>Local DC 2a</name>
+			</location>
+			<due>2015-01-01T00:00:00</due>
+			<priority>1</priority>
+		</demand>
+		<demand>
+			<name>order 4 for product A</name>
+			<quantity>100</quantity>
+			<item>
+				<name>product A</name>
+			</item>
+			<location>
+				<name>Local DC 2b</name>
+			</location>
+			<due>2015-03-01T00:00:00</due>
+			<priority>1</priority>
+		</demand>
+	</demands>
+</plan>

@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba
+# Copyright (C) 2007-2013 by frePPLe bvba
 #
 # This library is free software; you can redistribute it and/or modify it
 # under the terms of the GNU Affero General Public License as published
@@ -25,14 +25,14 @@ from freppledb.common.report import GridReport, GridFieldText, GridFieldNumber, 
 
 def getEntities(request):
   return tuple([
-    (i['entity'], string_concat(_(i['entity']),":",i['id__count']))
+    (i['entity'], string_concat(_(i['entity']), ":", i['id__count']))
     for i in Problem.objects.using(request.database).values('entity').annotate(Count('id')).order_by('entity')
     ])
 
 
 def getNames(request):
   return tuple([
-    (i['name'], string_concat(_(i['name']),":",i['id__count']))
+    (i['name'], string_concat(_(i['name']), ":", i['id__count']))
     for i in Problem.objects.using(request.database).values('name').annotate(Count('id')).order_by('name')
     ])
 
@@ -42,15 +42,16 @@ class Report(GridReport):
   A list report to show problems.
   '''
   template = 'output/problem.html'
-  title = _("Problem Report")
-  basequeryset = Problem.objects # TODO .extra(select={'forecast': "select name from forecast where out_problem.owner like forecast.name || ' - %%'",})
+  title = _("Problem report")
+  basequeryset = Problem.objects  # TODO .extra(select={'forecast': "select name from forecast where out_problem.owner like forecast.name || ' - %%'",})
   model = Problem
   permissions = (("view_problem_report", "Can view problem report"),)
   frozenColumns = 0
   editable = False
   multiselect = False
   rows = (
-    GridFieldText('entity', title=_('entity'), editable=False, align='center'), # TODO choices=getEntities
+    GridFieldText('entity', title=_('entity'), editable=False, align='center'),  # TODO choices=getEntities
+    #. Translators: Translation included with Django
     GridFieldText('name', title=_('name'), editable=False, align='center'),  # TODO choices=getNames
     GridFieldText('owner', title=_('owner'), editable=False, extra='formatter:probfmt'),
     GridFieldText('description', title=_('description'), editable=False, width=350),

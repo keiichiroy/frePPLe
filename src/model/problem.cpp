@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- * Copyright (C) 2007-2012 by Johan De Taeye, frePPLe bvba                 *
+ * Copyright (C) 2007-2015 by frePPLe bvba                                 *
  *                                                                         *
  * This library is free software; you can redistribute it and/or modify it *
  * under the terms of the GNU Affero General Public License as published   *
@@ -45,37 +45,28 @@ DECLARE_EXPORT const MetaClass* ProblemMaterialExcess::metadata,
 int Problem::initialize()
 {
   // Initialize the problem metadata.
-  Problem::metadata = new MetaCategory
-  ("problem", "problems", NULL, Problem::writer);
-  ProblemMaterialExcess::metadata = new MetaClass
-  ("problem","material excess");
-  ProblemMaterialShortage::metadata = new MetaClass
-  ("problem","material shortage");
-  ProblemExcess::metadata = new MetaClass
-  ("problem","excess");
-  ProblemShort::metadata = new MetaClass
-  ("problem","short");
-  ProblemEarly::metadata = new MetaClass
-  ("problem","early");
-  ProblemLate::metadata = new MetaClass
-  ("problem","late");
-  ProblemInvalidData::metadata = new MetaClass
-  ("problem","invalid data");
-  ProblemDemandNotPlanned::metadata = new MetaClass
-  ("problem","unplanned");
-  ProblemPrecedence::metadata = new MetaClass
-  ("problem","precedence");
-  ProblemBeforeFence::metadata = new MetaClass
-  ("problem","before fence");
-  ProblemBeforeCurrent::metadata = new MetaClass
-  ("problem","before current");
-  ProblemCapacityUnderload::metadata = new MetaClass
-  ("problem","underload");
-  ProblemCapacityOverload::metadata = new MetaClass
-  ("problem","overload");
+  metadata = MetaCategory::registerCategory<Problem>("problem", "problems");
+  registerFields<Problem>(const_cast<MetaCategory*>(metadata));
+
+  // Register classes.
+  // We register them as default to avoid saving an xsi:type header. This
+  // has no further impact as there is no factory method.
+  ProblemMaterialExcess::metadata = MetaClass::registerClass<ProblemMaterialExcess>("problem", "material excess", true);
+  ProblemMaterialShortage::metadata = MetaClass::registerClass<ProblemMaterialShortage>("problem", "material shortage", true);
+  ProblemExcess::metadata = MetaClass::registerClass<ProblemExcess>("problem", "excess", true);
+  ProblemShort::metadata = MetaClass::registerClass<ProblemShort>("problem", "short", true);
+  ProblemEarly::metadata = MetaClass::registerClass<ProblemEarly>("problem", "early", true);
+  ProblemLate::metadata = MetaClass::registerClass<ProblemLate>("problem", "late", true);
+  ProblemInvalidData::metadata = MetaClass::registerClass<ProblemInvalidData>("problem", "invalid data", true);
+  ProblemDemandNotPlanned::metadata = MetaClass::registerClass<ProblemDemandNotPlanned>("problem", "unplanned", true);
+  ProblemPrecedence::metadata = MetaClass::registerClass<ProblemPrecedence>("problem", "precedence", true);
+  ProblemBeforeFence::metadata = MetaClass::registerClass<ProblemBeforeFence>("problem", "before fence", true);
+  ProblemBeforeCurrent::metadata = MetaClass::registerClass<ProblemBeforeCurrent>("problem", "before current", true);
+  ProblemCapacityUnderload::metadata = MetaClass::registerClass<ProblemCapacityUnderload>("problem", "underload", true);
+  ProblemCapacityOverload::metadata = MetaClass::registerClass<ProblemCapacityOverload>("problem", "overload", true);
 
   // Initialize the Python type
-  PythonType& x = PythonExtension<Problem>::getType();
+  PythonType& x = PythonExtension<Problem>::getPythonType();
   x.setName("problem");
   x.setDoc("frePPLe problem");
   x.supportgetattro();
@@ -208,26 +199,6 @@ DECLARE_EXPORT void Plannable::computeProblems()
 }
 
 
-DECLARE_EXPORT void Plannable::writeElement (XMLOutput* o, const Keyword& tag, mode m) const
-{
-  // We don't bother about the mode, since this method is only called from
-  // within the writeElement() method of other classes.
-
-  // Problem detection flag only written if different from the default value
-  if (!getDetectProblems()) o->writeElement(Tags::tag_detectproblems, false);
-}
-
-
-DECLARE_EXPORT void Plannable::endElement(XMLInput& pIn, const Attribute& pAttr, const DataElement& pElement)
-{
-  if (pAttr.isA (Tags::tag_detectproblems))
-  {
-    bool b = pElement.getBool();
-    setDetectProblems(b);
-  }
-}
-
-
 DECLARE_EXPORT void Problem::clearProblems()
 {
   // Loop through all entities, and call clearProblems(i)
@@ -260,32 +231,11 @@ DECLARE_EXPORT void Problem::clearProblems(HasProblems& p, bool setchanged)
 }
 
 
-DECLARE_EXPORT void Problem::writer(const MetaCategory* c, XMLOutput* o)
+DECLARE_EXPORT Problem::iterator Plannable::getProblems() const
 {
-  const_iterator piter = begin();
-  if (piter != end())
-  {
-    o->BeginObject(*c->grouptag);
-    for (; piter!=end(); ++piter)
-      // Note: not the regular write, but a fast write to speed things up.
-      // This is possible since problems aren't nested and are never
-      // referenced.
-      piter->writeElement(o, *c->typetag);
-    o->EndObject(*c->grouptag);
-  }
-}
-
-
-DECLARE_EXPORT void Problem::writeElement(XMLOutput *o, const Keyword& tag, mode m) const
-{
-  // We ignore the mode, and always write the complete model
-  o->BeginObject(tag);
-  o->writeElement(Tags::tag_name, getType().type);
-  o->writeElement(Tags::tag_description, getDescription());
-  o->writeElement(Tags::tag_start, getDates().getStart());
-  o->writeElement(Tags::tag_end, getDates().getEnd());
-  o->writeElement(Tags::tag_weight, getWeight());
-  o->EndObject(tag);
+  if (getChanged())
+    const_cast<Plannable*>(this)->updateProblems();
+  return Problem::iterator(firstProblem);
 }
 
 
@@ -370,13 +320,21 @@ DECLARE_EXPORT HasProblems::EntityIterator::~EntityIterator()
   switch (type)
   {
       // Buffer
-    case 0: delete bufIter; return;
+    case 0:
+      delete bufIter;
+      return;
       // Resource
-    case 1: delete resIter; return;
+    case 1:
+      delete resIter;
+      return;
       // Operation
-    case 2: delete operIter; return;
+    case 2:
+      delete operIter;
+      return;
       // Demand
-    case 3: delete demIter; return;
+    case 3:
+      delete demIter;
+      return;
   }
 }
 
@@ -387,10 +345,14 @@ DECLARE_EXPORT HasProblems::EntityIterator::EntityIterator(const EntityIterator&
   this->~EntityIterator();
   // Populate new values
   type = o.type;
-  if (type==0) bufIter = new Buffer::iterator(*(o.bufIter));
-  else if (type==1) resIter = new Resource::iterator(*(o.resIter));
-  else if (type==2) operIter = new OperationPlan::iterator(*(o.operIter));
-  else if (type==3) demIter = new Demand::iterator(*(o.demIter));
+  if (type==0)
+    bufIter = new Buffer::iterator(*(o.bufIter));
+  else if (type==1)
+    resIter = new Resource::iterator(*(o.resIter));
+  else if (type==2)
+    operIter = new OperationPlan::iterator(*(o.operIter));
+  else if (type==3)
+    demIter = new Demand::iterator(*(o.demIter));
 }
 
 
@@ -403,10 +365,14 @@ HasProblems::EntityIterator::operator=(const EntityIterator& o)
   this->~EntityIterator();
   // Populate new values
   type = o.type;
-  if (type==0) bufIter = new Buffer::iterator(*(o.bufIter));
-  else if (type==1) resIter = new Resource::iterator(*(o.resIter));
-  else if (type==2) operIter = new OperationPlan::iterator(*(o.operIter));
-  else if (type==3) demIter = new Demand::iterator(*(o.demIter));
+  if (type==0)
+    bufIter = new Buffer::iterator(*(o.bufIter));
+  else if (type==1)
+    resIter = new Resource::iterator(*(o.resIter));
+  else if (type==2)
+    operIter = new OperationPlan::iterator(*(o.operIter));
+  else if (type==3)
+    demIter = new Demand::iterator(*(o.demIter));
   return *this;
 }
 
@@ -420,17 +386,22 @@ HasProblems::EntityIterator::operator != (const EntityIterator& t) const
   // Same iterator type, more granular comparison required
   switch (type)
   {
+    case 0:
       // Buffer
-    case 0: return *bufIter != *(t.bufIter);
+      return *bufIter != *(t.bufIter);
+    case 1:
       // Resource
-    case 1: return *resIter != *(t.resIter);
-      // Operationplan
-    case 2: return *operIter != *(t.operIter);
+      return *resIter != *(t.resIter);
+    case 2:
+      // Operation
+      return *operIter != *(t.operIter);
+    case 3:
       // Demand
-    case 3: return *demIter != *(t.demIter);
+      return *demIter != *(t.demIter);
+    default:
       // Always return true for higher type numbers. This should happen only
       // when comparing with the end of list element.
-    default: return false;
+      return false;
   }
 }
 
@@ -439,15 +410,20 @@ DECLARE_EXPORT HasProblems& HasProblems::EntityIterator::operator*() const
 {
   switch (type)
   {
+    case 0:
       // Buffer
-    case 0: return **bufIter;
+      return **bufIter;
+    case 1:
       // Resource
-    case 1: return **resIter;
+      return **resIter;
+    case 2:
       // Operation
-    case 2: return **operIter;
+      return **operIter;
+    case 3:
       // Demand
-    case 3: return **demIter;
-    default: throw LogicException("Unreachable code reached");
+      return **demIter;
+    default:
+      throw LogicException("Unknown problem entity found");
   }
 }
 
@@ -456,15 +432,20 @@ DECLARE_EXPORT HasProblems* HasProblems::EntityIterator::operator->() const
 {
   switch (type)
   {
+    case 0:
       // Buffer
-    case 0: return &**bufIter;
+      return &**bufIter;
+    case 1:
       // Resource
-    case 1: return &**resIter;
-      // Operationplan
-    case 2: return &**operIter;
+      return &**resIter;
+    case 2:
+      // Operation
+      return &**operIter;
+    case 3:
       // Demand
-    case 3: return &**demIter;
-    default: throw LogicException("Unreachable code reached");
+      return &**demIter;
+    default:
+      throw LogicException("Unknown problem entity found");
   }
 }
 
@@ -483,7 +464,7 @@ DECLARE_EXPORT HasProblems::EntityIterator HasProblems::endEntity()
 }
 
 
-DECLARE_EXPORT Problem::const_iterator& Problem::const_iterator::operator++()
+DECLARE_EXPORT Problem::iterator& Problem::iterator::operator++()
 {
   // Incrementing beyond the end
   if (!iter) return *this;
@@ -493,56 +474,37 @@ DECLARE_EXPORT Problem::const_iterator& Problem::const_iterator::operator++()
 
   // Move to the next entity
   // We need a while loop here because some entities can be without problems
-  while (!iter && !owner && eiter!=HasProblems::endEntity())
+  while (!iter && !owner && eiter && *eiter!=HasProblems::endEntity())
   {
-    ++eiter;
-    if (eiter!=HasProblems::endEntity()) iter = eiter->firstProblem;
+    ++(*eiter);
+    if (*eiter != HasProblems::endEntity())
+      iter = (*eiter)->firstProblem;
   }
   return *this;
 }
 
 
-DECLARE_EXPORT Problem::const_iterator Problem::begin()
+DECLARE_EXPORT Problem::iterator Problem::begin()
 {
-  Plannable::computeProblems();
-  return const_iterator();
+  return iterator();
 }
 
 
-DECLARE_EXPORT Problem::const_iterator Problem::begin(HasProblems* i, bool refresh)
+DECLARE_EXPORT Problem::iterator Problem::begin(HasProblems* i, bool refresh)
 {
   // Null pointer passed, loop through the full list anyway
   if (!i) return begin();
 
   // Return an iterator for a single entity
-  if (refresh) i->updateProblems();
-  return const_iterator(i);
+  if (refresh)
+    i->updateProblems();
+  return iterator(i);
 }
 
 
-DECLARE_EXPORT const Problem::const_iterator Problem::end()
+DECLARE_EXPORT const Problem::iterator Problem::end()
 {
-  return const_iterator(static_cast<Problem*>(NULL));
-}
-
-
-PyObject* Problem::getattro(const Attribute& attr)
-{
-  if (attr.isA(Tags::tag_name))
-    return PythonObject(getType().type);
-  if (attr.isA(Tags::tag_description))
-    return PythonObject(getDescription());
-  if (attr.isA(Tags::tag_entity))
-    return PythonObject(getEntity());
-  if (attr.isA(Tags::tag_start))
-    return PythonObject(getDates().getStart());
-  if (attr.isA(Tags::tag_end))
-    return PythonObject(getDates().getEnd());
-  if (attr.isA(Tags::tag_weight))
-    return PythonObject(getWeight());
-  if (attr.isA(Tags::tag_owner))
-    return PythonObject(getOwner());
-  return NULL;
+  return iterator(static_cast<Problem*>(NULL));
 }
 
 
