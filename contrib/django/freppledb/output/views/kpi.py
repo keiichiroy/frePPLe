@@ -18,7 +18,6 @@
 from django.utils.translation import ugettext_lazy as _
 from django.db import connections
 
-from freppledb.common.db import sql_datediff
 from freppledb.common.models import Parameter
 from freppledb.common.report import GridReport, GridFieldText, GridFieldInteger
 
@@ -37,12 +36,13 @@ class Report(GridReport):
   default_sort = (1, 'asc')
   filterable = False
   multiselect = False
+  help_url = 'user-guide/user-interface/plan-analysis/performance-indicator-report.html'
 
   @staticmethod
   def query(request, basequery):
     # Execute the query
     cursor = connections[request.database].cursor()
-    query = '''
+    cursor.execute('''
       select 101 as id, 'Problem count' as category, name as name, count(*) as value
       from out_problem
       group by name
@@ -52,45 +52,48 @@ class Report(GridReport):
       group by name
       union all
       select 201, 'Demand', 'Requested', coalesce(round(sum(quantity)),0)
-      from out_demand
+      from demand
+      where status in ('open', 'quote')
       union all
-      select 202, 'Demand', 'Planned', coalesce(round(sum(planquantity)),0)
-      from out_demand
+      select 202, 'Demand', 'Planned', coalesce(round(sum(quantity)),0)
+      from operationplan
+      where demand_id is not null and owner_id is null
       union all
-      select 203, 'Demand', 'Planned late', coalesce(round(sum(planquantity)),0)
-      from out_demand
-      where plandate > due and plandate is not null
+      select 203, 'Demand', 'Planned late', coalesce(round(sum(quantity)),0)
+      from operationplan
+      where enddate > due and demand_id is not null and owner_id is null
       union all
-      select 204, 'Demand', 'Unplanned', coalesce(round(sum(quantity)),0)
-      from out_demand
-      where planquantity is null
+      select 204, 'Demand', 'Planned on time', coalesce(round(sum(quantity)),0)
+      from operationplan
+      where enddate <= due and demand_id is not null and owner_id is null
       union all
-      select 205, 'Demand', 'Total lateness', coalesce(round(sum(planquantity * %s)),0)
-      from out_demand
-      where plandate > due and plandate is not null
+      select 205, 'Demand', 'Unplanned', coalesce(round(sum(weight)),0)
+      from out_problem
+      where name = 'unplanned'
+      union all
+      select 206, 'Demand', 'Total lateness', coalesce(round(sum(quantity * extract(epoch from enddate - due)) / 86400),0)
+      from operationplan
+      where enddate > due and demand_id is not null and owner_id is null
       union all
       select 301, 'Operation', 'Count', count(*)
-      from out_operationplan
+      from operationplan
       union all
       select 301, 'Operation', 'Quantity', coalesce(round(sum(quantity)),0)
-      from out_operationplan
+      from operationplan
       union all
-      select 302, 'Resource', 'Usage', coalesce(round(sum(quantity * %s)),0)
-      from out_loadplan
+      select 302, 'Resource', 'Usage', coalesce(round(sum(quantity * extract(epoch from enddate - startdate)) / 86400),0)
+      from operationplanresource
       union all
       select 401, 'Material', 'Produced', coalesce(round(sum(quantity)),0)
-      from out_flowplan
+      from operationplanmaterial
       where quantity>0
       union all
       select 402, 'Material', 'Consumed', coalesce(round(sum(-quantity)),0)
-      from out_flowplan
+      from operationplanmaterial
       where quantity<0
       order by 1
-      ''' % (
-        sql_datediff('plandate', 'due'),
-        sql_datediff('enddate', 'startdate')
+      '''
       )
-    cursor.execute(query)
 
     # Build the python result
     for row in cursor.fetchall():

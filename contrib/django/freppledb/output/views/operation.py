@@ -21,8 +21,6 @@ from django.utils.text import capfirst
 from django.utils.encoding import force_text
 
 from freppledb.input.models import Operation
-from freppledb.output.models import OperationPlan
-from freppledb.common.db import sql_true, python_date, string_agg
 from freppledb.common.report import GridReport, GridPivot, GridFieldText, GridFieldNumber, GridFieldDateTime, GridFieldBool, GridFieldInteger
 
 
@@ -35,14 +33,15 @@ class OverviewReport(GridPivot):
   basequeryset = Operation.objects.all()
   model = Operation
   permissions = (("view_operation_report", "Can view operation report"),)
+  help_url = 'user-guide/user-interface/plan-analysis/operation-report.html'
   rows = (
-    GridFieldText('operation', title=_('operation'), key=True, editable=False, field_name='name', formatter='detail', extra="role:'input/operation'"),
-    GridFieldText('location', title=_('location'), editable=False, field_name='location__name', formatter='detail', extra="role:'input/location'"),
+    GridFieldText('operation', title=_('operation'), key=True, editable=False, field_name='name', formatter='detail', extra='"role":"input/operation"'),
+    GridFieldText('location', title=_('location'), editable=False, field_name='location__name', formatter='detail', extra='"role":"input/location"'),
     )
   crosses = (
-    ('locked_start', {'title': _('locked starts')}),
+    ('proposed_start', {'title': _('proposed starts')}),
     ('total_start', {'title': _('total starts')}),
-    ('locked_end', {'title': _('locked ends')}),
+    ('proposed_end', {'title': _('proposed ends')}),
     ('total_end', {'title': _('total ends')}),
     )
 
@@ -64,13 +63,13 @@ class OverviewReport(GridPivot):
     cursor = connections[request.database].cursor()
     query = '''
         select x.row1, x.row2, x.col1, x.col2, x.col3,
-          min(x.frozen_start), min(x.total_start),
-          coalesce(sum(case o2.locked when %s then o2.quantity else 0 end),0),
+          min(x.proposed_start), min(x.total_start),
+          coalesce(sum(case when o2.status in ('proposed') then o2.quantity else 0 end),0),
           coalesce(sum(o2.quantity),0)
         from (
           select oper.name as row1,  oper.location_id as row2,
                d.bucket as col1, d.startdate as col2, d.enddate as col3,
-               coalesce(sum(case o1.locked when %s then o1.quantity else 0 end),0) as frozen_start,
+               coalesce(sum(case when o1.status in ('proposed') then o1.quantity else 0 end),0) as proposed_start,
                coalesce(sum(o1.quantity),0) as total_start
           from (%s) oper
           -- Multiply with buckets
@@ -80,22 +79,26 @@ class OverviewReport(GridPivot):
              where bucket_id = '%s' and enddate > '%s' and startdate < '%s'
              ) d
           -- Planned and frozen quantity, based on start date
-          left join out_operationplan o1
-          on oper.name = o1.operation
+          left join operationplan o1
+          on oper.name = o1.operation_id
           and d.startdate <= o1.startdate
           and d.enddate > o1.startdate
+          and o1.type = 'MO'
+          and o1.status in ('approved','confirmed','proposed')
           -- Grouping
           group by oper.name, oper.location_id, d.bucket, d.startdate, d.enddate
         ) x
         -- Planned and frozen quantity, based on end date
-        left join out_operationplan o2
-        on x.row1 = o2.operation
+        left join operationplan o2
+        on x.row1 = o2.operation_id
         and x.col2 <= o2.enddate
         and x.col3 > o2.enddate
+        and o2.type = 'MO'
+        and o2.status in ('approved','confirmed','proposed')
         -- Grouping and ordering
         group by x.row1, x.row2, x.col1, x.col2, x.col3
         order by %s, x.col2
-      ''' % (sql_true(), sql_true(), basesql, request.report_bucket,
+      ''' % (basesql, request.report_bucket,
              request.report_startdate, request.report_enddate, sortsql)
     cursor.execute(query, baseparams)
 
@@ -105,60 +108,10 @@ class OverviewReport(GridPivot):
         'operation': row[0],
         'location': row[1],
         'bucket': row[2],
-        'startdate': python_date(row[3]),
-        'enddate': python_date(row[4]),
-        'locked_start': row[5],
+        'startdate': row[3].date(),
+        'enddate': row[4].date(),
+        'proposed_start': row[5],
         'total_start': row[6],
-        'locked_end': row[7],
+        'proposed_end': row[7],
         'total_end': row[8],
         }
-
-
-class DetailReport(GridReport):
-  '''
-  A list report to show operationplans.
-  '''
-  template = 'output/operationplan.html'
-  title = _("Operation detail report")
-  model = OperationPlan
-  permissions = (("view_operation_report", "Can view operation report"),)
-  frozenColumns = 0
-  editable = False
-  multiselect = False
-
-  @ classmethod
-  def basequeryset(reportclass, request, args, kwargs):
-    if args and args[0]:
-      base = OperationPlan.objects.filter(operation__exact=args[0])
-    else:
-      base = OperationPlan.objects
-    return base.select_related() \
-      .extra(select={
-        'operation_in': "select name from operation where out_operationplan.operation = operation.name",
-        'demand': ("select %s(q || ' : ' || d, ', ') from ("
-                   "select round(sum(quantity)) as q, demand as d "
-                   "from out_demandpegging "
-                   "where out_demandpegging.operationplan = out_operationplan.id "
-                   "group by demand order by 1 desc, 2) peg"
-                   % string_agg())
-        })
-
-  @classmethod
-  def extra_context(reportclass, request, *args, **kwargs):
-    if args and args[0]:
-      request.session['lasttab'] = 'plandetail'
-    return {'active_tab': 'plandetail'}
-
-
-  rows = (
-    GridFieldInteger('id', title=_('operationplan'), key=True, editable=False),
-    GridFieldText('operation', title=_('operation'), editable=False, formatter='detail', extra="role:'input/operation'"),
-    GridFieldNumber('quantity', title=_('quantity'), editable=False),
-    GridFieldText('demand', title=_('demand quantity'), formatter='demanddetail', width=300, editable=False),
-    GridFieldDateTime('startdate', title=_('start date'), editable=False),
-    GridFieldDateTime('enddate', title=_('end date'), editable=False),
-    GridFieldNumber('criticality', title=_('criticality'), editable=False),
-    GridFieldBool('locked', title=_('locked'), editable=False),
-    GridFieldNumber('unavailable', title=_('unavailable'), editable=False),
-    GridFieldInteger('owner', title=_('owner'), editable=False),
-    )

@@ -17,10 +17,11 @@
 
 from datetime import datetime, time
 
-from django.db import models
+from django.db import models, DEFAULT_DB_ALIAS
+from django.db.models import Max
 from django.utils.translation import ugettext_lazy as _
 
-from freppledb.common.fields import DurationField
+from freppledb.common.fields import JSONField
 from freppledb.common.models import HierarchyModel, AuditModel
 
 
@@ -50,7 +51,7 @@ class Calendar(AuditModel):
     )
   defaultvalue = models.DecimalField(
     _('default value'), max_digits=15,
-    decimal_places=4, default='0.00', null=True, blank=True,
+    decimal_places=6, default='0.00', null=True, blank=True,
     help_text=_('Value to be used when no entry is effective')
     )
 
@@ -60,9 +61,9 @@ class Calendar(AuditModel):
   class Meta(AuditModel.Meta):
     db_table = 'calendar'
     #. Translators: Translation included with Django
-    verbose_name = _('Calendar')
+    verbose_name = _('calendar')
     #. Translators: Translation included with Django
-    verbose_name_plural = _('Calendars')
+    verbose_name_plural = _('calendars')
     ordering = ['name']
 
 
@@ -71,12 +72,12 @@ class CalendarBucket(AuditModel):
   # Database fields
   id = models.AutoField(_('identifier'), primary_key=True)
   #. Translators: Translation included with Django
-  calendar = models.ForeignKey(Calendar, verbose_name=_('Calendar'), related_name='buckets')
+  calendar = models.ForeignKey(Calendar, verbose_name=_('calendar'), related_name='buckets')
   startdate = models.DateTimeField(_('start date'), null=True, blank=True)
   enddate = models.DateTimeField(_('end date'), null=True, blank=True, default=datetime(2030, 12, 31))
   value = models.DecimalField(
     _('value'), default='0.00', blank=True,
-    max_digits=15, decimal_places=4
+    max_digits=15, decimal_places=6
     )
   priority = models.IntegerField(_('priority'), default=0, blank=True, null=True)
 
@@ -109,9 +110,15 @@ class CalendarBucket(AuditModel):
 
 class Location(AuditModel, HierarchyModel):
   # Database fields
-  description = models.CharField(_('description'), max_length=500, null=True, blank=True)
-  category = models.CharField(_('category'), max_length=300, null=True, blank=True, db_index=True)
-  subcategory = models.CharField(_('subcategory'), max_length=300, null=True, blank=True, db_index=True)
+  description = models.CharField(
+    _('description'), max_length=500, null=True, blank=True
+    )
+  category = models.CharField(
+    _('category'), max_length=300, null=True, blank=True, db_index=True
+    )
+  subcategory = models.CharField(
+    _('subcategory'), max_length=300, null=True, blank=True, db_index=True
+    )
   available = models.ForeignKey(
     Calendar, verbose_name=_('available'),
     null=True, blank=True,
@@ -130,9 +137,15 @@ class Location(AuditModel, HierarchyModel):
 
 class Customer(AuditModel, HierarchyModel):
   # Database fields
-  description = models.CharField(_('description'), max_length=500, null=True, blank=True)
-  category = models.CharField(_('category'), max_length=300, null=True, blank=True, db_index=True)
-  subcategory = models.CharField(_('subcategory'), max_length=300, null=True, blank=True, db_index=True)
+  description = models.CharField(
+    _('description'), max_length=500, null=True, blank=True
+    )
+  category = models.CharField(
+    _('category'), max_length=300, null=True, blank=True, db_index=True
+    )
+  subcategory = models.CharField(
+    _('subcategory'), max_length=300, null=True, blank=True, db_index=True
+    )
 
   def __str__(self):
     return self.name
@@ -149,13 +162,9 @@ class Item(AuditModel, HierarchyModel):
   description = models.CharField(_('description'), max_length=500, null=True, blank=True)
   category = models.CharField(_('category'), max_length=300, null=True, blank=True, db_index=True)
   subcategory = models.CharField(_('subcategory'), max_length=300, null=True, blank=True, db_index=True)
-  operation = models.ForeignKey(
-    'Operation', verbose_name=_('delivery operation'), null=True, blank=True,
-    help_text=_("Default operation used to ship a demand for this item")
-    )
   price = models.DecimalField(
     _('price'), null=True, blank=True,
-    max_digits=15, decimal_places=4,
+    max_digits=15, decimal_places=6,
     help_text=_("Selling price of the item")
     )
 
@@ -167,148 +176,6 @@ class Item(AuditModel, HierarchyModel):
     verbose_name = _('item')
     verbose_name_plural = _('items')
     ordering = ['name']
-
-
-class Supplier(AuditModel, HierarchyModel):
-  # Database fields
-  description = models.CharField(_('description'), max_length=500, null=True, blank=True)
-  category = models.CharField(_('category'), max_length=300, null=True, blank=True, db_index=True)
-  subcategory = models.CharField(_('subcategory'), max_length=300, null=True, blank=True, db_index=True)
-
-  def __str__(self):
-    return self.name
-
-  class Meta(AuditModel.Meta):
-    db_table = 'supplier'
-    verbose_name = _('supplier')
-    verbose_name_plural = _('suppliers')
-    ordering = ['name']
-
-
-class ItemSupplier(AuditModel):
-
-  # Database fields
-  id = models.AutoField(_('identifier'), primary_key=True)
-  item = models.ForeignKey(
-    Item, verbose_name=_('item'),
-    db_index=True, related_name='itemsuppliers'
-    )
-  location = models.ForeignKey(
-    Location, verbose_name=_('location'), null=True, blank=True,
-    db_index=True, related_name='itemsuppliers'
-    )
-  supplier = models.ForeignKey(
-    Supplier, verbose_name=_('supplier'),
-    db_index=True, related_name='suppliers'
-    )
-  leadtime = DurationField(
-    _('lead time'), null=True, blank=True,
-    max_digits=15, decimal_places=4,
-    help_text=_('Purchasing lead time')
-    )
-  sizeminimum = models.DecimalField(
-    _('size minimum'), max_digits=15, decimal_places=4,
-    null=True, blank=True, default='1.0',
-    help_text=_("A minimum purchasing quantity")
-    )
-  sizemultiple = models.DecimalField(
-    _('size multiple'), null=True, blank=True,
-    max_digits=15, decimal_places=4,
-    help_text=_("A multiple purchasing quantity")
-    )
-  cost = models.DecimalField(
-    _('cost'), null=True, blank=True,
-    max_digits=15, decimal_places=4,
-    help_text=_("Purchasing cost per unit")
-    )
-  priority = models.IntegerField(
-    _('priority'), default=1, null=True, blank=True,
-    help_text=_('Priority among all alternates')
-    )
-  effective_start = models.DateTimeField(
-    _('effective start'), null=True, blank=True,
-    help_text=_('Validity start date')
-    )
-  effective_end = models.DateTimeField(
-    _('effective end'), null=True, blank=True,
-    help_text=_('Validity end date')
-    )
-
-  def __str__(self):
-    return '%s - %s - %s' % (
-      self.supplier.name if self.supplier else 'No supplier',
-      self.item.name if self.item else 'No item',
-      self.location.name if self.location else 'Any location'
-      )
-
-  class Meta(AuditModel.Meta):
-    db_table = 'itemsupplier'
-    unique_together = (('item', 'location', 'supplier', 'effective_start'),)
-    verbose_name = _('item supplier')
-    verbose_name_plural = _('item suppliers')
-
-
-class ItemDistribution(AuditModel):
-
-  # Database fields
-  id = models.AutoField(_('identifier'), primary_key=True)
-  item = models.ForeignKey(
-    Item, verbose_name=_('item'),
-    db_index=True, related_name='distributions'
-    )
-  location = models.ForeignKey(
-    Location, verbose_name=_('location'), null=True, blank=True,
-    db_index=True, related_name='itemdistributions_destination'
-    )
-  origin = models.ForeignKey(
-    Location, verbose_name=_('origin'),
-    db_index=True, related_name='itemdistributions_origin'
-    )
-  leadtime = DurationField(
-    _('lead time'), null=True, blank=True,
-    max_digits=15, decimal_places=4,
-    help_text=_('lead time')
-    )
-  sizeminimum = models.DecimalField(
-    _('size minimum'), max_digits=15, decimal_places=4,
-    null=True, blank=True, default='1.0',
-    help_text=_("A minimum shipping quantity")
-    )
-  sizemultiple = models.DecimalField(
-    _('size multiple'), null=True, blank=True,
-    max_digits=15, decimal_places=4,
-    help_text=_("A multiple shipping quantity")
-    )
-  cost = models.DecimalField(
-    _('cost'), null=True, blank=True,
-    max_digits=15, decimal_places=4,
-    help_text=_("Shipping cost per unit")
-    )
-  priority = models.IntegerField(
-    _('priority'), default=1, null=True, blank=True,
-    help_text=_('Priority among all alternates')
-    )
-  effective_start = models.DateTimeField(
-    _('effective start'), null=True, blank=True,
-    help_text=_('Validity start date')
-    )
-  effective_end = models.DateTimeField(
-    _('effective end'), null=True, blank=True,
-    help_text=_('Validity end date')
-    )
-
-  def __str__(self):
-    return '%s - %s - %s' % (
-      self.location.name if self.location else 'Any destination',
-      self.item.name if self.item else 'No item',
-      self.origin.name if self.origin else 'No origin'
-      )
-
-  class Meta(AuditModel.Meta):
-    db_table = 'itemdistribution'
-    unique_together = (('item', 'location', 'origin', 'effective_start'),)
-    verbose_name = _('item distribution')
-    verbose_name_plural = _('item distributions')
 
 
 class Operation(AuditModel):
@@ -328,46 +195,59 @@ class Operation(AuditModel):
   description = models.CharField(_('description'), max_length=500, null=True, blank=True)
   category = models.CharField(_('category'), max_length=300, null=True, blank=True, db_index=True)
   subcategory = models.CharField(_('subcategory'), max_length=300, null=True, blank=True, db_index=True)
-  location = models.ForeignKey(
-    Location, verbose_name=_('location'),
-    null=True, blank=True, db_index=True
+  item = models.ForeignKey(
+    Item, verbose_name=_('item'), null=True, blank=True,
+    db_index=True, related_name='operations'
     )
-  fence = DurationField(
-    _('release fence'), max_digits=15, decimal_places=4, null=True, blank=True,
+  location = models.ForeignKey(
+    Location, verbose_name=_('location'), db_index=True
+    )
+  priority = models.IntegerField(
+    _('priority'), default=1, null=True, blank=True,
+    help_text=_('Priority among all alternates')
+    )
+  effective_start = models.DateTimeField(
+    _('effective start'), null=True, blank=True,
+    help_text=_('Validity start date')
+    )
+  effective_end = models.DateTimeField(
+    _('effective end'), null=True, blank=True,
+    help_text=_('Validity end date')
+    )
+  fence = models.DurationField(
+    _('release fence'), null=True, blank=True,
     help_text=_("Operationplans within this time window from the current day are expected to be released to production ERP")
     )
-  posttime = DurationField(
-    _('post-op time'), max_digits=15, decimal_places=4, null=True, blank=True,
+  posttime = models.DurationField(
+    _('post-op time'), null=True, blank=True,
     help_text=_("A delay time to be respected as a soft constraint after ending the operation")
     )
   sizeminimum = models.DecimalField(
-    _('size minimum'), max_digits=15, decimal_places=4,
+    _('size minimum'), max_digits=15, decimal_places=6,
     null=True, blank=True, default='1.0',
     help_text=_("A minimum quantity for operationplans")
     )
   sizemultiple = models.DecimalField(
     _('size multiple'), null=True, blank=True,
-    max_digits=15, decimal_places=4,
+    max_digits=15, decimal_places=6,
     help_text=_("A multiple quantity for operationplans")
     )
   sizemaximum = models.DecimalField(
     _('size maximum'), null=True, blank=True,
-    max_digits=15, decimal_places=4,
+    max_digits=15, decimal_places=6,
     help_text=_("A maximum quantity for operationplans")
     )
   cost = models.DecimalField(
     _('cost'), null=True, blank=True,
-    max_digits=15, decimal_places=4,
+    max_digits=15, decimal_places=6,
     help_text=_("Cost per operationplan unit")
     )
-  duration = DurationField(
+  duration = models.DurationField(
     _('duration'), null=True, blank=True,
-    max_digits=15, decimal_places=4,
     help_text=_("A fixed duration for the operation")
     )
-  duration_per = DurationField(
+  duration_per = models.DurationField(
     _('duration per unit'), null=True, blank=True,
-    max_digits=15, decimal_places=4,
     help_text=_("A variable duration for the operation")
     )
   search = models.CharField(
@@ -439,102 +319,56 @@ class Buffer(AuditModel, HierarchyModel):
   types = (
     ('default', _('Default')),
     ('infinite', _('Infinite')),
-    ('procure', _('Procure')),
   )
 
   # Fields common to all buffer types
-  description = models.CharField(_('description'), max_length=500, null=True, blank=True)
-  category = models.CharField(_('category'), max_length=300, null=True, blank=True, db_index=True)
-  subcategory = models.CharField(_('subcategory'), max_length=300, null=True, blank=True, db_index=True)
-  type = models.CharField(_('type'), max_length=20, null=True, blank=True, choices=types, default='default')
-  location = models.ForeignKey(
-    Location, verbose_name=_('location'), null=True,
-    blank=True, db_index=True
+  description = models.CharField(
+    _('description'), max_length=500, null=True, blank=True
     )
-  item = models.ForeignKey(Item, verbose_name=_('item'), db_index=True, null=True)
+  category = models.CharField(
+    _('category'), max_length=300, null=True, blank=True, db_index=True
+    )
+  subcategory = models.CharField(
+    _('subcategory'), max_length=300, null=True, blank=True, db_index=True
+    )
+  type = models.CharField(
+    _('type'), max_length=20, null=True, blank=True, choices=types,
+    default='default'
+    )
+  location = models.ForeignKey(
+    Location, verbose_name=_('location'), 
+    db_index=True, blank=False, null=False
+    )
+  item = models.ForeignKey(
+    Item, verbose_name=_('item'), 
+    db_index=True, blank=False, null=False
+    )
   onhand = models.DecimalField(
     _('onhand'), null=True, blank=True,
-    max_digits=15, decimal_places=4,
+    max_digits=15, decimal_places=6,
     default="0.00", help_text=_('current inventory')
     )
   minimum = models.DecimalField(
     _('minimum'), null=True, blank=True,
-    max_digits=15, decimal_places=4,
-    default="0.00", help_text=_('Safety stock')
+    max_digits=15, decimal_places=6,
+    default="0.00", help_text=_('safety stock')
     )
   minimum_calendar = models.ForeignKey(
     Calendar, verbose_name=_('minimum calendar'),
     null=True, blank=True,
     help_text=_('Calendar storing a time-dependent safety stock profile')
     )
-  producing = models.ForeignKey(
-    Operation, verbose_name=_('producing'),
-    null=True, blank=True, related_name='used_producing',
-    help_text=_('Operation to replenish the buffer')
-    )
-  # Extra fields for procurement buffers
-  leadtime = DurationField(
-    _('leadtime'), null=True, blank=True,
-    max_digits=15, decimal_places=4,
-    help_text=_('Leadtime for supplier of a procure buffer')
-    )
-  fence = DurationField(
-    _('fence'), null=True, blank=True,
-    max_digits=15, decimal_places=4,
-    help_text=_('Frozen fence for creating new procurements')
-    )
-  min_inventory = models.DecimalField(
-    _('min_inventory'), null=True, blank=True,
-    max_digits=15, decimal_places=4,
-    help_text=_('Inventory level that triggers replenishment of a procure buffer')
-    )
-  max_inventory = models.DecimalField(
-    _('max_inventory'), null=True, blank=True,
-    max_digits=15, decimal_places=4,
-    help_text=_('Inventory level to which a procure buffer is replenished')
-    )
-  min_interval = DurationField(
+  min_interval = models.DurationField(
     _('min_interval'), null=True, blank=True,
-    max_digits=15, decimal_places=4,
-    help_text=_('Minimum time interval between replenishments of a procure buffer')
-    )
-  max_interval = DurationField(
-    _('max_interval'), null=True, blank=True,
-    max_digits=15, decimal_places=4,
-    help_text=_('Maximum time interval between replenishments of a procure buffer')
-    )
-  size_minimum = models.DecimalField(
-    _('size_minimum'), null=True, blank=True,
-    max_digits=15, decimal_places=4,
-    help_text=_('Minimum size of replenishments of a procure buffer')
-    )
-  size_multiple = models.DecimalField(
-    _('size_multiple'), null=True, blank=True,
-    max_digits=15, decimal_places=4,
-    help_text=_('Replenishments of a procure buffer are a multiple of this quantity')
-    )
-  size_maximum = models.DecimalField(
-    _('size_maximum'), null=True, blank=True,
-    max_digits=15, decimal_places=4,
-    help_text=_('Maximum size of replenishments of a procure buffer')
+    help_text=_('Batching window for grouping replenishments in batches')
     )
 
   def __str__(self):
     return self.name
 
   def save(self, *args, **kwargs):
-    if self.type == 'infinite' or self.type == 'procure':
-      # Handle irrelevant fields for infinite and procure buffers
-      self.producing = None
-    if self.type != 'procure':
-      # Handle irrelevant fields for non-procure buffers
-      self.leadtime = None
-      self.fence = None
-      self.min_inventory = None
-      self.max_inventory = None
-      self.size_minimum = None
-      self.size_multiple = None
-      self.size_maximum = None
+    self.name = "%s @ %s" % (self.item.name if self.item else "NULL", self.location.name if self.location else "NULL")
+    # Call the real save() method
     super(Buffer, self).save(*args, **kwargs)
 
   class Meta(AuditModel.Meta):
@@ -542,6 +376,7 @@ class Buffer(AuditModel, HierarchyModel):
     verbose_name = _('buffer')
     verbose_name_plural = _('buffers')
     ordering = ['name']
+    unique_together = (('item', 'location'),)
 
 
 class SetupMatrix(AuditModel):
@@ -576,12 +411,12 @@ class SetupRule(AuditModel):
     _('to setup'), max_length=300, blank=True, null=True,
     help_text=_("Name of the new setup (wildcard characters are supported)")
     )
-  duration = DurationField(
-    _('duration'), max_digits=15, decimal_places=0, null=True, blank=True,
+  duration = models.DurationField(
+    _('duration'), null=True, blank=True,
     help_text=_("Duration of the changeover")
     )
   cost = models.DecimalField(
-    _('cost'), max_digits=15, decimal_places=4, null=True, blank=True,
+    _('cost'), max_digits=15, decimal_places=6, null=True, blank=True,
     help_text=_("Cost of the conversion")
     )
 
@@ -599,9 +434,9 @@ class SetupRule(AuditModel):
 class Resource(AuditModel, HierarchyModel):
   # Types of resources
   types = (
-    ('default', _('Default')),
-    ('buckets', _('Buckets')),
-    ('infinite', _('Infinite')),
+    ('default', _('default')),
+    ('buckets', _('buckets')),
+    ('infinite', _('infinite')),
   )
 
   # Database fields
@@ -619,7 +454,7 @@ class Resource(AuditModel, HierarchyModel):
     )
   maximum = models.DecimalField(
     _('maximum'), default="1.00", null=True, blank=True,
-    max_digits=15, decimal_places=4,
+    max_digits=15, decimal_places=6,
     help_text=_('Size of the resource')
     )
   maximum_calendar = models.ForeignKey(
@@ -633,11 +468,10 @@ class Resource(AuditModel, HierarchyModel):
     )
   cost = models.DecimalField(
     _('cost'), null=True, blank=True,
-    max_digits=15, decimal_places=4,
+    max_digits=15, decimal_places=6,
     help_text=_("Cost for using 1 unit of the resource for 1 hour"))
-  maxearly = DurationField(
-    _('max early'), max_digits=15, decimal_places=0,
-    null=True, blank=True,
+  maxearly = models.DurationField(
+    _('max early'), null=True, blank=True,
     help_text=_('Time window before the ask date where we look for available capacity')
     )
   setupmatrix = models.ForeignKey(
@@ -656,10 +490,10 @@ class Resource(AuditModel, HierarchyModel):
 
   def save(self, *args, **kwargs):
     if self.type == 'infinite':
-        # These fields are not relevant for infinite resources
-        self.maximum = None
-        self.maximum_calendar_id = None
-        self.maxearly = None
+      # These fields are not relevant for infinite resources
+      self.maximum = None
+      self.maximum_calendar_id = None
+      self.maxearly = None
     # Call the real save() method
     super(Resource, self).save(*args, **kwargs)
 
@@ -693,10 +527,12 @@ class ResourceSkill(AuditModel):
   # Database fields
   id = models.AutoField(_('identifier'), primary_key=True)
   resource = models.ForeignKey(
-    Resource, verbose_name=_('resource'), db_index=True, related_name='skills'
+    Resource, verbose_name=_('resource'), db_index=True, related_name='skills',
+    blank=False, null=False
     )
   skill = models.ForeignKey(
-    Skill, verbose_name=_('skill'), db_index=True, related_name='resources'
+    Skill, verbose_name=_('skill'), db_index=True, related_name='resources',
+    blank=False, null=False
     )
   effective_start = models.DateTimeField(
     _('effective start'), null=True, blank=True,
@@ -719,7 +555,7 @@ class ResourceSkill(AuditModel):
     ordering = ['resource', 'skill']
 
 
-class Flow(AuditModel):
+class OperationMaterial(AuditModel):
   # Types of flow
   types = (
     ('start', _('Start')),
@@ -732,15 +568,17 @@ class Flow(AuditModel):
   id = models.AutoField(_('identifier'), primary_key=True)
   operation = models.ForeignKey(
     Operation, verbose_name=_('operation'),
-    db_index=True, related_name='flows'
+    db_index=True, related_name='operationmaterials',
+    blank=False, null=False
     )
-  thebuffer = models.ForeignKey(
-    Buffer, verbose_name=_('buffer'),
-    db_index=True, related_name='flows'
+  item = models.ForeignKey(
+    Item, verbose_name=_('item'),
+    db_index=True, related_name='operationmaterials',
+    blank=False, null=False
     )
   quantity = models.DecimalField(
     _('quantity'), default='1.00',
-    max_digits=15, decimal_places=4,
+    max_digits=15, decimal_places=6,
     help_text=_('Quantity to consume or produce per operationplan unit')
     )
   type = models.CharField(
@@ -758,15 +596,11 @@ class Flow(AuditModel):
   name = models.CharField(
     #. Translators: Translation included with Django
     _('name'), max_length=300, null=True, blank=True,
-    help_text=_('Optional name of this flow')
-    )
-  alternate = models.CharField(
-    _('alternate'), max_length=300, null=True, blank=True,
-    help_text=_('Puts the flow in a group of alternate flows')
+    help_text=_('Optional name of this operation material')
     )
   priority = models.IntegerField(
     _('priority'), default=1, null=True, blank=True,
-    help_text=_('Priority of this flow in a group of alternates')
+    help_text=_('Priority of this operation material in a group of alternates')
     )
   search = models.CharField(
     _('search mode'), max_length=20,
@@ -775,24 +609,38 @@ class Flow(AuditModel):
     )
 
   def __str__(self):
-    return '%s - %s' % (self.operation.name, self.thebuffer.name)
+    return '%s - %s' % (
+      self.operation.name if self.operation else None,
+      self.item.name if self.item else None
+      )
 
   class Meta(AuditModel.Meta):
-    db_table = 'flow'
-    unique_together = (('operation', 'thebuffer'),)  # TODO also include effectivity in this
-    verbose_name = _('flow')
-    verbose_name_plural = _('flows')
+    db_table = 'operationmaterial'
+    unique_together = (('operation', 'item', 'effective_start'),)
+    verbose_name = _('operation material')
+    verbose_name_plural = _('operation materials')
 
 
-class Load(AuditModel):
+class OperationResource(AuditModel):
   # Database fields
   id = models.AutoField(_('identifier'), primary_key=True)
-  operation = models.ForeignKey(Operation, verbose_name=_('operation'), db_index=True, related_name='loads')
-  resource = models.ForeignKey(Resource, verbose_name=_('resource'), db_index=True, related_name='loads')
-  skill = models.ForeignKey(Skill, verbose_name=_('skill'), null=True, blank=True, db_index=True, related_name='loads')
+  operation = models.ForeignKey(
+    Operation, verbose_name=_('operation'), 
+    db_index=True, related_name='operationresources',
+    blank=False, null=False
+    )
+  resource = models.ForeignKey(
+    Resource, verbose_name=_('resource'), db_index=True,
+    related_name='operationresources',
+    blank=False, null=False
+    )
+  skill = models.ForeignKey(
+    Skill, verbose_name=_('skill'), related_name='operationresources',
+    null=True, blank=True, db_index=True
+    )
   quantity = models.DecimalField(
     _('quantity'), default='1.00',
-    max_digits=15, decimal_places=4
+    max_digits=15, decimal_places=6
     )
   effective_start = models.DateTimeField(
     _('effective start'), null=True, blank=True,
@@ -806,10 +654,6 @@ class Load(AuditModel):
     #. Translators: Translation included with Django
     _('name'), max_length=300, null=True, blank=True,
     help_text=_('Optional name of this load')
-    )
-  alternate = models.CharField(
-    _('alternate'), max_length=300, null=True, blank=True,
-    help_text=_('Puts the load in a group of alternate loads')
     )
   priority = models.IntegerField(
     _('priority'), default=1, null=True, blank=True,
@@ -829,171 +673,179 @@ class Load(AuditModel):
     return '%s - %s' % (self.operation.name, self.resource.name)
 
   class Meta(AuditModel.Meta):
-    db_table = 'resourceload'
-    unique_together = (('operation', 'resource'),)  # TODO also include effectivity in this
-    verbose_name = _('load')
-    verbose_name_plural = _('loads')
+    db_table = 'operationresource'
+    unique_together = (('operation', 'resource', 'effective_start'),)
+    verbose_name = _('operation resource')
+    verbose_name_plural = _('operation resources')
 
 
-class OperationPlan(AuditModel):
-  # Possible status
-  orderstatus = (
-    ('proposed', _('proposed')),
-    ('confirmed', _('confirmed')),
-    ('closed', _('closed')),
-  )
-
+class Supplier(AuditModel, HierarchyModel):
   # Database fields
-  id = models.IntegerField(
-    _('identifier'), primary_key=True,
-    help_text=_('Unique identifier of an operationplan')
-    )
-  status = models.CharField(
-    _('status'), null=True, blank=True, max_length=20, choices=orderstatus,
-    help_text=_('Status of the order')
-    )
-  reference = models.CharField(
-    _('reference'), max_length=300, null=True, blank=True,
-    help_text=_('External reference of this order')
-    )
-  operation = models.ForeignKey(
-    Operation, verbose_name=_('operation'),
-    db_index=True
-    )
-  quantity = models.DecimalField(
-    _('quantity'), max_digits=15,
-    decimal_places=4, default='1.00'
-    )
-  startdate = models.DateTimeField(_('start date'), help_text=_('start date'), null=True, blank=True)
-  enddate = models.DateTimeField(_('end date'), help_text=_('end date'), null=True, blank=True)
-  criticality = models.DecimalField(
-    _('criticality'), max_digits=15,
-    decimal_places=4, null=True, blank=True,
-    )
-  owner = models.ForeignKey(
-    'self', verbose_name=_('owner'), null=True, blank=True,
-    related_name='xchildren', help_text=_('Hierarchical parent')
-    )
+  description = models.CharField(_('description'), max_length=500, null=True, blank=True)
+  category = models.CharField(_('category'), max_length=300, null=True, blank=True, db_index=True)
+  subcategory = models.CharField(_('subcategory'), max_length=300, null=True, blank=True, db_index=True)
 
   def __str__(self):
-    return str(self.id)
+    return self.name
 
   class Meta(AuditModel.Meta):
-    db_table = 'operationplan'
-    verbose_name = _('operationplan')
-    verbose_name_plural = _('operationplans')
-    ordering = ['id']
+    db_table = 'supplier'
+    verbose_name = _('supplier')
+    verbose_name_plural = _('suppliers')
+    ordering = ['name']
 
 
-class DistributionOrder(AuditModel):
-  # Possible status
-  orderstatus = (
-    ('proposed', _('proposed')),
-    ('confirmed', _('confirmed')),
-    ('closed', _('closed')),
-  )
-
+class ItemSupplier(AuditModel):
   # Database fields
-  id = models.IntegerField(
-    _('identifier'), primary_key=True,
-    help_text=_('Unique identifier')
-    )
-  reference = models.CharField(
-    _('reference'), max_length=300, null=True, blank=True,
-    help_text=_('External reference of this order')
-    )
-  status = models.CharField(
-    _('status'), null=True, blank=True, max_length=20, choices=orderstatus,
-    help_text=_('Status of the order')
-    )
+  id = models.AutoField(_('identifier'), primary_key=True)
   item = models.ForeignKey(
     Item, verbose_name=_('item'),
-    db_index=True
+    db_index=True, related_name='itemsuppliers',
+    null=False, blank=False
     )
-  origin = models.ForeignKey(
-    Location, verbose_name=_('origin'), null=True, blank=True,
-    related_name='origins', db_index=True
-    )
-  destination = models.ForeignKey(
-    Location, verbose_name=_('destination'),
-    related_name='destinations', db_index=True
-    )
-  quantity = models.DecimalField(
-    _('quantity'), max_digits=15,
-    decimal_places=4, default='1.00'
-    )
-  startdate = models.DateTimeField(_('start date'), help_text=_('start date'), null=True, blank=True)
-  enddate = models.DateTimeField(_('end date'), help_text=_('end date'), null=True, blank=True)
-  consume_material = models.BooleanField(_('consume material'), blank=True, default=True,
-    help_text=_('Consume material at origin location')
-    )
-  criticality = models.DecimalField(
-    _('criticality'), max_digits=15,
-    decimal_places=4, null=True, blank=True,
-    )
-
-  def __str__(self):
-    return str(self.id)
-
-  class Meta(AuditModel.Meta):
-    db_table = 'distribution_order'
-    verbose_name = _('distribution order')
-    verbose_name_plural = _('distribution orders')
-    ordering = ['id']
-
-
-class PurchaseOrder(AuditModel):
-  # Possible status
-  orderstatus = (
-    ('proposed', _('proposed')),
-    ('confirmed', _('confirmed')),
-    ('closed', _('closed')),
-  )
-
-  # Database fields
-  id = models.IntegerField(
-    _('identifier'), primary_key=True,
-    help_text=_('Unique identifier')
-    )
-  reference = models.CharField(
-    _('reference'), max_length=300, null=True, blank=True,
-    help_text=_('External reference of this order')
-    )
-  status = models.CharField(
-    _('status'), null=True, blank=True, max_length=20, choices=orderstatus,
-    help_text=_('Status of the order')
-    )
-  item = models.ForeignKey(
-    Item, verbose_name=_('item'),
-    db_index=True
+  location = models.ForeignKey(
+    Location, verbose_name=_('location'), null=True, blank=True,
+    db_index=True, related_name='itemsuppliers'
     )
   supplier = models.ForeignKey(
     Supplier, verbose_name=_('supplier'),
-    db_index=True
+    db_index=True, related_name='suppliers',
+    null=False, blank=False
     )
-  location = models.ForeignKey(
-    Location, verbose_name=_('location'),
-    db_index=True
+  leadtime = models.DurationField(
+    _('lead time'), null=True, blank=True,
+    help_text=_('Purchasing lead time')
     )
-  quantity = models.DecimalField(
-    _('quantity'), max_digits=15,
-    decimal_places=4, default='1.00'
+  sizeminimum = models.DecimalField(
+    _('size minimum'), max_digits=15, decimal_places=6,
+    null=True, blank=True, default='1.0',
+    help_text=_("A minimum purchasing quantity")
     )
-  startdate = models.DateTimeField(_('start date'), help_text=_('start date'), null=True, blank=True)
-  enddate = models.DateTimeField(_('end date'), help_text=_('end date'), null=True, blank=True)
-  criticality = models.DecimalField(
-    _('criticality'), max_digits=15,
-    decimal_places=4, null=True, blank=True,
+  sizemultiple = models.DecimalField(
+    _('size multiple'), null=True, blank=True,
+    max_digits=15, decimal_places=6,
+    help_text=_("A multiple purchasing quantity")
+    )
+  cost = models.DecimalField(
+    _('cost'), null=True, blank=True,
+    max_digits=15, decimal_places=6,
+    help_text=_("Purchasing cost per unit")
+    )
+  priority = models.IntegerField(
+    _('priority'), default=1, null=True, blank=True,
+    help_text=_('Priority among all alternates')
+    )
+  effective_start = models.DateTimeField(
+    _('effective start'), null=True, blank=True,
+    help_text=_('Validity start date')
+    )
+  effective_end = models.DateTimeField(
+    _('effective end'), null=True, blank=True,
+    help_text=_('Validity end date')
+    )
+  resource = models.ForeignKey(
+    Resource, verbose_name=_('resource'), null=True, blank=True,
+    db_index=True, related_name='itemsuppliers',
+    help_text=_("Resource to model the supplier capacity")
+    )
+  resource_qty = models.DecimalField(
+    _('resource quantity'), null=True, blank=True,
+    max_digits=15, decimal_places=6, default='1.0',
+    help_text=_("Resource capacity consumed per purchased unit")
+    )
+  fence = models.DurationField(
+    _('fence'), null=True, blank=True,
+    help_text=_('Frozen fence for creating new procurements')
     )
 
   def __str__(self):
-    return str(self.id)
+    return '%s - %s - %s' % (
+      self.supplier.name if self.supplier else 'No supplier',
+      self.item.name if self.item else 'No item',
+      self.location.name if self.location else 'Any location'
+      )
 
   class Meta(AuditModel.Meta):
-    db_table = 'purchase_order'
-    verbose_name = _('purchase order')
-    verbose_name_plural = _('purchase orders')
-    ordering = ['id']
+    db_table = 'itemsupplier'
+    unique_together = (('item', 'location', 'supplier', 'effective_start'),)
+    verbose_name = _('item supplier')
+    verbose_name_plural = _('item suppliers')
+
+
+class ItemDistribution(AuditModel):
+  # Database fields
+  id = models.AutoField(_('identifier'), primary_key=True)
+  item = models.ForeignKey(
+    Item, verbose_name=_('item'),
+    db_index=True, related_name='distributions',
+    null=False, blank=False
+    )
+  location = models.ForeignKey(
+    Location, verbose_name=_('location'), null=True, blank=True,
+    db_index=True, related_name='itemdistributions_destination'
+    )
+  origin = models.ForeignKey(
+    Location, verbose_name=_('origin'),
+    db_index=True, related_name='itemdistributions_origin'
+    )
+  leadtime = models.DurationField(
+    _('lead time'), null=True, blank=True,
+    help_text=_('lead time')
+    )
+  sizeminimum = models.DecimalField(
+    _('size minimum'), max_digits=15, decimal_places=6,
+    null=True, blank=True, default='1.0',
+    help_text=_("A minimum shipping quantity")
+    )
+  sizemultiple = models.DecimalField(
+    _('size multiple'), null=True, blank=True,
+    max_digits=15, decimal_places=6,
+    help_text=_("A multiple shipping quantity")
+    )
+  cost = models.DecimalField(
+    _('cost'), null=True, blank=True,
+    max_digits=15, decimal_places=6,
+    help_text=_("Shipping cost per unit")
+    )
+  priority = models.IntegerField(
+    _('priority'), default=1, null=True, blank=True,
+    help_text=_('Priority among all alternates')
+    )
+  effective_start = models.DateTimeField(
+    _('effective start'), null=True, blank=True,
+    help_text=_('Validity start date')
+    )
+  effective_end = models.DateTimeField(
+    _('effective end'), null=True, blank=True,
+    help_text=_('Validity end date')
+    )
+  resource = models.ForeignKey(
+    Resource, verbose_name=_('resource'), null=True, blank=True,
+    db_index=True, related_name='itemdistributions',
+    help_text=_("Resource to model the distribution capacity")
+    )
+  resource_qty = models.DecimalField(
+    _('resource quantity'), null=True, blank=True,
+    max_digits=15, decimal_places=6, default='1.0',
+    help_text=_("Resource capacity consumed per distributed unit")
+    )
+  fence = models.DurationField(
+    _('fence'), null=True, blank=True,
+    help_text=_('Frozen fence for creating new shipments')
+    )
+
+  def __str__(self):
+    return '%s - %s - %s' % (
+      self.location.name if self.location else 'Any destination',
+      self.item.name if self.item else 'No item',
+      self.origin.name if self.origin else 'No origin'
+      )
+
+  class Meta(AuditModel.Meta):
+    db_table = 'itemdistribution'
+    unique_together = (('item', 'location', 'origin', 'effective_start'),)
+    verbose_name = _('item distribution')
+    verbose_name_plural = _('item distributions')
 
 
 class Demand(AuditModel, HierarchyModel):
@@ -1025,13 +877,13 @@ class Demand(AuditModel, HierarchyModel):
     _('subcategory'), max_length=300, null=True, blank=True, db_index=True
     )
   customer = models.ForeignKey(
-    Customer, verbose_name=_('customer'), null=True, blank=True, db_index=True
+    Customer, verbose_name=_('customer'), db_index=True
     )
   item = models.ForeignKey(
-    Item, verbose_name=_('item'), null=True, blank=True, db_index=True
+    Item, verbose_name=_('item'), db_index=True
     )
   location = models.ForeignKey(
-    Location, verbose_name=_('location'), null=True, blank=True, db_index=True
+    Location, verbose_name=_('location'), db_index=True
     )
   due = models.DateTimeField(_('due'), help_text=_('Due date of the demand'))
   status = models.CharField(
@@ -1046,7 +898,7 @@ class Demand(AuditModel, HierarchyModel):
     help_text=_('Operation used to satisfy this demand')
     )
   quantity = models.DecimalField(
-    _('quantity'), max_digits=15, decimal_places=4
+    _('quantity'), max_digits=15, decimal_places=6
     )
   priority = models.PositiveIntegerField(
     _('priority'), default=10, choices=demandpriorities,
@@ -1054,14 +906,14 @@ class Demand(AuditModel, HierarchyModel):
     )
   minshipment = models.DecimalField(
     _('minimum shipment'), null=True, blank=True,
-    max_digits=15, decimal_places=4,
+    max_digits=15, decimal_places=6,
     help_text=_('Minimum shipment quantity when planning this demand')
     )
-  maxlateness = DurationField(
+  maxlateness = models.DurationField(
     _('maximum lateness'), null=True, blank=True,
-    max_digits=15, decimal_places=4,
     help_text=_("Maximum lateness allowed when planning this demand")
     )
+  plan = JSONField(default="{}", null=True, blank=True, editable=False)
 
   # Convenience methods
   def __str__(self):
@@ -1072,3 +924,257 @@ class Demand(AuditModel, HierarchyModel):
     verbose_name = _('sales order')
     verbose_name_plural = _('sales orders')
     ordering = ['name']
+
+
+class OperationPlan(AuditModel):
+  # Possible types
+  types = (
+    ('STCK', _('inventory')),
+    ('MO', _('manufacturing order')),
+    ('PO', _('purchase order')),
+    ('DO', _('distribution order')),
+    ('DLVR', _('customer shipment')),
+    )
+
+  # Possible status
+  orderstatus = (
+    ('proposed', _('proposed')),
+    ('approved', _('approved')),
+    ('confirmed', _('confirmed')),
+    ('closed', _('closed')),
+  )
+
+  # Database fields
+  # Common fields
+  id = models.IntegerField(
+    _('identifier'), primary_key=True,
+    help_text=_('Unique identifier of an operationplan')
+    )
+  status = models.CharField(
+    _('status'), null=True, blank=True, max_length=20, choices=orderstatus,
+    help_text=_('Status of the order')
+    )
+  type = models.CharField(
+    _('type'), max_length=5, choices=types, default='MO',
+    help_text=_('Order type'), db_index=True
+    )
+  reference = models.CharField(
+    _('reference'), max_length=300, null=True, blank=True,
+    help_text=_('External reference of this order')
+    )
+  quantity = models.DecimalField(
+    _('quantity'), max_digits=15,
+    decimal_places=6, default='1.00'
+    )
+  startdate = models.DateTimeField(_('start date'), help_text=_('start date'), null=True, blank=True)
+  enddate = models.DateTimeField(_('end date'), help_text=_('end date'), null=True, blank=True)
+  criticality = models.DecimalField(
+    _('criticality'), max_digits=15,
+    decimal_places=6, null=True, blank=True, editable=False
+    )
+  delay = models.DurationField(
+    _('delay'), null=True, blank=True, editable=False
+    )
+  plan = JSONField(default="{}", null=True, blank=True, editable=False)
+  # Used only for manufacturing orders
+  operation = models.ForeignKey(
+    Operation, verbose_name=_('operation'),
+    db_index=True, null=True, blank=True
+    )
+  owner = models.ForeignKey(
+    'self', verbose_name=_('owner'), null=True, blank=True,
+    related_name='xchildren', help_text=_('Hierarchical parent')
+    )
+  # Used for purchase orders and distribution orders
+  item = models.ForeignKey(
+    Item, verbose_name=_('item'),
+    null=True, blank=True, db_index=True
+    )
+  # Used only for distribution orders
+  origin = models.ForeignKey(
+    Location, verbose_name=_('origin'), null=True, blank=True,
+    related_name='origins', db_index=True
+    )
+  destination = models.ForeignKey(
+    Location, verbose_name=_('destination'),
+    null=True, blank=True, related_name='destinations', db_index=True
+    )
+  # Used only for purchase orders
+  supplier = models.ForeignKey(
+    Supplier, verbose_name=_('supplier'),
+    null=True, blank=True, db_index=True
+    )
+  location = models.ForeignKey(
+    Location, verbose_name=_('location'),
+    null=True, blank=True, db_index=True
+    )
+  # Used for delivery operationplans
+  demand = models.ForeignKey(
+    Demand, verbose_name=_('demand'),
+    null=True, blank=True, db_index=True
+    )
+  due = models.DateTimeField(
+    _('due'), help_text=_('Due date of the demand/forecast'),
+    null=True, blank=True
+    )
+  name = models.CharField(
+    _('name'), max_length=1000, null=True, 
+    blank=True, db_index=True
+    )
+
+  def __str__(self):
+    return str(self.id)
+
+  def save(self, *args, **kwargs):
+    if not self.id:
+      if 'using' in kwargs:
+        db = kwargs['using']
+      else:
+        state = getattr(self, '_state', None)
+        db = state.db if state else DEFAULT_DB_ALIAS
+      self.id = OperationPlan.objects.all().using(db).aggregate(Max('id'))['id__max']
+      if self.id:
+        self.id += 1
+      else:
+        self.id = 1
+
+    # Call the real save() method
+    super(OperationPlan, self).save(*args, **kwargs)
+
+  class Meta(AuditModel.Meta):
+    db_table = 'operationplan'
+    verbose_name = _('operationplan')
+    verbose_name_plural = _('operationplans')
+    ordering = ['id']
+
+
+class OperationPlanResource(models.Model):
+  # Database fields
+  resource = models.CharField(_('resource'), max_length=300, db_index=True)
+  operationplan = models.ForeignKey(
+    OperationPlan, verbose_name=_('operationplan'), db_index=True
+    )
+  quantity = models.DecimalField(_('quantity'), max_digits=15, decimal_places=6)
+  startdate = models.DateTimeField(_('startdate'), db_index=True)
+  enddate = models.DateTimeField(_('enddate'), db_index=True)
+  setup = models.CharField(_('setup'), max_length=300, null=True)
+
+  def __str__(self):
+      return "%s %s %s" % (self.resource, self.startdate, self.enddate)
+
+  class Meta:
+    db_table = 'operationplanresource'
+    ordering = ['resource', 'startdate']
+    verbose_name = _('operationplan resource')
+    verbose_name_plural = _('operationplan resources')
+
+
+class OperationPlanMaterial(models.Model):
+  # Database fields
+  buffer = models.CharField(_('buffer'), max_length=300, db_index=True)
+  operationplan = models.ForeignKey(
+    OperationPlan, verbose_name=_('operationplan'), db_index=True
+    )
+  quantity = models.DecimalField(_('quantity'), max_digits=15, decimal_places=6)
+  flowdate = models.DateTimeField(_('date'), db_index=True)
+  onhand = models.DecimalField(_('onhand'), max_digits=15, decimal_places=6)
+
+  def __str__(self):
+    return "%s %s %s" % (self.buffer, self.flowdate, self.quantity)
+
+  class Meta:
+    db_table = 'operationplanmaterial'
+    ordering = ['buffer', 'flowdate']
+    verbose_name = _('operationplan material')
+    verbose_name_plural = _('operationplan materials')
+
+
+class DistributionOrder(OperationPlan):
+
+  class DistributionOrderManager(models.Manager):
+
+    def get_queryset(self):
+      return super(DistributionOrder.DistributionOrderManager, self).get_queryset() \
+        .filter(type='DO')
+        #.defer("operation", "owner", "supplier", "location")
+
+  objects = DistributionOrderManager()
+
+  def save(self, *args, **kwargs):
+    self.type = 'DO'
+    self.operation = self.owner = self.location = self.supplier = None
+    super(DistributionOrder, self).save(*args, **kwargs)
+
+  class Meta:
+    proxy = True
+    verbose_name = _('distribution order')
+    verbose_name_plural = _('distribution orders')
+
+
+class PurchaseOrder(OperationPlan):
+
+  class PurchaseOrderManager(models.Manager):
+
+    def get_queryset(self):
+      return super(PurchaseOrder.PurchaseOrderManager, self).get_queryset() \
+        .filter(type='PO')
+        # Note: defer screws up the model name when deleting a PO
+        #.defer("operation", "owner", "origin", "destination")
+
+  objects = PurchaseOrderManager()
+
+  def save(self, *args, **kwargs):
+    self.type = 'PO'
+    self.operation = self.owner = self.origin = self.destination = None
+    super(PurchaseOrder, self).save(*args, **kwargs)
+
+  class Meta:
+    proxy = True
+    verbose_name = _('purchase order')
+    verbose_name_plural = _('purchase orders')
+
+
+class ManufacturingOrder(OperationPlan):
+
+  class ManufacturingOrderManager(models.Manager):
+
+    def get_queryset(self):
+      return super(ManufacturingOrder.ManufacturingOrderManager, self).get_queryset() \
+        .filter(type='MO')
+        # Note: defer screws up the model name when deleting a PO
+        # .defer("supplier", "location", "origin", "destination")
+
+  objects = ManufacturingOrderManager()
+
+  def save(self, *args, **kwargs):
+    self.type = 'MO'
+    self.supplier = self.item = self.location = self.origin = self.destination = None
+    super(ManufacturingOrder, self).save(*args, **kwargs)
+
+  class Meta:
+    proxy = True
+    verbose_name = _('manufacturing order')
+    verbose_name_plural = _('manufacturing orders')
+
+
+class DeliveryOrder(OperationPlan):
+
+  class DeliveryOrderManager(models.Manager):
+
+    def get_queryset(self):
+      return super(DeliveryOrder.DeliveryOrderManager, self).get_queryset() \
+        .filter(demand__isnull=False, owner__isnull=True)
+        # Note: defer screws up the model name when deleting a PO
+        # .defer("operation", "owner", "supplier", "location", "origin", "destination")
+
+  objects = DeliveryOrderManager()
+
+  def save(self, *args, **kwargs):
+    self.type = 'DLVR'
+    self.supplier = self.item = self.location = self.origin = self.destination = self.operation = self.owner = None
+    super(DeliveryOrder, self).save(*args, **kwargs)
+
+  class Meta:
+    proxy = True
+    verbose_name = _('customer shipment')
+    verbose_name_plural = _('customer shipments')

@@ -1,0 +1,754 @@
+{% extends "admin/base_site_grid.html" %}
+{% load i18n %}
+{% block extrahead %}{{block.super}}
+<script type="text/javascript">
+
+  var refresh = null;
+
+  function updateRefresh()
+  {
+    if (refresh !== null)
+    {
+       // Disable the refresh which is currently active
+       clearInterval(refresh);
+       $('#autorefresh span').removeClass("fa-pause").addClass("fa-refresh");
+       refresh = null;
+    }
+    else
+    {
+      // Enable the refresh which is currently inactive
+      refresh = setInterval(function() {
+        $("#grid").trigger("reloadGrid",[{current:true}]);
+        }, 5000);
+      $('#autorefresh span').removeClass("fa-refresh").addClass("fa-pause");
+    }
+  }
+
+  function status (cellvalue, options, rowdata) {
+    if (rowdata.name == "generate plan"
+        && !('finished' in rowdata)
+        && cellvalue.charAt(cellvalue.length-1) == "%"
+        )
+      {% comment %}Translators: Translation included with Django {% endcomment %}
+      return cellvalue + "&nbsp;&nbsp;<button class='btn btn-primary btn-default' style='padding:0 0.5em 0 0.5em; font-size:66%' onclick='cancelTask(" + rowdata['id'] + ")'>{% filter force_escape %}{% trans 'Cancel' %}{% endfilter %}</button>";
+    if (cellvalue == 'Failed')
+      return "<span class='bg-danger' style='display:block'>{% trans 'failed'|capfirst %}</span>";
+    else if (cellvalue == 'Waiting')
+    {% comment %}Translators: Translation included with Django{% endcomment %}
+      return "{% trans 'waiting'|capfirst|force_escape %}&nbsp;&nbsp;<button class='btn btn-primary btn-default' style='padding:0 0.5em 0 0.5em; font-size:66%' onclick='cancelTask(" + rowdata['id'] + ")'>{% filter force_escape %}{% trans 'Cancel' %}{% endfilter %}</button>";
+    else if (cellvalue == 'Done')
+      return "{% trans 'done'|capfirst %}";
+    else if (cellvalue == 'Canceled')
+      return "{% trans 'canceled'|capfirst %}";
+    else
+      return cellvalue;
+  }
+
+  function cancelTask(id) {
+    $.jgrid.hideModal("#searchmodfbox_grid");
+
+    $("#popup").html('<div class="modal-dialog">'+
+        '<div class="modal-content">'+
+          '<div class="modal-header">'+
+            '<h4 class="modal-title">'+gettext('Cancel task')+'</h4>'+
+          '</div>'+
+          '<div class="modal-body"><p>'+
+          interpolate(gettext('You are about to cancel task %s'), [id]) +
+          '</p></div>'+
+          '<div class="modal-footer">'+
+            '<input type="submit" id="confirmbutton" role="button" class="btn btn-danger pull-left" value="'+gettext('Confirm')+'">'+
+            '<input type="submit" id="cancelbutton" role="button" class="btn btn-primary pull-right" data-dismiss="modal" value="'+gettext('Cancel')+'">'+
+          '</div>'+
+        '</div>'+
+    '</div>' )
+    .modal('show');
+    $('#confirmbutton').on('click', function() {
+        $.ajax({
+          url: "{{request.prefix}}/execute/cancel/" + id + "/",
+          type: "POST",
+          success: function () {
+            $('#popup').modal('hide');
+          },
+          error: function (result, stat, errorThrown) {
+            $('#popup .modal-body p').html(result.responseText);
+            $('#popup .modal-title').html(gettext("Error canceling data"));
+            $('#confirmbutton').prop("disabled", true).hide();
+            }
+        })
+      })
+  }
+
+  function checkChildren(id)
+  {
+    var m = id.substring(6,100);
+    $("#" + id.replace(".","\\.")).prop("checked",true);  // Jquery has issues with dots in identifiers
+    for (var child in models[m])
+      checkChildren("empty_" + models[m][child]);
+  }
+
+  function importWorkbook()
+  {
+    if ($('#spreadsheet').val() == "")
+      return;
+
+    $.jgrid.hideModal("#searchmodfbox_grid");
+
+    // Create dialog box
+    $('#popup').modal({keyboard: false, backdrop:'static'});
+    $("#popup").html('<div class="modal-dialog">'+
+        '<div class="modal-content">'+
+          '<div class="modal-header">'+
+            '<button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true" class="fa fa-times"></span></button>'+
+            '<h4 class="modal-title">'+gettext("Uploading spreadsheet")+'</h4>'+
+          '</div>'+
+          '<div class="modal-body">'+
+          '<br/><div style="margin: 5px 0"><textarea id="uploadResponse" class="form-control" rows="10" style="resize: vertical; background-color: inherit; border: none" readonly="readonly"></textarea></div>'  +
+        '</div>'+
+        '<div class="modal-footer">'+
+            '<input type="submit" id="cancelbutton" role="button" class="btn btn-primary pull-right" data-dismiss="modal" value="'+gettext('Close')+'">'+
+        '</div>'+
+        '</div>'+
+    '</div>' )
+    .modal('show');
+
+    // Upload the file
+    var data = new FormData();
+    data.append("spreadsheet", $('#spreadsheet').get(0).files[0]);
+    $('#uploadResponse').css('display','block');
+    $('#uploadResponse').text(gettext('Importing... pressing Close button will not stop the process.'));
+    $.ajax({
+      type: 'post',
+      url: '{{request.prefix}}/execute/launch/importworkbook/',
+      cache: false,
+      data: data,
+      success: function (data) {
+        var el = $('#uploadResponse');
+        el.val(data);
+        el.scrollTop(el[0].scrollHeight - el.height());
+        // Resetting the value of filename. This is only done to avoid a 
+        // corner case where Internet Explorer is uploading a cached
+        // (potentially outdated or even deleted) file.
+        // See http://stackoverflow.com/questions/29396572/internet-explorer-caching-file-uploads
+        $('#spreadsheet').val('');
+      },
+      xhrFields: {
+        onprogress: function (e) {
+          var el = $('#uploadResponse');
+          el.val(e.currentTarget.response);
+          el.scrollTop(el[0].scrollHeight - el.height());
+        }
+      },
+      processData: false,
+      contentType: false
+      });
+  }
+  {
+    // Nothing to import
+    $('#importbutton').on('click', function() {
+      if ($("#csv_file").val() == "") return;
+      $('#uploadResponse').css('display','block');
+      $.ajax({
+        type: 'post',
+        url: '{{request.prefix}}/execute/launch/importworkbook/',
+        cache: false,
+        data: new FormData($("#uploadform")[0]),
+        success: function (data) {
+          var el = $('#uploadResponse');
+          el.val(data);
+          el.scrollTop(el[0].scrollHeight - el.height());
+        },
+        xhrFields: {
+          onprogress: function (e) {
+            var el = $('#uploadResponse');
+            el.val(e.currentTarget.response);
+            el.scrollTop(el[0].scrollHeight - el.height());
+          }
+        },
+        processData: false,
+        contentType: false
+        });
+     }
+    )
+  }
+
+  $(function() {
+    iconslist = {
+        time: 'fa fa-clock-o',
+        date: 'fa fa-calendar',
+        up: 'fa fa-chevron-up',
+        down: 'fa fa-chevron-down',
+        previous: 'fa fa-chevron-left',
+        next: 'fa fa-chevron-right',
+        today: 'fa fa-bullseye',
+        clear: 'fa fa-trash',
+        close: 'fa fa-close'
+      };
+    // Date picker
+    $(".vDateField").on('focusin', function() {
+      $(this).parent().css('position', 'relative');
+      $(this).datetimepicker({format: 'YYYY-MM-DD', calendarWeeks: true, icons: iconslist, locale: document.documentElement.lang});
+    });
+
+    {% if not "refresh" in preferences or preferences.refresh %}
+    // Refresh the grid every 5 seconds
+    refresh = setInterval(function() {
+      $("#grid").trigger("reloadGrid",[{current:true}]);
+      }, 5000);{% endif %}
+    // Checkboxes for workbook export
+    $(".chck_all").click( function() {
+      $(".chck_entity").prop("checked", $(this).prop("checked"));
+      });
+    $(".chck_entity").click( function() {
+      $(".chck_all").prop("checked",$(".chck_entity:not(:checked)").length == 0);
+      });
+    // Checkboxes for emptying the database
+    $(".empty_all").click( function() {
+      $(".empty_entity").prop("checked", $(this).prop("checked"));
+      });
+    $(".empty_entity").click( function() {
+      $(".empty_all").prop("checked",$(".empty_entity:not(:checked)").length == 0);
+      if ($(this).prop("checked")) checkChildren($(this).attr('id'));
+      });
+
+    // Checkboxes for Load from folder
+    $(".chckfile_all").click( function() {
+      $(".chckfile_entity").prop("checked", $(this).prop("checked"));
+      });
+    $(".chckfile_entity").click( function() {
+      $(".chckfile_all").prop("checked",$(".chckfile_entity:not(:checked)").length == 0);
+      });
+
+    $("#sourceul li a").click(function(){
+      $("#source").html($(this).text() + ' <span class="caret"></span>');
+      $("#sourcescenario").val($(this).text());
+    });
+
+    $("#entityul li a").click(function(){
+      $("#entity").html($(this).text() + ' <span class="caret"></span>');
+      $("#loaddatafile").val($(this).text());
+    });
+
+    $("#weekstartul li a").click(function(){
+      $("#weekstart1").html($(this).text() + ' <span class="caret"></span>');
+      $("#weekstart").val($(this).parent().index());
+    });
+
+    var resizeoptions={
+        handleSelector: "#resize-handle",
+        resizeWidth: false,
+        resizeHeight: true,
+        onDrag: function (e, $el, opt) {$("#grid").setGridHeight($('#content-main').height()-52);},
+    }
+    $("#resize-handle").css({'display':'inline-block'});
+    $("#content-main").resizable({
+      handleSelector: "#resize-handle",
+      resizeWidth: false,
+      resizeHeight: true,
+      onDrag: function (e, $el, opt) {$("#grid").setGridHeight($('#content-main').height()-52);},
+      onDragEnd: function (e, $el, opt) {}
+    });
+
+  });
+
+  var models = {% getModelDependencies %};
+</script>
+
+<style>
+#scenarios td {
+  padding: 5px;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+#grid tr td {
+  line-height: 22px;
+}
+#grid_frozen tr td {
+  line-height: 22px;
+}
+.chck_all, .chck_entity, .empty_all, .empty_entity {
+  margin-left: 20px;
+  margin-right: 20px;
+}
+
+</style>
+{% endblock %}
+
+{% block actions %}
+	<button class="btn btn-xs btn-primary" id="autorefresh" onclick="updateRefresh()" data-toggle="tooltip" data-placement="top" data-original-title="{% trans 'autorefresh'|capfirst|force_escape %}" >
+	   <span class="fa {% if "refresh" in preferences and not preferences.refresh %} fa-refresh{% else %} fa-pause{% endif %}"></span>
+	</button>
+{{block.super}}
+{% endblock %}
+{% block after_table %}
+<div class="row" id="accordion">
+<div class="col-md-12">
+  <h1>{% trans "launch new tasks"|capfirst %}</h1>
+</div></div>
+<div class="row">
+	<div id="tasks" class="panel-group col-md-12" role="tablist" aria-multiselectable="true" style="max-width:700px; min-width: 600px">
+
+	{% if perms.execute %}
+	  {% if perms.execute.generate_plan %}
+	  <div class="panel panel-default">
+		  <div class="panel-heading" data-parent="#tasks" role="tab" id="eersteHeading" data-toggle="collapse" data-target="#eersteAccord">
+		    <h4 class="panel-title">
+		      <a role="button">
+		          {% trans 'Create a plan' %}
+		      </a>
+		    </h4>
+		  </div>
+		  <div id="eersteAccord" class="panel-collapse collapse in" role="tabpanel" aria-labelledby="eersteHeading">
+		    <div class="panel-body">
+			    <form role="form" method="post" action="{{request.prefix}}/execute/launch/frepple_run/">{% csrf_token %}
+			      <table>
+			      <tr>
+			        <td style="vertical-align:top; padding: 15px">
+			            <button type="submit" class="btn btn-primary">{% trans "launch"|capfirst %}</button>
+			        </td>
+			        <td  style="padding: 15px;">
+				        {% blocktrans %}
+										Load frePPLe from the database and live data sources...<br>
+										and create a plan in frePPLe...<br>
+										and export results.{% endblocktrans %}<br><br>
+								{% if planning_options %}
+								<p {% if planning_options|length <= 1 %}style="display: none"{% endif %}><b>{% trans "optional planning steps"|capfirst %}</b><br>
+				        {% for b in planning_options %}
+				        <label for="option_{{b.0}}"><input type="checkbox" name="optional" {% if b.0 in current_options %}checked {% endif %}value="{{b.0}}" id="option_{{b.0}}"/>&nbsp;&nbsp;{{b.1}}</label><br>
+				        {% endfor %}
+				        </p>
+				        {% endif %}
+								<p><b>Plan type</b><br>
+
+                <input type="radio" id="plantype1" name="plantype" {% ifnotequal request.session.plantype '2' %}checked {% endifnotequal %}value="1"/>
+                <label for="plantype1">{% blocktrans %}<span data-toggle="tooltip" data-placement="top" data-html="true" data-original-title="Generate a supply plan that respects all constraints.<br>In case of shortages the demand is planned late or short.">Constrained plan</span>{% endblocktrans %}
+                <span class="fa fa-question-circle" style="display:inline-block;"></span></label><br>
+                <input type="radio" id="plantype2" name="plantype" {% ifequal  request.session.plantype '2' %}checked {% endifequal %}value="2"/>
+                <label for="plantype2">{% blocktrans %}<span data-toggle="tooltip" data-placement="top" data-html="true" data-original-title="Generate a supply plan that shows material, capacity and operation problems that prevent the demand from being planned in time.<br>The demand is always met completely and on time.">Unconstrained plan</span>{% endblocktrans %}
+                <span class="fa fa-question-circle" style="display:inline-block;"></span></label><br>
+				        </p>
+				        <p>
+				        <b>{% trans "constraints"|capfirst %}</b><br>
+								<label for="cb4"><input type="checkbox" name="constraint" {% if capacityconstrained %}checked {% endif %}value="4" id="cb4"/>&nbsp;&nbsp;{% trans "Capacity: respect capacity limits" %}</label><br>
+								<label for="cb2"><input type="checkbox" name="constraint" {% if materialconstrained %}checked {% endif %}value="2" id="cb2"/>&nbsp;&nbsp;{% trans "Material: respect procurement limits" %}</label><br>
+								<label for="cb1"><input type="checkbox" name="constraint" {% if leadtimeconstrained %}checked {% endif %}value="1" id="cb1"/>&nbsp;&nbsp;{% trans "Lead time: do not plan in the past" %}</label><br>
+								<label for="cb8"><input type="checkbox" name="constraint" {% if fenceconstrained %}checked {% endif %}value="8" id="cb8"/>&nbsp;&nbsp;{% trans "Release fence: do not plan within the release time window" %}</label><br>
+				        </p>
+				        <p>
+				        <a id="logfile" class="btn btn-info" role="button" href="{{request.prefix}}/execute/logfrepple/">{% trans "View log file" %}</a>
+				        </p>
+				      </td>
+			      </tr>
+  			    </table>
+  			  </form>
+		    </div>
+		  </div>
+		</div>
+	  {% endif %}
+
+	  <div class="panel panel-default">
+		  <div class="panel-heading" data-parent="#tasks" role="tab" id="tweedeHeading"  data-toggle="collapse" data-target="#tweedeAccord">
+		    <h4 class="panel-title">
+		      <a role="button">{% trans "Export a spreadsheet" %}</a>
+		    </h4>
+		  </div>
+		  <div id="tweedeAccord" class="panel-collapse collapse" role="tabpanel" aria-labelledby="tweedeHeading">
+		    <div class="panel-body">
+		      <form role="form" method="post" action="{{request.prefix}}/execute/launch/exportworkbook/">{% csrf_token %}
+				    <table>
+			      <tr>
+			        <td style="vertical-align:top; padding: 15px">
+			            <button type="submit" class="btn btn-primary" id="export" value="{% trans "export"|capfirst %}" >{% trans "export"|capfirst %}</button>
+			        </td>
+			        <td style="padding: 15px;">
+			         <p>
+			          {% trans "Download all input data in a single spreadsheet." %}
+			         </p>
+			          {% getMenu as menu %}
+			          <p>
+			          <input class="chck_all check" type="checkbox" name="all" value="1" checked=""><br>
+			          {% for group in menu %}
+			            {% for item in group.1 %}
+			              {% if item.1.model and not item.1.excludeFromBulkOperations %}
+			                <label for="chbx_{{ item.1.model | model_name }}">
+			                  <input class="chck_entity check" type="checkbox" name="entities" value="{{ item.1.model | model_name }}" checked="" id="chbx_{{ item.1.model | model_name }}">
+			                    {{ group.0 }} - {{ item.0 }}
+			                </label><br>
+			              {% endif %}
+			            {% endfor %}
+			          {% endfor %}
+			          </p>
+			        </td>
+			      </tr>
+			      </table>
+			    </form>
+		    </div>
+		  </div>
+	  </div>
+
+	  <div class="panel panel-default">
+		  <div class="panel-heading" data-parent="#tasks" role="tab" id="derdeHeading" data-toggle="collapse" data-target="#derdeAccord">
+		    <h4 class="panel-title">
+		      <a role="button">{% trans "Import a spreadsheet" %}</a>
+		    </h4>
+		  </div>
+		  <div id="derdeAccord" class="panel-collapse collapse" role="tabpanel" aria-labelledby="derdeHeading">
+			  <div class="panel-body">
+				    <table>
+				      <tr>
+				        <td style="vertical-align:top; padding: 15px">
+				          <button type="submit" class="btn btn-primary" id="import" onclick="importWorkbook()" value="{% trans "import"|capfirst %}">{% trans "import"|capfirst %}</button>
+				        </td>
+				        <td style="padding: 15px;">
+				          <p>{% trans "Import input data from a spreadsheet.</p><p>The spreadsheet must match the structure exported with the task above." %}</p>
+		              <label>{% trans "Data file" %}:
+                    <input class="btn btn-info form-control" type="file" id="spreadsheet" name="spreadsheet" accept="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+                  </label>
+				        </td>
+				      </tr>
+				    </table>
+			    </div>
+		  </div>
+		</div>
+
+		{% if datafolderconfigured and user.is_superuser %}
+    <div class="panel panel-default">
+      <div class="panel-heading" data-parent="#tasks" role="tab" id="vertiendeHeading" data-toggle="collapse" data-target="#vertiendeAccord">
+        <h4 class="panel-title">
+          <a role="button">{% trans "Import/Export data files in folder" %}</a>
+        </h4>
+      </div>
+      <div id="vertiendeAccord" class="panel-collapse collapse" role="tabpanel" aria-labelledby="vertiendeHeading">
+        <div class="panel-body">
+          <form role="form" method="post" action="{{request.prefix}}/execute/launch/frepple_importfromfolder/">{% csrf_token %}
+            <table>
+              <tr>
+
+	                <td style="vertical-align:top; padding-left: 15px">
+	                  <button type="submit" class="btn btn-primary" id="importfromfolder" value="{% trans "import"|capfirst %}">{% trans "import"|capfirst %}</button>
+	                </td>
+
+                <td colspan='1' style="padding-left: 15px;">
+                  <p>{% trans "Import CSV files from the configured data folder. The file names must match the names of data objects and the first line in the file must contain the field names." %}</p>
+                </td>
+              </tr>
+            </table>
+          </form>
+          <form role="form" method="post" action="{{request.prefix}}/execute/launch/frepple_exporttofolder/">{% csrf_token %}
+            <table>
+              <tr>
+
+                  <td style="vertical-align:top; padding-left: 15px">
+                    <button type="submit" class="btn btn-primary" id="exporttofolder" value="{% trans "export"|capfirst %}">{% trans "export"|capfirst %}</button>
+                  </td>
+
+                <td colspan='3' style="padding-left: 15px;">
+                  <p>{% trans "Exports the plan (purchase orders, distribution orders and manufacturing orders) as a set of CSV files." %}</p>
+                </td>
+              </tr>
+              <tr>
+								<td></td>
+								<td><strong>{% trans 'file name'|capfirst %}</strong></td>
+								<td><strong>{% trans 'size'|capfirst %}</strong></td>
+								<td><strong>{% trans 'changed'|capfirst %}</strong></td>
+						  </tr>
+              {% for j in filestoupload %}
+              <tr>
+                <td></td>
+                <td>{{j.0}}<a href="{{request.prefix}}/execute/viewfile/{{j.0}}">&nbsp;<span class="fa fa-caret-right"></span></a></td>
+                <td>{{j.2}}</td>
+                <td>{{j.1}}</td>
+              </tr>
+              {% endfor %}
+            </table>
+          </form>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+
+	  {% if scenarios.count > 1 %}
+	  <div class="panel panel-default">
+		  <div class="panel-heading" data-parent="#tasks" role="tab" id="vierdeHeading" data-toggle="collapse" data-target="#vierdeAccord">
+		    <h4 class="panel-title">
+		      <a role="button">{% trans "scenario management"|capfirst %}</a>
+		    </h4>
+		  </div>
+		  <div id="vierdeAccord" class="panel-collapse collapse" role="tabpanel" aria-labelledby="vierdeHeading">
+		    <div class="panel-body">
+			      <form role="form" method="post" action="{{request.prefix}}/execute/launch/frepple_copy/">{% csrf_token %}
+					    <table id="scenarios">
+					      <tr>
+					        {% comment %}Translators: Translation included with Django {% endcomment %}
+									<th style="padding: 0px 15px;">{% trans 'scenario'|capfirst %}</th>
+									<th style="padding: 0px 15px;">{% trans 'status'|capfirst %}</th>
+									<th>{% trans 'label'|capfirst %}</th>
+									<th>{% trans 'last refresh'|capfirst %}</th>
+					      </tr>
+					      {% for j in scenarios %}{% ifnotequal j.name 'default' %}
+					      <tr>
+									<td style="padding: 0px 15px;"><input type=checkbox name="{{j.name}}" id="sc{{j.name}}"/>
+									  <label for="sc{{j.name}}">&nbsp;<strong>{{j.name|capfirst}}</strong>
+									  </label>
+									</td>
+									<td  style="padding: 0px 15px;">{{j.status}}</td>
+									<td>{{j.description}}</td>
+									<td>{{j.lastrefresh|date:"DATETIME_FORMAT"}}</td>
+					      </tr>
+					      {% endifnotequal %}{% endfor %}
+					      {% if perms.execute.copy_scenario %}
+					      <tr>
+					        <td><button  class="btn btn-primary" name="copy" type="submit" value="{% trans "copy"|capfirst %}" style="width:100%">{% trans "copy"|capfirst %}</button>
+					        </td>
+					        <td  style="padding: 0px 15px;" colspan="3">
+                    {% trans "copy"|capfirst %}
+                      <div class="dropdown dropdown-submit-input" style="display: inline-block;">
+	                      <button class="btn btn-default dropdown-toggle" id="source" value="" type="button" data-toggle="dropdown" style="min-width: 160px">-&nbsp;&nbsp;<span class="caret"></span></button>
+	                      <ul class="dropdown-menu" aria-labelledby="source" id="sourceul" style="top: auto">
+	                      {% for j in scenarios %}
+	                        {% ifequal j.status 'In use' %}
+	                          <li><a name="{{j.name}}">{{j.name}}</a></li>
+	                        {% endifequal %}
+	                      {% endfor %}
+	                      </ul>
+	                    </div>
+                    {% trans "into selected scenarios" %}
+
+					        </td>
+					      </tr>
+					      {% endif %}
+					      {% if perms.execute.release_scenario %}
+					      <tr>
+					        <td><button class="btn btn-primary" name="release" type="submit" value="{% trans "release"|capfirst %}" style="width:100%">{% trans "release"|capfirst %}</button></td>
+					        <td  style="padding: 0px 15px;" colspan="3">{% trans "release selected scenarios"|capfirst %}</td>
+					      </tr>
+					      <tr>
+					        <td><button class="btn btn-primary" name="update" type="submit" value="{% trans "update"|capfirst %}" style="width:100%">{% trans "update"|capfirst %}</button></td>
+					        <td  style="padding: 0px 15px;" colspan="3"><input class="form-control" name="description" type="text" size="40" placeholder="{% trans "Update description of selected scenarios" %}"/></td>
+					      </tr>
+					      {% endif %}
+					  </table>
+					  <input type="hidden" name="source" id="sourcescenario" value="">
+			    </form>
+        </div>
+		  </div>
+		</div>
+	  {% endif %}
+
+	  <div class="panel panel-default">
+		  {% if perms.execute.run_db %}
+		  <div class="panel-heading" data-parent="#tasks" role="tab" id="vijfdeHeading" data-toggle="collapse" data-target="#vijfdeAccord">
+		    <h4 class="panel-title">
+		      <a role="button">{% trans "Back up the database" %}</a>
+		    </h4>
+		  </div>
+		  <div id="vijfdeAccord" class="panel-collapse collapse" role="tabpanel" aria-labelledby="vijfdeHeading">
+			  <div class="panel-body">
+					<form role="form" method="post" action="{{request.prefix}}/execute/launch/frepple_backup/">{% csrf_token %}
+				    <table>
+						<tr>
+							<td  style="padding: 0px 15px;"><button  class="btn btn-primary" type="submit" value="{% trans "launch"|capfirst %}">{% trans "launch"|capfirst %}</button></td>
+							<td  style="padding: 0px 15px;">{% trans "Dump the database contents to a file." %}</td>
+						</tr>
+						</table>
+					</form>
+				</div>
+		  </div>
+		</div>
+
+	  <div class="panel panel-default">
+		  <div class="panel-heading" data-parent="#tasks" role="tab" id="zesdeHeading" data-toggle="collapse" data-target="#zesdeAccord">
+		    <h4 class="panel-title">
+		      <a role="button">{% trans "Empty the database" %}</a>
+		    </h4>
+		  </div>
+		  <div id="zesdeAccord" class="panel-collapse collapse" role="tabpanel" aria-labelledby="zesdeHeading">
+		    <div class="panel-body">
+					<form role="form" method="post" action="{{request.prefix}}/execute/launch/frepple_flush/">{% csrf_token %}
+			    <table>
+					  <tr>
+							<td  style="padding: 15px; vertical-align:top"><button  class="btn btn-primary" type="submit" id="erase" value="{% trans "launch"|capfirst %}">{% trans "launch"|capfirst %}</button></td>
+							<td  style="padding: 15px;">{% trans "Erase selected tables in the database." %}<br><br>
+								<input class="empty_all" type="checkbox" name="all" value="1"><br>
+								{% for group in menu %}{% for item in group.1 %}{% if item.1.model and not item.1.excludeFromBulkOperations %}
+								<label for="empty_{{ item.1.model | model_name }}">
+								 <input class="empty_entity" type="checkbox" name="entities" value="{{ item.1.model | model_name }}" {% if group.0 != _("admin") %}checked {% endif %}id="empty_{{ item.1.model | model_name }}">{{ group.0 }} - {{ item.0 }}
+								</label><br>
+								{% endif %}{% endfor %}{% endfor %}
+							</td>
+						</tr>
+					</table>
+					</form>
+				</div>
+		  </div>
+		</div>
+
+	  <div class="panel panel-default">
+		  <div class="panel-heading" data-parent="#tasks" role="tab" id="zevendeHeading" data-toggle="collapse" data-target="#zevendeAccord">
+		    <h4 class="panel-title">
+		      <a role="button">{% trans "Load a dataset" %}</a>
+		    </h4>
+		  </div>
+		  <div id="zevendeAccord" class="panel-collapse collapse" role="tabpanel" aria-labelledby="zevendeHeading">
+		    <div class="panel-body">
+					<form class="form" role="form" method="post" action="{{request.prefix}}/execute/launch/loaddata/">{% csrf_token %}
+					<table>
+					 <tr>
+						<td  style="padding: 0px 15px;">
+						  <button  class="btn btn-primary" id="load" type="submit" value="{% trans "launch"|capfirst %}">
+						    {% trans "launch"|capfirst %}
+						  </button>
+						</td>
+				  	<td>
+	               <div class="dropdown dropdown-submit-input">
+		               {% trans "Load one of the available datasets to the current database." %}
+		                   <button class="btn btn-default dropdown-toggle form-control" id="entity" type="button" data-toggle="dropdown">-&nbsp;&nbsp;<span class="caret"></span>
+		                   </button>
+                       <ul class="dropdown-menu col-xs-12" aria-labelledby="entity" id="entityul">
+                          {% for i in fixtures %}<li><a>{{i}}</a></li>{% endfor %}
+                       </ul>
+
+               </div>
+            </td>
+					 </tr>
+					</table>
+					<input type="hidden" name="datafile" id="loaddatafile" value="">
+					</form>
+				</div>
+		  </div>
+		</div>
+	  {% endif %}
+
+	  {% if openbravo %}
+	  <div class="panel panel-default">
+		  <div class="panel-heading" data-parent="#tasks" role="tab" id="achtsteHeading" data-toggle="collapse" data-target="#achtsteAccord">
+		    <h4 class="panel-title">
+		      <a role="button">{% blocktrans with erp="Openbravo" %}Import data from {{ erp }}{% endblocktrans %}</a>
+		    </h4>
+		  </div>
+		  <div id="achtsteAccord" class="panel-collapse collapse" role="tabpanel" aria-labelledby="achtsteHeading">
+			  <div class="panel-body">
+			    <form role="form" method="post" action="{{request.prefix}}/execute/launch/openbravo_import/">{% csrf_token %}
+			    <table>
+			      <tr>
+				      <td style="vertical-align:top; padding: 15px">
+				         <button  class="btn btn-primary" type="submit" value="{% trans "launch"|capfirst %}">{% trans "launch"|capfirst %}</button>
+				      </td>
+				      <td  style="padding: 0px 15px;">{% blocktrans with delta="<input class='form-control' name='delta' type='text' maxlength='4' size='5' value='7' />" %}Import data changes in the last {{ delta }} days from the ERP into frePPLe.{% endblocktrans %}
+			        </td>
+			      </tr>
+			    </table>
+			    </form>
+			  </div>
+		  </div>
+		</div>
+
+		<div class="panel panel-default">
+			<div class="panel-heading" data-parent="#tasks" role="tab" id="negendeHeading" data-toggle="collapse" data-target="#negendeAccord">
+				<h4 class="panel-title">
+					<a role="button">{% blocktrans with erp="Openbravo" %}Export data to {{ erp }}{% endblocktrans %}</a>
+				</h4>
+			</div>
+			<div id="negendeAccord" class="panel-collapse collapse" role="tabpanel" aria-labelledby="negendeHeading">
+				<div class="panel-body">
+					<form role="form" method="post" action="{{request.prefix}}/execute/launch/openbravo_export/">
+						{% csrf_token %}
+						<table>
+							<tr>
+								<td style="vertical-align: top; padding: 15px">
+									<button class="btn btn-primary" type="submit" value="{% trans "launch"|capfirst %}">
+									{% trans "launch"|capfirst %}
+									</button>
+								</td>
+								<td style="padding: 0px 15px;">{% trans "Export frePPLe plan to the ERP." %} </br>
+								</br>
+								{% blocktrans %}<label data-toggle="tooltip" data-placement="bottom" data-original-title="Filter parameters define which transactions are getting exported">{% endblocktrans %}
+								  <input type="checkbox" name="filter_export" value="SO" id="filter_export" style="margin-left: 8px;">
+								  <span> {% trans "Apply filter parameters." %} </span>
+								  <span class="fa fa-question-circle" style="display: inline-block;"></span>
+								</label>
+								</td>
+							</tr>
+						</table>
+					</form>
+				</div>
+			</div>
+		</div>
+		{% endif %}
+
+    {% if odoo %}
+    <div class="panel panel-default">
+      <div class="panel-heading" data-parent="#tasks" role="tab" id="elfdeHeading" data-toggle="collapse" data-target="#elfdeAccord">
+        <h4 class="panel-title">
+          <a role="button">{% blocktrans with erp="Odoo" %}Import data from {{ erp }}{% endblocktrans %}</a>
+        </h4>
+      </div>
+      <div id="elfdeAccord" class="panel-collapse collapse" role="tabpanel" aria-labelledby="elfdeHeading">
+        <div class="panel-body">
+          <form role="form" method="post" action="{{request.prefix}}/execute/launch/odoo_import/">{% csrf_token %}
+          <table>
+            <tr>
+              <td style="vertical-align:top; padding: 15px">
+                 <button  class="btn btn-primary"  type="submit" value="{% trans "launch"|capfirst %}">{% trans "launch"|capfirst %}</button>
+              </td>
+              <td  style="padding: 0px 15px;">{% trans "Import Odoo data into frePPLe." %}
+              </td>
+            </tr>
+          </table>
+          </form>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+	  {% if perms.execute.run_db %}
+	  <div class="panel panel-default">
+		  <div class="panel-heading" data-parent="#tasks" role="tab" id="tiendeHeading" data-toggle="collapse" data-target="#tiendeAccord">
+		    <h4 class="panel-title">
+		      <a role="button">{% blocktrans %}Generate buckets{% endblocktrans %}</a>
+		    </h4>
+		  </div>
+		  <div id="tiendeAccord" class="panel-collapse collapse" role="tabpanel" aria-labelledby="tiendeHeading">
+  		  <div class="panel-body">
+					<form role="form" method="post" action="{{request.prefix}}/execute/launch/frepple_createbuckets/">{% csrf_token %}
+					<input type="hidden" name="weekstart" id="weekstart" value="1">
+					<table>
+					  <tr>
+							<td style="vertical-align:top; padding: 15px">
+							  <button  class="btn btn-primary" type="submit" value="{% trans "launch"|capfirst %}">{% trans "launch"|capfirst %}</button>
+							</td>
+							<td  style="padding: 0px 15px;">
+							<p>{% blocktrans %}Create time buckets for reporting.</p>
+								<label class="control-label">Start date: <input class="vDateField form-control" id="start" name="start" type="text" size="12"/></label>
+								<label class="control-label">End date: <input class="vDateField form-control" id="end" name="end" type="text" size="12"/></label><br>
+               <label class="control-label" for="weekstart1">Week starts on:</label>
+               <div class="dropdown dropdown-submit-input">
+                       <button class="btn btn-default dropdown-toggle form-control"  id="weekstart1" value="1" type="button" data-toggle="dropdown">Monday&nbsp;&nbsp;<span class="caret"></span>
+                       </button>
+                       <ul class="dropdown-menu col-xs-12" aria-labelledby="weekstart1" id="weekstartul">
+                          <li><a>Sunday</a></li>
+                          <li><a>Monday</a></li>
+                          <li><a>Tuesday</a></li>
+                          <li><a>Wednesday</a></li>
+                          <li><a>Thursday</a></li>
+                          <li><a>Friday</a></li>
+                          <li><a>Saturday</a></li>
+                       </ul>
+               </div>
+
+							{% endblocktrans %}</td>
+					  </tr>
+					</table>
+					</form>
+				</div>
+		  </div>
+		</div>
+
+	{% endif %}
+
+	{% else %}
+	{% trans "Sorry, You don't have any execute permissions..." %}
+	{% endif %}
+	</div>
+	</div> <!-- end row -->
+{% endblock %}

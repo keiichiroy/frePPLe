@@ -20,9 +20,7 @@ from django.utils.translation import ugettext_lazy as _
 from django.utils.text import capfirst
 from django.utils.encoding import force_text
 
-from freppledb.input.models import Buffer
-from freppledb.output.models import FlowPlan
-from freppledb.common.db import sql_max, sql_min, python_date, string_agg
+from freppledb.input.models import Buffer, OperationPlanMaterial
 from freppledb.common.report import GridReport, GridPivot, GridFieldText, GridFieldNumber
 from freppledb.common.report import GridFieldDateTime, GridFieldBool, GridFieldInteger
 
@@ -36,10 +34,11 @@ class OverviewReport(GridPivot):
   basequeryset = Buffer.objects.only('name', 'item__name', 'location__name', 'lft', 'rght', 'onhand')
   model = Buffer
   permissions = (('view_inventory_report', 'Can view inventory report'),)
+  help_url = 'user-guide/user-interface/plan-analysis/inventory-report.html'
   rows = (
-    GridFieldText('buffer', title=_('buffer'), key=True, editable=False, field_name='name', formatter='detail', extra="role:'input/buffer'"),
-    GridFieldText('item', title=_('item'), editable=False, field_name='item__name', formatter='detail', extra="role:'input/item'"),
-    GridFieldText('location', title=_('location'), editable=False, field_name='location__name', formatter='detail', extra="role:'input/location'"),
+    GridFieldText('buffer', title=_('buffer'), key=True, editable=False, field_name='name', formatter='detail', extra='"role":"input/buffer"'),
+    GridFieldText('item', title=_('item'), editable=False, field_name='item__name', formatter='detail', extra='"role":"input/item"'),
+    GridFieldText('location', title=_('location'), editable=False, field_name='location__name', formatter='detail', extra='"role":"input/location"'),
     )
   crosses = (
     ('startoh', {'title': _('start inventory')}),
@@ -59,8 +58,8 @@ class OverviewReport(GridPivot):
     else:
       return {}
 
-  @staticmethod
-  def query(request, basequery, sortsql='1 asc'):
+  @classmethod
+  def query(reportclass, request, basequery, sortsql='1 asc'):
     cursor = connections[request.database].cursor()
     basesql, baseparams = basequery.query.get_compiler(basequery.db).as_sql(with_col_aliases=False)
 
@@ -75,17 +74,17 @@ class OverviewReport(GridPivot):
       inner join buffer
       on buffer.lft between buffers.lft and buffers.rght
       inner join (
-      select out_flowplan.thebuffer as thebuffer, out_flowplan.onhand as onhand
-      from out_flowplan,
-        (select thebuffer, max(id) as id
-         from out_flowplan
+      select operationplanmaterial.buffer as buffer, operationplanmaterial.onhand as onhand
+      from operationplanmaterial,
+        (select buffer, max(id) as id
+         from operationplanmaterial
          where flowdate < '%s'
-         group by thebuffer
+         group by buffer
         ) maxid
-      where maxid.thebuffer = out_flowplan.thebuffer
-      and maxid.id = out_flowplan.id
+      where maxid.buffer = operationplanmaterial.buffer
+      and maxid.id = operationplanmaterial.id
       ) oh
-      on oh.thebuffer = buffer.name
+      on oh.buffer = buffer.name
       group by buffers.name
       ''' % (basesql, request.report_startdate)
     cursor.execute(query, baseparams)
@@ -96,34 +95,33 @@ class OverviewReport(GridPivot):
     query = '''
       select buf.name as row1, buf.item_id as row2, buf.location_id as row3,
              d.bucket as col1, d.startdate as col2, d.enddate as col3,
-             coalesce(sum(%s),0.0) as consumed,
-             coalesce(-sum(%s),0.0) as produced
+             coalesce(sum(greatest(operationplanmaterial.quantity, 0)),0) as consumed,
+             coalesce(-sum(least(operationplanmaterial.quantity, 0)),0) as produced
         from (%s) buf
         -- Multiply with buckets
         cross join (
              select name as bucket, startdate, enddate
              from common_bucketdetail
-             where bucket_id = '%s' and enddate > '%s' and startdate < '%s'
+             where bucket_id = %%s and enddate > %%s and startdate < %%s
              ) d
         -- Include child buffers
         inner join buffer
         on buffer.lft between buf.lft and buf.rght
         -- Consumed and produced quantities
-        left join out_flowplan
-        on buffer.name = out_flowplan.thebuffer
-        and d.startdate <= out_flowplan.flowdate
-        and d.enddate > out_flowplan.flowdate
-        and out_flowplan.flowdate >= '%s'
-        and out_flowplan.flowdate < '%s'
+        left join operationplanmaterial
+        on buffer.name = operationplanmaterial.buffer
+        and d.startdate <= operationplanmaterial.flowdate
+        and d.enddate > operationplanmaterial.flowdate
+        and operationplanmaterial.flowdate >= %%s
+        and operationplanmaterial.flowdate < %%s
         -- Grouping and sorting
         group by buf.name, buf.item_id, buf.location_id, buf.onhand, d.bucket, d.startdate, d.enddate
         order by %s, d.startdate
       ''' % (
-        sql_max('out_flowplan.quantity', '0.0'), sql_min('out_flowplan.quantity', '0.0'),
-        basesql, request.report_bucket, request.report_startdate, request.report_enddate,
-        request.report_startdate, request.report_enddate, sortsql
+        basesql, sortsql
       )
-    cursor.execute(query, baseparams)
+    cursor.execute(query, baseparams + (request.report_bucket, request.report_startdate, request.report_enddate,
+        request.report_startdate, request.report_enddate))
 
     # Build the python result
     prevbuf = None
@@ -140,8 +138,8 @@ class OverviewReport(GridPivot):
         'item': row[1],
         'location': row[2],
         'bucket': row[3],
-        'startdate': python_date(row[4]),
-        'enddate': python_date(row[5]),
+        'startdate': row[4].date(),
+        'enddate': row[5].date(),
         'startoh': round(startoh, 1),
         'produced': round(row[6], 1),
         'consumed': round(row[7], 1),
@@ -151,32 +149,26 @@ class OverviewReport(GridPivot):
 
 class DetailReport(GridReport):
   '''
-  A list report to show flowplans.
+  A list report to show OperationPlanMaterial.
   '''
   template = 'output/flowplan.html'
   title = _("Inventory detail report")
-  model = FlowPlan
+  model = OperationPlanMaterial
   permissions = (('view_inventory_report', 'Can view inventory report'),)
   frozenColumns = 0
   editable = False
   multiselect = False
+  help_url = 'user-guide/user-interface/plan-analysis/inventory-detail-report.html'
 
   @ classmethod
   def basequeryset(reportclass, request, args, kwargs):
     if args and args[0]:
-      base = FlowPlan.objects.filter(thebuffer__exact=args[0])
+      base = OperationPlanMaterial.objects.filter(buffer__exact=args[0])
     else:
-      base = FlowPlan.objects
-    return base.select_related() \
-      .extra(select={
-        'operation_in': "select name from operation where out_operationplan.operation = operation.name",
-        'demand': ("select %s(q || ' : ' || d, ', ') from ("
-                   "select round(sum(quantity)) as q, demand as d "
-                   "from out_demandpegging "
-                   "where out_demandpegging.operationplan = out_flowplan.operationplan_id "
-                   "group by demand order by 1 desc, 2) peg"
-                   % string_agg())
-        })
+      base = OperationPlanMaterial.objects
+    return base.select_related().extra(select={
+      'pegging': "(select string_agg(value || ' : ' || key, ', ') from (select key, value from json_each_text(plan) order by key desc) peg)"
+      })
 
   @classmethod
   def extra_context(reportclass, request, *args, **kwargs):
@@ -185,14 +177,18 @@ class DetailReport(GridReport):
     return {'active_tab': 'plandetail'}
 
   rows = (
-    GridFieldText('thebuffer', title=_('buffer'), key=True, editable=False, formatter='detail', extra="role:'input/buffer'"),
-    GridFieldText('operationplan__operation', title=_('operation'), editable=False, formatter='detail', extra="role:'input/operation'"),
+    #. Translators: Translation included with Django
+    GridFieldInteger('id', title=_('id'), key=True, editable=False, hidden=True),
+    GridFieldText('buffer', title=_('buffer'), editable=False, formatter='detail', extra='"role":"input/buffer"'),
+    GridFieldInteger('operationplan__id', title=_('id'), editable=False),    
+    GridFieldText('operationplan__reference', title=_('reference'), editable=False),
+    GridFieldText('operationplan__type', title=_('type'), field_name='operationplan__type', editable=False),
+    GridFieldText('operationplan__name', title=_('operation'), editable=False, field_name='operationplan__name', formatter='detail', extra='"role":"input/operation"'),
     GridFieldNumber('quantity', title=_('quantity'), editable=False),
     GridFieldDateTime('flowdate', title=_('date'), editable=False),
     GridFieldNumber('onhand', title=_('onhand'), editable=False),
-    GridFieldNumber('operationplan__criticality', title=_('criticality'), editable=False),
-    GridFieldBool('operationplan__locked', title=_('locked'), editable=False),
+    GridFieldNumber('operationplan__criticality', title=_('criticality'), field_name='operationplan__criticality', editable=False),
+    GridFieldText('operationplan__status', title=_('status'), editable=False, field_name='operationplan__status'),
     GridFieldNumber('operationplan__quantity', title=_('operationplan quantity'), editable=False),
-    GridFieldText('demand', title=_('demand quantity'), formatter='demanddetail', width=300, editable=False),
-    GridFieldInteger('operationplan', title=_('operationplan'), editable=False),
+    GridFieldText('pegging', title=_('demand quantity'), formatter='demanddetail', extra='"role":"input/demand"', width=300, editable=False, sortable=False),
     )

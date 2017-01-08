@@ -99,8 +99,11 @@ class Command(BaseCommand):
 
       # Run the restore command
       # Commenting the next line is a little more secure, but requires you to create a .pgpass file.
-      os.environ['PGPASSWORD'] = settings.DATABASES[database]['PASSWORD']
-      cmd = [ "psql", '--username=%s' % settings.DATABASES[database]['USER'] ]
+      if settings.DATABASES[database]['PASSWORD']:
+        os.environ['PGPASSWORD'] = settings.DATABASES[database]['PASSWORD']
+      cmd = [ "psql", ]
+      if settings.DATABASES[database]['USER']:
+        cmd.append("--username=%s" % settings.DATABASES[database]['USER'])
       if settings.DATABASES[database]['HOST']:
         cmd.append("--host=%s" % settings.DATABASES[database]['HOST'])
       if settings.DATABASES[database]['PORT']:

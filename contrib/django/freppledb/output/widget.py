@@ -15,8 +15,10 @@
 # License along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 
+from datetime import datetime, timedelta
 from urllib.parse import urlencode
 
+from django.conf import settings
 from django.db import DEFAULT_DB_ALIAS, connections
 from django.http import HttpResponse
 from django.utils.encoding import force_text
@@ -26,21 +28,35 @@ from django.utils.text import capfirst
 from django.utils.translation import ugettext_lazy as _
 
 from freppledb.common.middleware import _thread_locals
+from freppledb.common.models import Parameter
 from freppledb.common.dashboard import Dashboard, Widget
 from freppledb.common.report import GridReport
-from freppledb.input.models import PurchaseOrder, DistributionOrder
-from freppledb.output.models import LoadPlan, Problem, OperationPlan, Demand
+from freppledb.input.models import PurchaseOrder, DistributionOrder, OperationPlanResource
+from freppledb.output.models import Problem
 
 
 class LateOrdersWidget(Widget):
   name = "late_orders"
-  title = _("Late orders")
+  title = _("late orders")
   tooltip = _("Shows orders that will be delivered after their due date")
   permissions = (("view_problem_report", "Can view problem report"),)
   asynchronous = True
   url = '/problem/?entity=demand&name=late&sord=asc&sidx=startdate'
   exporturl = True
   limit = 20
+
+  query = '''
+    select
+      out_problem.owner, out_problem.weight,
+      out_problem.startdate, out_problem.enddate
+    from out_problem
+    left outer join demand
+      on out_problem.owner = demand.name
+    where out_problem.name = 'late' and out_problem.entity = 'demand'
+      and demand.name is not null
+    order by out_problem.startdate, out_problem.weight desc
+    limit %s
+    '''
 
   def args(self):
     return "?%s" % urlencode({'limit': self.limit})
@@ -52,20 +68,22 @@ class LateOrdersWidget(Widget):
       db = _thread_locals.request.database or DEFAULT_DB_ALIAS
     except:
       db = DEFAULT_DB_ALIAS
+    cursor = connections[db].cursor()
     result = [
-      '<table style="width:100%">',
+      '<div class="table-responsive"><table class="table">',
       '<tr><th class="alignleft">%s</th><th>%s</th><th>%s</th><th>%s</th></tr>' % (
         capfirst(force_text(_("name"))), capfirst(force_text(_("due"))),
         capfirst(force_text(_("planned date"))), capfirst(force_text(_("delay")))
         )
       ]
     alt = False
-    for prob in Problem.objects.using(db).filter(name='late', entity='demand').order_by('startdate', '-weight')[:limit]:
+    cursor.execute(cls.query % limit)
+    for rec in cursor.fetchall():
       result.append('<tr%s><td class="underline"><a href="%s/demandpegging/%s/">%s</a></td><td class="aligncenter">%s</td><td class="aligncenter">%s</td><td class="aligncenter">%s</td></tr>' % (
-        alt and ' class="altRow"' or '', request.prefix, urlquote(prob.owner), escape(prob.owner), prob.startdate.date(), prob.enddate.date(), int(prob.weight)
+        alt and ' class="altRow"' or '', request.prefix, urlquote(rec[0]), escape(rec[0]), rec[2].date(), rec[3].date(), int(rec[1])
         ))
       alt = not alt
-    result.append('</table>')
+    result.append('</table></div>')
     return HttpResponse('\n'.join(result))
 
 Dashboard.register(LateOrdersWidget)
@@ -73,7 +91,7 @@ Dashboard.register(LateOrdersWidget)
 
 class ShortOrdersWidget(Widget):
   name = "short_orders"
-  title = _("Short orders")
+  title = _("short orders")
   tooltip = _("Shows orders that are not planned completely")
   permissions = (("view_problem_report", "Can view problem report"),)
   asynchronous = True
@@ -83,6 +101,18 @@ class ShortOrdersWidget(Widget):
   exporturl = True
   limit = 20
 
+  query = '''
+    select
+      out_problem.owner, out_problem.weight, out_problem.startdate
+    from out_problem
+    left outer join demand
+      on out_problem.owner = demand.name
+    where out_problem.name in ('short', 'unplanned') and out_problem.entity = 'demand'
+      and demand.name is not null
+    order by out_problem.startdate desc
+    limit %s
+    '''
+
   def args(self):
     return "?%s" % urlencode({'limit': self.limit})
 
@@ -93,27 +123,704 @@ class ShortOrdersWidget(Widget):
       db = _thread_locals.request.database or DEFAULT_DB_ALIAS
     except:
       db = DEFAULT_DB_ALIAS
+    cursor = connections[db].cursor()
     result = [
-      '<table style="width:100%">',
+      '<div class="table-responsive"><table class="table">',
       '<tr><th class="alignleft">%s</th><th>%s</th><th>%s</th></tr>' % (
         capfirst(force_text(_("name"))), capfirst(force_text(_("due"))), capfirst(force_text(_("short")))
         )
       ]
     alt = False
-    for prob in Problem.objects.using(db).filter(name__gte='short', entity='demand').order_by('startdate')[:limit]:
+    cursor.execute(cls.query % limit)
+    for rec in cursor.fetchall():
       result.append('<tr%s><td class="underline"><a href="%s/demandpegging/%s/">%s</a></td><td class="aligncenter">%s</td><td class="aligncenter">%s</td></tr>' % (
-        alt and ' class="altRow"' or '', request.prefix, urlquote(prob.owner), escape(prob.owner), prob.startdate.date(), int(prob.weight)
+        alt and ' class="altRow"' or '', request.prefix, urlquote(rec[0]), escape(rec[0]), rec[2].date(), int(rec[1])
         ))
       alt = not alt
-    result.append('</table>')
+    result.append('</table></div>')
     return HttpResponse('\n'.join(result))
 
 Dashboard.register(ShortOrdersWidget)
 
 
+class ManufacturingOrderWidget(Widget):
+  name = "manufacturing_orders"
+  title = _("manufacturing orders")
+  tooltip = _("Shows manufacturing orders by start date")
+  permissions = (("view_problem_report", "Can view problem report"),)
+  asynchronous = True
+  url = '/data/input/manufacturingorder/?sord=asc&sidx=startdate&status__in=proposed,confirmed'
+  exporturl = True
+  fence1 = 7
+  fence2 = 30
+
+  def args(self):
+    return "?%s" % urlencode({'fence1': self.fence1, 'fence2': self.fence2})
+
+  javascript = '''
+    var margin_y = 70;  // Width allocated for the Y-axis
+    var margin_x = 60;  // Height allocated for the X-axis
+    var svg = d3.select("#mo_chart");
+    var svgrectangle = document.getElementById("mo_chart").getBoundingClientRect();
+
+    // Collect the data
+    var domain_x = [];
+    var data = [];
+    var max_value = 0.0;
+    var max_units = 0.0;
+    var max_count = 0.0;
+    var nth = Math.ceil($("#mo_overview").find("tr").length / (svgrectangle['width'] - margin_y) * 30);       
+    var myticks = [];
+    $("#mo_overview").find("tr").each(function(idx) {
+      var name = $(this).children('td').first();
+      var count = name.next();
+      var units = count.next();
+      var value = units.next();
+      var el = [name.text(), parseFloat(count.text()), parseFloat(units.text()), parseFloat(value.text())];
+      data.push(el);
+      domain_x.push(el[0]);
+      if (el[1] > max_count) max_count = el[1];
+      if (el[2] > max_units) max_units = el[2];
+      if (el[3] > max_value) max_value = el[3];
+      if (idx %% nth == 0) myticks.push(name.text());
+      });
+
+    // Define axis domains
+    var x = d3.scale.ordinal()
+      .domain(domain_x)
+      .rangeRoundBands([0, svgrectangle['width'] - margin_y - 10], 0);
+    var y_value = d3.scale.linear()
+      .range([svgrectangle['height'] - margin_x - 10, 0])
+      .domain([0, max_value + 5]);
+    var y_count = d3.scale.linear()
+      .range([svgrectangle['height'] - margin_x - 10, 0])
+      .domain([0, max_count + 5]);
+
+    // Draw invisible rectangles for the hoverings
+    svg.selectAll("g")
+     .data(data)
+     .enter()
+     .append("g")
+     .attr("transform", function(d, i) { return "translate(" + ((i) * x.rangeBand() + margin_y) + ",10)"; })
+     .append("rect")
+      .attr("height", svgrectangle['height'] - 10 - margin_x)
+      .attr("width", x.rangeBand())
+      .attr("fill-opacity", 0)
+      .on("mouseover", function(d) {
+        $("#mo_tooltip")
+          .css("display", "block")
+          .html(d[0] + "<br>" + d[1] + " / " + d[2] + " %s / %s " + d[3] + "%s");
+        })
+      .on("mousemove", function(){
+        $("#mo_tooltip").css("top", (event.clientY+5) + "px").css("left", (event.clientX+5) + "px");
+        })
+      .on("mouseout", function(){
+        $("#mo_tooltip").css("display", "none")
+        });
+
+    // Draw x-axis
+    var xAxis = d3.svg.axis().scale(x).tickValues(myticks).orient("bottom");
+    svg.append("g")
+      .attr("transform", "translate(" + margin_y  + ", " + (svgrectangle['height'] - margin_x) +" )")
+      .attr("class", "x axis")
+      .call(xAxis)
+      .selectAll("text")
+      .style("text-anchor", "end")
+      .attr("dx", "-.75em")
+      .attr("dy", "-.25em")
+      .attr("transform", "rotate(-90)" );
+
+    // Draw y-axis
+    var yAxis = d3.svg.axis().scale(y_value)
+        .orient("left")
+        .ticks(5)
+        .tickFormat(d3.format("s"));
+    svg.append("g")
+      .attr("transform", "translate(" + margin_y + ", 10 )")
+      .attr("class", "y axis")
+      .call(yAxis);
+
+    // Draw the lines
+    var line_value = d3.svg.line()
+      .x(function(d) { return x(d[0]) + x.rangeBand() / 2; })
+      .y(function(d) { return y_value(d[3]); });
+    var line_count = d3.svg.line()
+      .x(function(d) { return x(d[0]) + x.rangeBand() / 2; })
+      .y(function(d) { return y_count(d[1]); });
+
+    svg.append("svg:path")
+      .attr("transform", "translate(" + margin_y + ", 10 )")
+      .attr('class', 'graphline')
+      .attr("stroke","#8BBA00")
+      .attr("d", line_value(data));
+    svg.append("svg:path")
+      .attr("transform", "translate(" + margin_y + ", 10 )")
+      .attr('class', 'graphline')
+      .attr("stroke","#FFC000")
+      .attr("d", line_count(data));
+    ''' % (force_text(_("units")), settings.CURRENCY[0], settings.CURRENCY[1])
+
+  @classmethod
+  def render(cls, request=None):
+    fence1 = int(request.GET.get('fence1', cls.fence1))
+    fence2 = int(request.GET.get('fence2', cls.fence2))
+    try:
+      db = _thread_locals.request.database or DEFAULT_DB_ALIAS
+    except:
+      db = DEFAULT_DB_ALIAS
+    try:
+      current = datetime.strptime(
+        Parameter.objects.using(db).get(name="currentdate").value,
+        "%Y-%m-%d %H:%M:%S"
+        )
+    except:
+      current = datetime.now()
+      current = current.replace(microsecond=0)
+    request.database = db
+    GridReport.getBuckets(request)
+    cursor = connections[db].cursor()
+    query = '''
+      select
+         0, common_bucketdetail.name, common_bucketdetail.startdate,
+         count(*), coalesce(round(sum(quantity)),0),
+         coalesce(round(sum(quantity * cost)),0)         
+      from common_bucketdetail
+      left outer join operationplan
+        on operationplan.startdate >= common_bucketdetail.startdate
+        and operationplan.startdate < common_bucketdetail.enddate
+        and status in ('confirmed', 'proposed')
+        and operationplan.type = 'MO'
+      left outer join operation
+        on operationplan.operation_id = operation.name        
+      where bucket_id = %%s and common_bucketdetail.enddate > %%s
+        and common_bucketdetail.startdate < %%s
+      group by common_bucketdetail.name, common_bucketdetail.startdate
+      union all
+      select 
+        1, null, null, count(*),
+        coalesce(round(sum(quantity)),0),
+        coalesce(round(sum(quantity * cost)),0)         
+      from operationplan
+      inner join operation
+        on operationplan.operation_id = operation.name
+      where status = 'confirmed'
+        and operationplan.type = 'MO'
+      union all
+      select 
+        2, null, null, count(*),
+        coalesce(round(sum(quantity)),0),
+        coalesce(round(sum(quantity * cost)),0)        
+      from operationplan
+      inner join operation
+        on operationplan.operation_id = operation.name
+      where status = 'proposed'
+        and startdate < %%s + interval '%s day'
+        and operationplan.type = 'MO'
+      union all
+      select 
+        3, null, null, count(*),
+        coalesce(round(sum(quantity)),0),
+        coalesce(round(sum(quantity * cost)),0)        
+      from operationplan
+      inner join operation
+        on operationplan.operation_id = operation.name
+      where status = 'proposed'
+        and startdate < %%s + interval '%s day'
+        and operationplan.type = 'MO'
+      order by 1, 3
+      ''' % (fence1, fence2)
+    cursor.execute(query, (request.report_bucket, request.report_startdate, request.report_enddate, current, current))
+    result = [
+      '<svg class="chart" id="mo_chart" style="width:100%; height: 150px;"></svg>',
+      '<table id="mo_overview" style="display: none">',
+      ]
+    for rec in cursor.fetchall():
+      if rec[0] == 0:
+        result.append('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>' % (rec[1], rec[3], rec[4], rec[5]))
+      elif rec[0] == 1:
+        result.append('</table><div class="row"><div class="col-xs-4"><h2>%s / %s %s / %s%s%s&nbsp;<a href="%s/data/input/manufacturingorder/?sord=asc&sidx=startdate&amp;status=confirmed" role="button" class="btn btn-success btn-xs">%s</a></h2><small>%s</small></div>' % (
+          rec[3], rec[4], force_text(_("units")),
+          settings.CURRENCY[0], rec[5], settings.CURRENCY[1],
+          request.prefix,
+          force_text(_("Review")),
+          force_text(_("confirmed orders"))
+          ))
+      elif rec[0] == 2 and fence1:
+        limit_fence1 = current + timedelta(days=fence1)
+        result.append('<div class="col-xs-4"><h2>%s / %s %s / %s%s%s&nbsp;<a href="%s/data/input/manufacturingorder/?sord=asc&sidx=startdate&startdate__lte=%s&amp;status=proposed" role="button" class="btn btn-success btn-xs">%s</a></h2><small>%s</small></div>' % (
+          rec[3], rec[4], force_text(_("units")),
+          settings.CURRENCY[0], rec[5], settings.CURRENCY[1],
+          request.prefix, limit_fence1.strftime("%Y-%m-%d"),
+          force_text(_("Review")),
+          force_text(_("proposed orders within %(fence)s days") % {'fence': fence1})
+          ))
+      elif fence2:
+        limit_fence2 = current + timedelta(days=fence2)
+        result.append('<div class="col-xs-4"><h2>%s / %s %s / %s%s%s&nbsp;<a href="%s/data/input/manufacturingorder/?sord=asc&sidx=startdate&startdate__lte=%s&amp;status=proposed" rol="button" class="btn btn-success btn-xs">%s</a></h2><small>%s</small></div>' % (
+          rec[3], rec[4], force_text(_("units")), 
+          settings.CURRENCY[0], rec[5], settings.CURRENCY[1],
+          request.prefix, limit_fence2.strftime("%Y-%m-%d"),
+          force_text(_("Review")),
+          force_text(_("proposed orders within %(fence)s days") % {'fence': fence2})
+          ))
+    result.append('</div><div id="mo_tooltip" class="tooltip-inner" style="display: none; z-index:10000; position:fixed;"></div>')
+    return HttpResponse('\n'.join(result))
+
+Dashboard.register(ManufacturingOrderWidget)
+
+
+class DistributionOrderWidget(Widget):
+  name = "distribution_orders"
+  title = _("distribution orders")
+  tooltip = _("Shows distribution orders by start date")
+  permissions = (("view_problem_report", "Can view problem report"),)
+  asynchronous = True
+  url = '/data/input/distributionorder/?sord=asc&sidx=startdate&status__in=proposed,confirmed'
+  exporturl = True
+  fence1 = 7
+  fence2 = 30
+
+  def args(self):
+    return "?%s" % urlencode({'fence1': self.fence1, 'fence2': self.fence2})
+
+  javascript = '''
+    var margin_y = 70;  // Width allocated for the Y-axis
+    var margin_x = 60;  // Height allocated for the X-axis
+    var svg = d3.select("#do_chart");
+    var svgrectangle = document.getElementById("do_chart").getBoundingClientRect();
+
+    // Collect the data
+    var domain_x = [];
+    var data = [];
+    var max_value = 0.0;
+    var max_units = 0.0;
+    var max_count = 0.0;
+    var nth = Math.ceil($("#do_overview").find("tr").length / (svgrectangle['width'] - margin_y) * 30);       
+    var myticks = [];
+    $("#do_overview").find("tr").each(function(idx) {
+      var name = $(this).children('td').first();
+      var count = name.next();
+      var units = count.next();
+      var value = units.next()
+      var el = [name.text(), parseFloat(count.text()), parseFloat(units.text()), parseFloat(value.text())];
+      data.push(el);
+      domain_x.push(el[0]);
+      if (el[1] > max_count) max_count = el[1];
+      if (el[2] > max_units) max_units = el[2];
+      if (el[3] > max_value) max_value = el[3];
+      if (idx %% nth == 0) myticks.push(name.text());
+      });
+      
+    // Define axis domains
+    var x = d3.scale.ordinal()
+      .domain(domain_x)
+      .rangeRoundBands([0, svgrectangle['width'] - margin_y - 10], 0);
+    var y_value = d3.scale.linear()
+      .range([svgrectangle['height'] - margin_x - 10, 0])
+      .domain([0, max_value + 5]);
+    var y_count = d3.scale.linear()
+      .range([svgrectangle['height'] - margin_x - 10, 0])
+      .domain([0, max_count + 5]);
+
+    // Draw invisible rectangles for the hoverings
+    svg.selectAll("g")
+     .data(data)
+     .enter()
+     .append("g")
+     .attr("transform", function(d, i) { return "translate(" + ((i) * x.rangeBand() + margin_y) + ",10)"; })
+     .append("rect")
+      .attr("height", svgrectangle['height'] - 10 - margin_x)
+      .attr("width", x.rangeBand())
+      .attr("fill-opacity", 0)
+      .on("mouseover", function(d) {
+        $("#do_tooltip").css("display", "block").html(d[0] + "<br>"+ d[1] + " / " + d[2] + " %s / %s " + d[3] + "%s");
+        })
+      .on("mousemove", function(){
+        $("#do_tooltip").css("top", (event.clientY+5) + "px").css("left", (event.clientX+5) + "px");
+        })
+      .on("mouseout", function(){
+        $("#do_tooltip").css("display", "none");
+        });
+
+    // Draw x-axis
+    var xAxis = d3.svg.axis().scale(x).tickValues(myticks).orient("bottom");
+    svg.append("g")
+      .attr("transform", "translate(" + margin_y  + ", " + (svgrectangle['height'] - margin_x) +" )")
+      .attr("class", "x axis")
+      .call(xAxis)
+      .selectAll("text")
+      .style("text-anchor", "end")
+      .attr("dx", "-.75em")
+      .attr("dy", "-.25em")
+      .attr("transform", "rotate(-90)" );
+
+    // Draw y-axis
+    var yAxis = d3.svg.axis().scale(y_value)
+        .orient("left")
+        .ticks(5)
+        .tickFormat(d3.format("s"));
+    svg.append("g")
+      .attr("transform", "translate(" + margin_y + ", 10 )")
+      .attr("class", "y axis")
+      .call(yAxis);
+
+    // Draw the lines
+    var line_value = d3.svg.line()
+      .x(function(d) { return x(d[0]) + x.rangeBand() / 2; })
+      .y(function(d) { return y_value(d[3]); });
+    var line_count = d3.svg.line()
+      .x(function(d) { return x(d[0]) + x.rangeBand() / 2; })
+      .y(function(d) { return y_count(d[1]); });
+
+    svg.append("svg:path")
+      .attr("transform", "translate(" + margin_y + ", 10 )")
+      .attr('class', 'graphline')
+      .attr("stroke","#8BBA00")
+      .attr("d", line_value(data));
+    svg.append("svg:path")
+      .attr("transform", "translate(" + margin_y + ", 10 )")
+      .attr('class', 'graphline')
+      .attr("stroke","#FFC000")
+      .attr("d", line_count(data));
+    ''' % (force_text(_("units")), settings.CURRENCY[0], settings.CURRENCY[1])
+
+  @classmethod
+  def render(cls, request=None):
+    fence1 = int(request.GET.get('fence1', cls.fence1))
+    fence2 = int(request.GET.get('fence2', cls.fence2))
+    try:
+      db = _thread_locals.request.database or DEFAULT_DB_ALIAS
+    except:
+      db = DEFAULT_DB_ALIAS
+    try:
+      current = datetime.strptime(
+        Parameter.objects.using(db).get(name="currentdate").value,
+        "%Y-%m-%d %H:%M:%S"
+        )
+    except:
+      current = datetime.now()
+      current = current.replace(microsecond=0)
+    request.database = db
+    GridReport.getBuckets(request)
+    cursor = connections[db].cursor()
+    query = '''
+      select
+         0, common_bucketdetail.name, common_bucketdetail.startdate,
+         count(*), coalesce(round(sum(quantity)),0),
+         coalesce(round(sum(item.price * quantity)),0)
+      from common_bucketdetail
+      left outer join operationplan
+        on operationplan.startdate >= common_bucketdetail.startdate
+        and operationplan.startdate < common_bucketdetail.enddate
+      left outer join item
+        on operationplan.item_id = item.name
+        and status in ('confirmed', 'proposed')
+        and type = 'DO'
+      where bucket_id = %%s and common_bucketdetail.enddate > %%s
+        and common_bucketdetail.startdate < %%s        
+      group by common_bucketdetail.name, common_bucketdetail.startdate
+      union all
+      select 
+        1, null, null, count(*), 
+        coalesce(round(sum(quantity)),0),
+        coalesce(round(sum(item.price * quantity)),0)
+      from operationplan
+      inner join item
+      on operationplan.item_id = item.name
+      where status = 'confirmed' and type = 'DO'
+      union all
+      select 
+        2, null, null, count(*), 
+        coalesce(round(sum(item.price)),0),
+        coalesce(round(sum(item.price * quantity)),0)
+      from operationplan
+      inner join item
+      on operationplan.item_id = item.name
+      where status = 'proposed' and startdate < %%s + interval '%s day'
+      and type = 'DO'
+      union all
+      select
+        3, null, null, count(*),
+        coalesce(round(sum(quantity)),0),
+        coalesce(round(sum(item.price * quantity)),0)
+      from operationplan
+      inner join item
+      on operationplan.item_id = item.name
+      where status = 'proposed' and startdate < %%s + interval '%s day'
+      and type = 'DO'
+      order by 1, 3
+      ''' % (fence1, fence2)
+    cursor.execute(query, (request.report_bucket, request.report_startdate, request.report_enddate, current, current))
+    result = [
+      '<svg class="chart" id="do_chart" style="width:100%; height: 150px;"></svg>',
+      '<table id="do_overview" style="display: none">',
+      ]
+    for rec in cursor.fetchall():
+      if rec[0] == 0:
+        result.append('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>' % (rec[1], rec[3], rec[4], rec[5]))
+      elif rec[0] == 1:
+        result.append('</table><div class="row"><div class="col-xs-4"><h2>%s / %s %s / %s%s%s&nbsp;<a href="%s/data/input/distributionorder/?sord=asc&sidx=startdate&amp;status=confirmed" class="btn btn-success btn-xs">%s</a></h2><small>%s</small></div>' % (
+          rec[3], rec[4], force_text(_("units")), 
+          settings.CURRENCY[0], rec[5], settings.CURRENCY[1], request.prefix,
+          force_text(_("Review")),
+          force_text(_("confirmed orders"))
+          ))
+      elif rec[0] == 2 and fence1:
+        limit_fence1 = current + timedelta(days=fence1)
+        result.append('<div class="col-xs-4"><h2>%s / %s %s / %s%s%s&nbsp;<a href="%s/data/input/distributionorder/?sord=asc&sidx=startdate&startdate__lte=%s&amp;status=proposed" class="btn btn-success btn-xs">%s</a></h2><small>%s</small></div>' % (
+          rec[3], rec[4], force_text(_("units")),
+          settings.CURRENCY[0], rec[5], settings.CURRENCY[1],
+          request.prefix, limit_fence1.strftime("%Y-%m-%d"),
+          force_text(_("Review")),
+          force_text(_("proposed orders within %(fence)s days") % {'fence': fence1})
+          ))
+      elif fence2:
+        limit_fence2 = current + timedelta(days=fence2)
+        result.append('<div class="col-xs-4"><h2>%s / %s %s / %s%s%s&nbsp;<a href=%s/data/input/distributionorder/?sord=asc&sidx=startdate&startdate__lte=%s&amp;status=proposed" class="btn btn-success btn-xs">%s</a></h2><small>%s</small></div>' % (
+          rec[3], rec[4], force_text(_("units")), 
+          settings.CURRENCY[0], rec[5], settings.CURRENCY[1],
+          request.prefix, limit_fence2.strftime("%Y-%m-%d"),
+          force_text(_("Review")),
+          force_text(_("proposed orders within %(fence)s days") % {'fence': fence2})
+          ))
+    result.append('</div><div id="do_tooltip" class="tooltip-inner" style="display: none; z-index:10000; position:fixed"></div>')
+    return HttpResponse('\n'.join(result))
+
+Dashboard.register(DistributionOrderWidget)
+
+
+class PurchaseOrderWidget(Widget):
+  name = "purchase_orders"
+  title = _("purchase orders")
+  tooltip = _("Shows purchase orders by ordering date")
+  permissions = (("view_problem_report", "Can view problem report"),)
+  asynchronous = True
+  url = '/data/input/purchaseorder/?sord=asc&sidx=startdate&status__in=proposed,confirmed'
+  exporturl = True
+  fence1 = 7
+  fence2 = 30
+  supplier = None
+
+  def args(self):
+    if self.supplier:
+      return "?%s" % urlencode({'fence1': self.fence1, 'fence2': self.fence2, 'supplier': self.supplier})
+    else:
+      return "?%s" % urlencode({'fence1': self.fence1, 'fence2': self.fence2})
+
+  javascript = '''
+    var margin_y = 70;  // Width allocated for the Y-axis
+    var margin_x = 60;  // Height allocated for the X-axis
+    var svg = d3.select("#po_chart");
+    var svgrectangle = document.getElementById("po_chart").getBoundingClientRect();
+
+    // Collect the data
+    var domain_x = [];
+    var data = [];
+    var max_value = 0.0;
+    var max_units = 0.0;
+    var max_count = 0.0;
+    var nth = Math.ceil($("#po_overview").find("tr").length / (svgrectangle['width'] - margin_y) * 30);       
+    var myticks = [];
+    $("#po_overview").find("tr").each(function(idx) {
+      var name = $(this).children('td').first();
+      var count = name.next();
+      var units = count.next()
+      var value = units.next()
+      var el = [name.text(), parseFloat(count.text()), parseFloat(units.text()), parseFloat(value.text())];
+      data.push(el);
+      domain_x.push(el[0]);
+      if (el[1] > max_count) max_count = el[1];
+      if (el[2] > max_units) max_units = el[2];
+      if (el[3] > max_value) max_value = el[3];
+      if (idx %% nth == 0) myticks.push(name.text());
+      });
+
+    // Define axis domains
+    var x = d3.scale.ordinal()
+      .domain(domain_x)
+      .rangeRoundBands([0, svgrectangle['width'] - margin_y - 10], 0);
+    var y_value = d3.scale.linear()
+      .range([svgrectangle['height'] - margin_x - 10, 0])
+      .domain([0, max_value + 5]);
+    var y_count = d3.scale.linear()
+      .range([svgrectangle['height'] - margin_x - 10, 0])
+      .domain([0, max_count + 5]);
+
+    // Draw invisible rectangles for the hoverings
+    svg.selectAll("g")
+     .data(data)
+     .enter()
+     .append("g")
+     .attr("transform", function(d, i) { return "translate(" + ((i) * x.rangeBand() + margin_y) + ",10)"; })
+     .append("rect")
+      .attr("height", svgrectangle['height'] - 10 - margin_x)
+      .attr("width", x.rangeBand())
+      .attr("fill-opacity", 0)
+      .on("mouseover", function(d) {
+        $("#po_tooltip").css("display", "block").html(d[0] + "<br>" + d[1] + " / " + d[2] + " %s / %s " + d[3] + "%s")
+        })
+      .on("mousemove", function(){
+        $("#po_tooltip").css("top", (event.clientY+5) + "px").css("left", (event.clientX+5) + "px");
+        })
+      .on("mouseout", function(){
+        $("#po_tooltip").css("display", "none");
+        });
+
+    // Draw x-axis
+    var xAxis = d3.svg.axis().scale(x).tickValues(myticks).orient("bottom");
+    svg.append("g")
+      .attr("transform", "translate(" + margin_y  + ", " + (svgrectangle['height'] - margin_x) +" )")
+      .attr("class", "x axis")
+      .call(xAxis)
+      .selectAll("text")
+      .style("text-anchor", "end")
+      .attr("dx", "-.75em")
+      .attr("dy", "-.25em")
+      .attr("transform", "rotate(-90)" );
+
+    // Draw y-axis
+    var yAxis = d3.svg.axis().scale(y_value)
+        .orient("left")
+        .ticks(5)
+        .tickFormat(d3.format("s"));
+    svg.append("g")
+      .attr("transform", "translate(" + margin_y + ", 10 )")
+      .attr("class", "y axis")
+      .call(yAxis);
+
+    // Draw the lines
+    var line_value = d3.svg.line()
+      .x(function(d) { return x(d[0]) + x.rangeBand() / 2; })
+      .y(function(d) { return y_value(d[3]); });
+    var line_count = d3.svg.line()
+      .x(function(d) { return x(d[0]) + x.rangeBand() / 2; })
+      .y(function(d) { return y_count(d[1]); });
+
+    svg.append("svg:path")
+      .attr("transform", "translate(" + margin_y + ", 10 )")
+      .attr('class', 'graphline')
+      .attr("stroke","#8BBA00")
+      .attr("d", line_value(data));
+    svg.append("svg:path")
+      .attr("transform", "translate(" + margin_y + ", 10 )")
+      .attr('class', 'graphline')
+      .attr("stroke","#FFC000")
+      .attr("d", line_count(data));
+    ''' % (force_text(_("units")), settings.CURRENCY[0], settings.CURRENCY[1])
+
+  @classmethod
+  def render(cls, request=None):
+    fence1 = int(request.GET.get('fence1', cls.fence1))
+    fence2 = int(request.GET.get('fence2', cls.fence2))
+    supplier = request.GET.get('supplier', cls.supplier)
+    try:
+      db = _thread_locals.request.database or DEFAULT_DB_ALIAS
+    except:
+      db = DEFAULT_DB_ALIAS
+    try:
+      current = datetime.strptime(
+        Parameter.objects.using(db).get(name="currentdate").value,
+        "%Y-%m-%d %H:%M:%S"
+        )
+    except:
+      current = datetime.now()
+      current = current.replace(microsecond=0)
+    request.database = db
+    GridReport.getBuckets(request)
+    supplierfilter = 'and supplier_id = %s' if supplier else ''
+    cursor = connections[db].cursor()
+    query = '''
+      select
+         0, common_bucketdetail.name, common_bucketdetail.startdate,
+         count(*), coalesce(round(sum(quantity)),0),
+         coalesce(round(sum(item.price * quantity)),0)
+      from common_bucketdetail
+      left outer join operationplan
+        on operationplan.startdate >= common_bucketdetail.startdate
+        and operationplan.startdate < common_bucketdetail.enddate
+        and status in ('confirmed', 'proposed') %s
+      left outer join item
+        on operationplan.item_id = item.name
+      where bucket_id = %%s and common_bucketdetail.enddate > %%s
+        and common_bucketdetail.startdate < %%s
+      group by common_bucketdetail.name, common_bucketdetail.startdate
+      union all
+      select 
+        1, null, null, count(*), 
+        coalesce(round(sum(quantity)),0),
+        coalesce(round(sum(item.price * quantity)),0)
+      from operationplan
+      inner join item
+      on operationplan.item_id = item.name
+      where status = 'confirmed' %s and type = 'PO'
+      union all
+      select
+        2, null, null, count(*),
+        coalesce(round(sum(quantity)),0),
+        coalesce(round(sum(item.price * quantity)),0)
+      from operationplan
+      inner join item
+      on operationplan.item_id = item.name
+      where status = 'proposed' and type = 'PO' and startdate < %%s + interval '%s day' %s
+      union all
+      select 
+        3, null, null, count(*),
+        coalesce(round(sum(quantity)),0),
+        coalesce(round(sum(item.price * quantity)),0)
+      from operationplan
+      inner join item
+      on operationplan.item_id = item.name
+      where status = 'proposed' and type = 'PO' and startdate < %%s + interval '%s day' %s
+      order by 1, 3
+      ''' % (
+        supplierfilter, supplierfilter, fence1, supplierfilter, fence2, supplierfilter
+        )
+    if supplier:
+      cursor.execute(query, (request.report_bucket, request.report_startdate, request.report_enddate, supplier, supplier, current, supplier, current, supplier))
+    else:
+      cursor.execute(query, (request.report_bucket, request.report_startdate, request.report_enddate, current, current))
+    result = [
+      '<svg class="chart" id="po_chart" style="width:100%; height: 150px;"></svg>',
+      '<table id="po_overview" style="display: none">',
+      ]
+    for rec in cursor.fetchall():
+      if rec[0] == 0:
+        result.append('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>' % (rec[1], rec[3], rec[4], rec[5]))
+      elif rec[0] == 1:
+        result.append('</table><div class="row"><div class="col-xs-4"><h2>%s / %s %s / %s%s%s&nbsp;<a href="%s/data/input/purchaseorder/?sord=asc&sidx=startdate&amp;status=confirmed" class="btn btn-success btn-xs">%s</a></h2><small>%s</small></div>' % (
+          rec[3], rec[4], force_text(_("units")),
+          settings.CURRENCY[0], rec[4],
+          settings.CURRENCY[1], request.prefix,
+          force_text(_("Review")),
+          force_text(_("confirmed orders"))
+          ))
+      elif rec[0] == 2 and fence1:
+        limit_fence1 = current + timedelta(days=fence1)
+        result.append('<div class="col-xs-4"><h2>%s / %s %s / %s%s%s&nbsp;<a href="%s/data/input/purchaseorder/?sord=asc&sidx=startdate&startdate__lte=%s&amp;status=proposed" class="btn btn-success btn-xs">%s</a></h2><small>%s</small></div>' % (
+          rec[3], rec[4], force_text(_("units")),
+          settings.CURRENCY[0], rec[5], settings.CURRENCY[1],
+          request.prefix, limit_fence1.strftime("%Y-%m-%d"),
+          force_text(_("Review")),
+          force_text(_("proposed orders within %(fence)s days") % {'fence': fence1})
+          ))
+      elif fence2:
+        limit_fence2 = current + timedelta(days=fence2)
+        result.append('<div class="col-xs-4"><h2>%s / %s %s / %s%s%s&nbsp;<a href="%s/data/input/purchaseorder/?sord=asc&sidx=startdate&startdate__lte=%s&amp;status=proposed" class="btn btn-success btn-xs">%s</a></h2><small>%s</small></div>' % (
+          rec[3], rec[4], force_text(_("units")),
+          settings.CURRENCY[0], rec[5], settings.CURRENCY[1],
+          request.prefix, limit_fence2.strftime("%Y-%m-%d"),
+          force_text(_("Review")),
+          force_text(_("proposed orders within %(fence)s days") % {'fence': fence2})
+          ))
+    result.append('</div><div id="po_tooltip" class="tooltip-inner" style="display: none; z-index:10000; position:fixed"></div>')
+    return HttpResponse('\n'.join(result))
+
+Dashboard.register(PurchaseOrderWidget)
+
+
 class PurchaseQueueWidget(Widget):
   name = "purchase_queue"
-  title = _("Purchase queue")
+  title = _("purchase queue")
   tooltip = _("Display a list of new purchase orders")
   permissions = (("view_purchaseorder", "Can view purchase orders"),)
   asynchronous = True
@@ -132,7 +839,7 @@ class PurchaseQueueWidget(Widget):
     except:
       db = DEFAULT_DB_ALIAS
     result = [
-      '<table style="width:100%">',
+      '<div class="table-responsive"><table class="table">',
       '<tr><th class="alignleft">%s</th><th>%s</th><th>%s</th><th>%s</th><th>%s</th></tr>' % (
         capfirst(force_text(_("item"))), capfirst(force_text(_("supplier"))),
         capfirst(force_text(_("enddate"))), capfirst(force_text(_("quantity"))),
@@ -145,15 +852,56 @@ class PurchaseQueueWidget(Widget):
         alt and ' class="altRow"' or '', escape(po.item.name), escape(po.supplier.name), po.enddate.date(), int(po.quantity), int(po.criticality)
         ))
       alt = not alt
-    result.append('</table>')
+    result.append('</table></div>')
     return HttpResponse('\n'.join(result))
 
 Dashboard.register(PurchaseQueueWidget)
 
 
+
+class DistributionQueueWidget(Widget):
+  name = "distribution_queue"
+  title = _("distribution queue")
+  tooltip = _("Display a list of new distribution orders")
+  permissions = (("view_distributionorder", "Can view distribution orders"),)
+  asynchronous = True
+  url = '/data/input/distributionorder/?status=proposed&sidx=startdate&sord=asc'
+  exporturl = True
+  limit = 20
+
+  def args(self):
+    return "?%s" % urlencode({'limit': self.limit})
+
+  @classmethod
+  def render(cls, request=None):
+    limit = int(request.GET.get('limit', cls.limit))
+    try:
+      db = _thread_locals.request.database or DEFAULT_DB_ALIAS
+    except:
+      db = DEFAULT_DB_ALIAS
+    result = [
+      '<div class="table-responsive"><table class="table">',
+      '<tr><th class="alignleft">%s</th><th>%s</th><th>%s</th><th>%s</th><th>%s</th><th>%s</th></tr>' % (
+        capfirst(force_text(_("item"))), capfirst(force_text(_("origin"))),
+        capfirst(force_text(_("destination"))), capfirst(force_text(_("enddate"))),
+        capfirst(force_text(_("quantity"))), capfirst(force_text(_("criticality")))
+        )
+      ]
+    alt = False
+    for po in DistributionOrder.objects.using(db).filter(status='proposed').order_by('startdate')[:limit]:
+      result.append('<tr%s><td>%s</td><td class="aligncenter">%s</td><td class="aligncenter">%s</td><td class="aligncenter">%s</td><td class="aligncenter">%s</td><td class="aligncenter">%s</td></tr>' % (
+        alt and ' class="altRow"' or '', escape(po.item.name), escape(po.origin.name if po.origin else ''), escape(po.destination.name), po.enddate.date(), int(po.quantity), int(po.criticality)
+        ))
+      alt = not alt
+    result.append('</table></div>')
+    return HttpResponse('\n'.join(result))
+
+Dashboard.register(DistributionQueueWidget)
+
+
 class ShippingQueueWidget(Widget):
   name = "shipping_queue"
-  title = _("Shipping queue")
+  title = _("shipping queue")
   tooltip = _("Display a list of new distribution orders")
   permissions = (("view_distributionorder", "Can view distribution orders"),)
   asynchronous = True
@@ -172,7 +920,7 @@ class ShippingQueueWidget(Widget):
     except:
       db = DEFAULT_DB_ALIAS
     result = [
-      '<table style="width:100%">',
+      '<div class="table-responsive"><table class="table">',
       '<tr><th class="alignleft">%s</th><th>%s</th><th>%s</th><th>%s</th><th>%s</th><th>%s</th></tr>' % (
         capfirst(force_text(_("item"))), capfirst(force_text(_("origin"))),
         capfirst(force_text(_("destination"))), capfirst(force_text(_("quantity"))),
@@ -186,7 +934,7 @@ class ShippingQueueWidget(Widget):
         int(do.quantity), do.startdate.date(), int(do.criticality)
         ))
       alt = not alt
-    result.append('</table>')
+    result.append('</table></div>')
     return HttpResponse('\n'.join(result))
 
 Dashboard.register(ShippingQueueWidget)
@@ -194,7 +942,7 @@ Dashboard.register(ShippingQueueWidget)
 
 class ResourceQueueWidget(Widget):
   name = "resource_queue"
-  title = _("Resource queue")
+  title = _("resource queue")
   tooltip = _("Display planned activities for the resources")
   permissions = (("view_resource_report", "Can view resource report"),)
   asynchronous = True
@@ -213,7 +961,7 @@ class ResourceQueueWidget(Widget):
     except:
       db = DEFAULT_DB_ALIAS
     result = [
-      '<table style="width:100%">',
+      '<div class="table-responsive"><table class="table">',
       '<tr><th class="alignleft">%s</th><th>%s</th><th>%s</th><th>%s</th><th>%s</th><th>%s</th></tr>' % (
         capfirst(force_text(_("resource"))), capfirst(force_text(_("operation"))),
         capfirst(force_text(_("startdate"))), capfirst(force_text(_("enddate"))),
@@ -221,12 +969,12 @@ class ResourceQueueWidget(Widget):
         )
       ]
     alt = False
-    for ldplan in LoadPlan.objects.using(db).select_related().order_by('startdate')[:limit]:
-      result.append('<tr%s><td class="underline"><a href="%s/loadplan/?theresource=%s&sidx=startdate&sord=asc">%s</a></td><td>%s</td><td class="aligncenter">%s</td><td class="aligncenter">%s</td><td class="aligncenter">%s</td><td class="aligncenter">%s</td></tr>' % (
-        alt and ' class="altRow"' or '', request.prefix, urlquote(ldplan.theresource), escape(ldplan.theresource), escape(ldplan.operationplan.operation), ldplan.startdate, ldplan.enddate, int(ldplan.operationplan.quantity), int(ldplan.operationplan.criticality)
+    for ldplan in OperationPlanResource.objects.using(db).select_related().order_by('startdate')[:limit]:
+      result.append('<tr%s><td class="underline"><a href="%s/loadplan/?resource=%s&sidx=startdate&sord=asc">%s</a></td><td>%s</td><td class="aligncenter">%s</td><td class="aligncenter">%s</td><td class="aligncenter">%s</td><td class="aligncenter">%s</td></tr>' % (
+        alt and ' class="altRow"' or '', request.prefix, urlquote(ldplan.resource), escape(ldplan.resource), escape(ldplan.operationplan.operation), ldplan.startdate, ldplan.enddate, int(ldplan.operationplan.quantity), int(ldplan.operationplan.criticality)
         ))
       alt = not alt
-    result.append('</table>')
+    result.append('</table></div>')
     return HttpResponse('\n'.join(result))
 
 Dashboard.register(ResourceQueueWidget)
@@ -234,7 +982,7 @@ Dashboard.register(ResourceQueueWidget)
 
 class PurchaseAnalysisWidget(Widget):
   name = "purchase_order_analysis"
-  title = _("Purchase order analysis")
+  title = _("purchase order analysis")
   tooltip = _("Analyse the urgency of existing purchase orders")
   permissions = (("view_purchaseorder", "Can view purchase orders"),)
   asynchronous = True
@@ -249,7 +997,7 @@ class PurchaseAnalysisWidget(Widget):
     except:
       db = DEFAULT_DB_ALIAS
     result = [
-      '<table style="width:100%">',
+      '<div class="table-responsive"><table class="table">',
       '<tr><th class="alignleft">%s</th><th>%s</th><th>%s</th><th>%s</th><th>%s</th></tr>' % (
         capfirst(force_text(_("item"))), capfirst(force_text(_("supplier"))),
         capfirst(force_text(_("enddate"))), capfirst(force_text(_("quantity"))),
@@ -257,12 +1005,13 @@ class PurchaseAnalysisWidget(Widget):
         )
       ]
     alt = False
-    for po in PurchaseOrder.objects.using(db).filter(status='confirmed').order_by('criticality')[:limit]:
+    for po in PurchaseOrder.objects.using(db).filter(status='confirmed').order_by('criticality','enddate')[:limit]:
       result.append('<tr%s><td>%s</td><td class="aligncenter">%s</td><td class="aligncenter">%s</td><td class="aligncenter">%s</td><td class="aligncenter">%s</td></tr>' % (
-        alt and ' class="altRow"' or '', escape(po.item.name), escape(po.supplier.name), po.enddate.date(), int(po.quantity), int(po.criticality)
+        alt and ' class="altRow"' or '', escape(po.item.name), escape(po.supplier.name),
+        po.enddate.date(), int(po.quantity), int(po.criticality) if po.criticality else ""
         ))
       alt = not alt
-    result.append('</table>')
+    result.append('</table></div>')
     return HttpResponse('\n'.join(result))
 
 Dashboard.register(PurchaseAnalysisWidget)
@@ -270,43 +1019,77 @@ Dashboard.register(PurchaseAnalysisWidget)
 
 class AlertsWidget(Widget):
   name = "alerts"
-  title = _("Alerts")
+  title = _("alerts")
   tooltip = _("Overview of all alerts in the plan")
   permissions = (("view_problem_report", "Can view problem report"),)
   asynchronous = True
   url = '/problem/'
+  entities = 'material,capacity,demand,operation'
 
   @classmethod
   def render(cls, request=None):
+    entities = request.GET.get('entities', cls.entities).split(',')
+    try:
+      db = _thread_locals.request.database or DEFAULT_DB_ALIAS
+    except:
+      db = DEFAULT_DB_ALIAS
     result = [
-      '<table style="width:100%">',
+      '<div class="table-responsive"><table class="table">',
       '<tr><th class="alignleft">%s</th><th>%s</th><th>%s</th></tr>' % (
-        capfirst(force_text(_("resource"))), capfirst(force_text(_("count"))),
+        capfirst(force_text(_("type"))), capfirst(force_text(_("count"))),
         capfirst(force_text(_("weight")))
         )
       ]
-    cursor = connections[request.database].cursor()
+    cursor = connections[db].cursor()
     query = '''select name, count(*), sum(weight)
       from out_problem
+      where entity in (%s)
       group by name
       order by name
-      '''
-    cursor.execute(query)
+      ''' % (', '.join(['%s']*len(entities)))
+    cursor.execute(query, entities)
     alt = False
     for res in cursor.fetchall():
       result.append('<tr%s><td class="underline"><a href="%s/problem/?name=%s">%s</a></td><td class="aligncenter">%d</td><td class="aligncenter">%d</td></tr>' % (
         alt and ' class="altRow"' or '', request.prefix, urlquote(res[0]), res[0], res[1], res[2]
         ))
       alt = not alt
-    result.append('</table>')
+    result.append('</table></div>')
     return HttpResponse('\n'.join(result))
 
 Dashboard.register(AlertsWidget)
 
 
+class DemandAlertsWidget(AlertsWidget):
+  name = "demand_alerts"
+  title = _("demand alerts")
+  url = '/problem/?entity=demand'
+  entities = 'demand'
+
+Dashboard.register(DemandAlertsWidget)
+
+
+class CapacityAlertsWidget(AlertsWidget):
+  name = "capacity_alerts"
+  title = _("capacity alerts")
+  url = '/problem/?entity=capacity'
+  entities = 'capacity'
+
+Dashboard.register(CapacityAlertsWidget)
+
+
+class MaterialAlertsWidget(AlertsWidget):
+  name = "material_alerts"
+  title = _("material alerts")
+  url = '/problem/?entity=material'
+  entities = 'material'
+
+Dashboard.register(MaterialAlertsWidget)
+
+
 class ResourceLoadWidget(Widget):
   name = "resource_utilization"
-  title = _("Resource utilization")
+  title = _("resource utilization")
   tooltip = _("Shows the resources with the highest utilization")
   permissions = (("view_resource_report", "Can view resource report"),)
   asynchronous = True
@@ -329,8 +1112,9 @@ class ResourceLoadWidget(Widget):
       data.push( [l.attr("href"), l.text(), v] );
       if (v > max_util) max_util = v;
       });
-    var barHeight = $("#resLoad").height() / data.length;
-    var x = d3.scale.linear().domain([0, max_util]).range([0, $("#resLoad").width()]);
+    var svgrectangle = document.getElementById("resLoad").getBoundingClientRect();
+    var barHeight = svgrectangle['height'] / data.length;
+    var x = d3.scale.linear().domain([0, max_util]).range([0, svgrectangle['width']]);
     var resload_high = parseFloat($("#resload_high").html());
     var resload_medium = parseFloat($("#resload_medium").html());
 
@@ -378,7 +1162,7 @@ class ResourceLoadWidget(Widget):
     cursor = connections[request.database].cursor()
     GridReport.getBuckets(request)
     query = '''select
-                  theresource,
+                  resource,
                   ( coalesce(sum(out_resourceplan.load),0) + coalesce(sum(out_resourceplan.setup),0) )
                    * 100.0 / coalesce(sum(out_resourceplan.available)+0.000001,1) as avg_util,
                   coalesce(sum(out_resourceplan.load),0) + coalesce(sum(out_resourceplan.setup),0),
@@ -386,7 +1170,7 @@ class ResourceLoadWidget(Widget):
                 from out_resourceplan
                 where out_resourceplan.startdate >= '%s'
                   and out_resourceplan.startdate < '%s'
-                group by theresource
+                group by resource
                 order by 2 desc
               ''' % (request.report_startdate, request.report_enddate)
     cursor.execute(query)
@@ -407,7 +1191,7 @@ Dashboard.register(ResourceLoadWidget)
 
 class InventoryByLocationWidget(Widget):
   name = "inventory_by_location"
-  title = _("Inventory by location")
+  title = _("inventory by location")
   tooltip = _("Display the locations with the highest inventory value")
   asynchronous = True
   limit = 5
@@ -429,8 +1213,9 @@ class InventoryByLocationWidget(Widget):
          ] );
       if (l > invmax) invmax = l;
       });
-    var x_width = ($("#invByLoc").width()-margin) / data.length;
-    var y = d3.scale.linear().domain([0, invmax]).range([$("#invByLoc").height() - 20, 0]);
+    var svgrectangle = document.getElementById("invByLoc").getBoundingClientRect();
+    var x_width = (svgrectangle['width']-margin) / data.length;
+    var y = d3.scale.linear().domain([0, invmax]).range([svgrectangle['height'] - 20, 0]);
     var y_zero = y(0);
 
     // Draw the chart
@@ -448,23 +1233,34 @@ class InventoryByLocationWidget(Widget):
       .attr("width", x_width - 2)
       .style("fill", "#828915");
 
+// Location label
     bar.append("text")
-      .attr("y", y_zero - 3)
+      .attr("y", y_zero)
+      .attr("x", x_width/2)
       .text(function(d,i) { return d[0]; })
       .style("text-anchor", "end")
-      .attr("transform","rotate(90 " + (x_width/2 - 5) + "," + y_zero + ")");
+      .attr("transform","rotate(90 " + (x_width/2) + " " + y_zero + ")  ");
+
 
     // Draw the Y-axis
     var yAxis = d3.svg.axis()
       .scale(y)
       .ticks(4)
-      .orient("left");
+      .orient("left")
+      .tickFormat(d3.format("s"));
     d3.select("#invByLoc")
       .append("g")
       .attr("transform", "translate(" + margin + ", 10 )")
       .attr("class", "y axis")
       .call(yAxis);
     '''
+
+  query = '''select location_id, coalesce(sum(buffer.onhand * item.price),0)
+             from buffer
+             inner join item on buffer.item_id = item.name
+             group by location_id
+             order by 2 desc
+             limit 30'''
 
   @classmethod
   def render(cls, request=None):
@@ -474,13 +1270,7 @@ class InventoryByLocationWidget(Widget):
       '<table style="display:none">'
       ]
     cursor = connections[request.database].cursor()
-    query = '''select location_id, coalesce(sum(buffer.onhand * item.price),0)
-               from buffer
-               inner join item on buffer.item_id = item.name
-               group by location_id
-               order by 2 desc
-              '''
-    cursor.execute(query)
+    cursor.execute(cls.query)
     for res in cursor.fetchall():
       limit -= 1
       if limit < 0:
@@ -496,7 +1286,7 @@ Dashboard.register(InventoryByLocationWidget)
 
 class InventoryByItemWidget(Widget):
   name = "inventory_by_item"
-  title = _("Inventory by item")
+  title = _("inventory by item")
   tooltip = _("Display the items with the highest inventory value")
   asynchronous = True
   limit = 20
@@ -518,8 +1308,9 @@ class InventoryByItemWidget(Widget):
          ] );
       if (l > invmax) invmax = l;
       });
-    var x_width = ($("#invByItem").width()-margin) / data.length;
-    var y = d3.scale.linear().domain([0, invmax]).range([$("#invByItem").height() - 20, 0]);
+    var svgrectangle = document.getElementById("invByItem").getBoundingClientRect();
+    var x_width = (svgrectangle['width']-margin) / data.length;
+    var y = d3.scale.linear().domain([0, invmax]).range([svgrectangle['height'] - 20, 0]);
     var y_zero = y(0);
 
     // Draw the chart
@@ -547,7 +1338,8 @@ class InventoryByItemWidget(Widget):
     var yAxis = d3.svg.axis()
       .scale(y)
       .ticks(4)
-      .orient("left");
+      .orient("left")
+      .tickFormat(d3.format("s"));
     d3.select("#invByItem")
       .append("g")
       .attr("transform", "translate(" + margin + ", 10 )")
@@ -585,7 +1377,7 @@ Dashboard.register(InventoryByItemWidget)
 
 class DeliveryPerformanceWidget(Widget):
   name = "delivery_performance"
-  title = _("Delivery performance")
+  title = _("delivery performance")
   tooltip = _("Shows the percentage of demands that are planned to be shipped completely on time")
   asynchronous = True
   green = 90
@@ -615,10 +1407,12 @@ class DeliveryPerformanceWidget(Widget):
       select case when count(*) = 0 then 0 else 100 - sum(late) * 100.0 / count(*) end
       from (
         select
-          demand, max(case when plandate > due then 1 else 0 end) late
-        from out_demand
-        where due < '%s'
-        group by demand
+          demand_id, max(case when enddate > operationplan.due then 1 else 0 end) late
+        from operationplan
+        left outer join demand
+          on operationplan.demand_id = demand.name
+        where demand.due < '%s'
+        group by demand_id
       ) demands
       ''' % request.report_enddate
     cursor.execute(query)

@@ -24,11 +24,11 @@
 namespace frepple
 {
 
-template<class Resource> DECLARE_EXPORT Tree utils::HasName<Resource>::st;
-DECLARE_EXPORT const MetaCategory* Resource::metadata;
-DECLARE_EXPORT const MetaClass* ResourceDefault::metadata;
-DECLARE_EXPORT const MetaClass* ResourceInfinite::metadata;
-DECLARE_EXPORT const MetaClass* ResourceBuckets::metadata;
+template<class Resource> Tree utils::HasName<Resource>::st;
+const MetaCategory* Resource::metadata;
+const MetaClass* ResourceDefault::metadata;
+const MetaClass* ResourceInfinite::metadata;
+const MetaClass* ResourceBuckets::metadata;
 
 Duration Resource::defaultMaxEarly(100*86400L);
 
@@ -54,7 +54,7 @@ int ResourceDefault::initialize()
     Object::create<ResourceDefault>,
     true
     );
-  
+
   // Initialize the Python class
   return FreppleClass<ResourceDefault,Resource>::initialize();
 }
@@ -86,7 +86,39 @@ int ResourceBuckets::initialize()
 }
 
 
-DECLARE_EXPORT void Resource::setMaximum(double m)
+void Resource::inspect(const string msg) const
+{
+  logger << "Inspecting resource " << getName() << ": ";
+  if (!msg.empty()) logger  << msg;
+  logger << endl;
+
+  for (loadplanlist::const_iterator oo = getLoadPlans().begin();
+    oo != getLoadPlans().end();
+    ++oo)
+  {
+    logger << "  " << oo->getDate()
+      << " qty:" << oo->getQuantity()
+      << ", oh:" << oo->getOnhand();
+    switch (oo->getEventType())
+    {
+    case 1:
+      logger << ", oper:" << static_cast<const LoadPlan*>(&*oo)->getOperationPlan()->getOperation() << endl;
+      break;
+    case 2:
+      logger << ", event set-onhand" << endl;
+      break;
+    case 3:
+      logger << ", event update-minimum" << endl;
+      break;
+    case 4:
+      logger << ", event update-maximum" << endl;
+      break;
+    }
+  }
+}
+
+
+void Resource::setMaximum(double m)
 {
   if (m < 0)
     throw DataException("Maximum capacity for resource '" + getName() + "' must be postive");
@@ -120,7 +152,7 @@ DECLARE_EXPORT void Resource::setMaximum(double m)
 }
 
 
-DECLARE_EXPORT void Resource::setMaximumCalendar(Calendar* c)
+void Resource::setMaximumCalendar(Calendar* c)
 {
   // Resetting the same calendar
   if (size_max_cal == c) return;
@@ -158,7 +190,7 @@ DECLARE_EXPORT void Resource::setMaximumCalendar(Calendar* c)
 }
 
 
-DECLARE_EXPORT void ResourceBuckets::setMaximumCalendar(Calendar* c)
+void ResourceBuckets::setMaximumCalendar(Calendar* c)
 {
   // Resetting the same calendar
   if (size_max_cal == c) return;
@@ -167,13 +199,16 @@ DECLARE_EXPORT void ResourceBuckets::setMaximumCalendar(Calendar* c)
   setChanged();
 
   // Remove the current set-onhand events.
-  for (loadplanlist::iterator oo=loadplans.begin(); oo!=loadplans.end(); )
-    if (oo->getEventType() == 2)
+  for (loadplanlist::iterator oo = loadplans.begin(); oo != loadplans.end(); )
+  {
+    loadplanlist::Event *tmp = &*oo;
+    ++oo;
+    if (tmp->getEventType() == 2)
     {
-      loadplans.erase(&(*oo));
-      delete &(*(oo++));
+      loadplans.erase(tmp);
+      delete tmp;
     }
-    else ++oo;
+  }
 
   // Create timeline structures for every bucket.
   size_max_cal = c;
@@ -189,7 +224,7 @@ DECLARE_EXPORT void ResourceBuckets::setMaximumCalendar(Calendar* c)
 }
 
 
-DECLARE_EXPORT void Resource::deleteOperationPlans(bool deleteLocked)
+void Resource::deleteOperationPlans(bool deleteLocked)
 {
   // Delete the operationplans
   for (loadlist::iterator i=loads.begin(); i!=loads.end(); ++i)
@@ -200,7 +235,7 @@ DECLARE_EXPORT void Resource::deleteOperationPlans(bool deleteLocked)
 }
 
 
-DECLARE_EXPORT Resource::~Resource()
+Resource::~Resource()
 {
   // Delete all operationplans
   // An alternative logic would be to delete only the loadplans for this
@@ -210,17 +245,30 @@ DECLARE_EXPORT Resource::~Resource()
 
   // The Load and ResourceSkill objects are automatically deleted by the
   // destructor of the Association list class.
+
+  // Clean up references on the itemsupplier and itemdistribution models
+  for (Item::iterator itm_iter = Item::begin(); itm_iter != Item::end(); ++itm_iter)
+  {
+    Item::supplierlist::const_iterator itmsup_iter = itm_iter->getSupplierIterator();
+    while (ItemSupplier* itmsup = itmsup_iter.next())
+      if (itmsup->getResource() == this)
+        itmsup->setResource(nullptr);
+    Item::distributionIterator  itmdist_iter = itm_iter->getDistributionIterator();
+    while (ItemDistribution* itmdist = itmdist_iter.next())
+      if (itmdist->getResource() == this)
+        itmdist->setResource(nullptr);
+  }
 }
 
 
-DECLARE_EXPORT void Resource::updateSetups(const LoadPlan* ldplan)
+void Resource::updateSetups(const LoadPlan* ldplan)
 {
   // No updating required this resource
   if (!getSetupMatrix() || (ldplan && ldplan->getOperationPlan()->getOperation() != OperationSetup::setupoperation))
     return;
 
   // Update later setup opplans
-  OperationPlan *opplan = ldplan ? ldplan->getOperationPlan() : NULL;
+  OperationPlan *opplan = ldplan ? ldplan->getOperationPlan() : nullptr;
   loadplanlist::const_iterator i = ldplan ?
       getLoadPlans().begin(ldplan) :
       getLoadPlans().begin();
@@ -259,16 +307,16 @@ extern "C" PyObject* Resource::plan(PyObject *self, PyObject *args)
   Resource* resource = static_cast<Resource*>(self);
 
   // Parse the Python arguments
-  PyObject* buckets = NULL;
+  PyObject* buckets = nullptr;
   int ok = PyArg_ParseTuple(args, "O:plan", &buckets);
-  if (!ok) return NULL;
+  if (!ok) return nullptr;
 
   // Validate that the argument supports iteration.
   PyObject* iter = PyObject_GetIter(buckets);
   if (!iter)
   {
     PyErr_Format(PyExc_AttributeError,"Argument to resource.plan() must support iteration");
-    return NULL;
+    return nullptr;
   }
 
   // Return the iterator
@@ -288,13 +336,13 @@ int Resource::PlanIterator::initialize()
 
 
 Resource::PlanIterator::PlanIterator(Resource* r, PyObject* o) :
-  res(r), bucketiterator(o), ldplaniter(r ? r->getLoadPlans().begin() : NULL),
-  cur_setup(0.0), cur_load(0.0), cur_size(0.0), start_date(NULL), end_date(NULL)
+  res(r), bucketiterator(o), ldplaniter(r ? r->getLoadPlans().begin() : nullptr),
+  cur_setup(0.0), cur_load(0.0), cur_size(0.0), start_date(nullptr), end_date(nullptr)
 {
   if (!r)
   {
-    bucketiterator = NULL;
-    throw LogicException("Creating resource plan iterator for NULL resource");
+    bucketiterator = nullptr;
+    throw LogicException("Creating resource plan iterator for nullptr resource");
   }
 
   // Count differently for bucketized and continuous resources
@@ -413,7 +461,7 @@ PyObject* Resource::PlanIterator::iternext()
   {
     if (ldplaniter == res->getLoadPlans().end())
       // No more resource buckets
-      return NULL;
+      return nullptr;
     else
     {
       // At this point ldplaniter points to a bucket start event.
@@ -443,7 +491,7 @@ PyObject* Resource::PlanIterator::iternext()
     if (start_date) Py_DECREF(start_date);
     start_date = end_date;
     end_date = PyIter_Next(bucketiterator);
-    if (!end_date) return NULL;
+    if (!end_date) return nullptr;
     cur_date = PythonData(end_date).getDate();
 
     // Measure from beginning of the bucket till the first event in this bucket

@@ -1,0 +1,173 @@
+{% extends "admin/base_site_nav.html" %}
+{% load i18n %}
+{% block extrahead %}{{block.super}}
+{% if args.0 or mode == 'graph' %}
+<script type="text/javascript" src="{{STATIC_URL}}js/d3.min.js"></script>
+{% endif %}
+<script type="text/javascript">
+var editrow;
+var editcol;
+
+{% block crosses %}function crosses (cellvalue, options, rowdata) {
+  for (i in cellvalue)
+    if (i == 0) res = cellvalue[i];
+    else res += '<br/>' + cellvalue[i];
+  return res;
+};{% endblock %}
+
+var initialfilter{% if filters %} = {{filters|safe}}{% endif %};
+var resizing;
+{% if reportclass.hasTimeBuckets %}var numbuckets = {{request.report_bucketlist|length}};
+var timebuckets = [ {% for f in request.report_bucketlist %}{% if not forloop.first %},{% endif %}{'name':'{{f.name}}','startdate':'{{f.startdate|date:"Y-m-d"}}','enddate':'{{f.enddate|date:"Y-m-d"}}'}{% endfor %} ];
+{% endif %}var cross = [
+{{cross_list|safe}}
+];
+
+$(function() {
+  {% if reportclass.hasTimeBuckets and not bucketnames %}
+  $('#curfilter').html("{% trans 'Error: Missing time buckets or bucket dates' %}");
+{% else %}
+  jQuery("#grid").jqGrid({
+   	url: (location.href.indexOf("#") != -1 ? location.href.substr(0,location.href.indexOf("#")) : location.href)
+      + (location.search.length > 0 ? "&format=json" : "?format=json"),
+	  datatype: "json",
+	  jsonReader : {repeatitems:false},
+   	colModel:[
+      {{colmodel|safe}}{% if mode == "table" %},
+      {% for f in request.report_bucketlist %}{% if not forloop.first %},
+      {% endif %}{ name:'{{f.name|safe}}',startdate:'{{f.startdate|date:"Y-m-d"}}',enddate:'{{f.enddate|date:"Y-m-d"}}',sortable:false,width:90,align:'center',formatter:crosses,search:false,title:false }{% endfor %}
+      {% endif %}],{% if reportclass.editable and haschangeperm %}
+    cellsubmit: 'clientArray',
+    editurl: location.pathname,
+    beforeSaveCell: upload.select,{% else %}
+    onSelectRow: function() {$(this).resetSelection();},
+    formatCell: function(rowid, cellname, value, iRow, iCol) {
+      editrow = iRow;
+      editcol = iCol;
+      return value;
+    },
+    {% endif %}rowNum: {{request.pagesize}},
+   	pager: '#gridpager',
+    viewrecords: true,
+    sortorder: "asc",
+    iconSet: "fontAwesome",
+    guiStyle: "bootstrapPrimary",
+    hidegrid: false,
+    scrollRows: true,
+    autowidth: true,
+	  shrinkToFit: {% if mode == "table" %}false{% else %}true{% endif %},
+    searching: {
+      multipleSearch: true,
+      multipleGroup: true,
+      closeOnEscape: true,
+      searchOnEnter: true,
+      searchOperators: true,
+      zIndex: 5000,
+      width: 550
+    },
+
+	  loadError: function(xhr,st,err) {
+	    $('#load_grid').show();
+	    if (xhr.status == 200)
+      {
+        $('#curfilter').html("{{_('Warning: no data found')|escapejs}}");
+        $('#grid').clearGridData();
+      }
+      else
+        $('#curfilter').html("{{_('Error retrieving report data')|escapejs}}" + ":&nbsp;" + xhr.status + "&nbsp;" + xhr.statusText);
+    },{% if filters %}
+    postData: {filters: JSON.stringify(initialfilter)},
+    search : true,{% endif %}
+    {% block extra_grid %}{% endblock %}
+	  height: {% if reportclass.height %}{{reportclass.height}}{% else %}$(window).height() - $("#grid").offset().top - {{reportclass.heightmargin}}{% endif %}
+    });
+  {% if mode == "table" %}jQuery("#grid").jqGrid('setFrozenColumns');
+  {% endif %}
+  jQuery("#gridmode").click(function() {grid.displayMode("table");});
+  jQuery("#graphmode").click(function() {grid.displayMode("graph");});{% if reportclass.editable and haschangeperm %}
+  $("th").bindFirst('click', upload.validateSort);{% endif %}
+  {% endif %}
+
+	$(window).bind('resize', function() {
+	  $("#grid")
+	   .setGridWidth($('#content-main').width())
+	   .setGridHeight({% if reportclass.heigth %}{{reportclass.heigth}}{% else %}$(window).height() - $("#grid").offset().top - {{reportclass.heightmargin}}{% endif %});
+	});
+
+	$("#horizonbucketsul li a").click(function(){
+	  $("#horizonbuckets1").html($(this).text() + '  <span class="caret"></span>');
+	  $("#horizonbuckets").val($(this).prop('name'));
+	});
+
+  $("#horizonunitul li a").click(function(){
+    $("#horizonunit1").html($(this).text() + '  <span class="caret"></span>');
+    $("#horizonunit").val($(this).prop('name'));
+  });
+
+});
+
+</script>
+{% endblock %}
+{% block content %}
+{% block before_table %}{% endblock %}
+
+<div class="row">
+
+<div id="save_undo" class="col-xs-5 form-inline">
+{% block save_undo_buttons %}
+{% if not is_popup and reportclass.editable and haschangeperm %}
+{% comment %}Translators: Translation included with Django {% endcomment %}
+<input type="submit" value="{% filter force_escape|upper %}{% trans "Save" %}{% endfilter %}" class="btn btn-primary"  disabled role="button" id="save" onclick="upload.save()" title="{% trans 'save changes'|capfirst|force_escape %}">
+<input type="submit" value="{% filter force_escape|upper %}{% trans "Undo" %}{% endfilter %}" class="btn btn-primary"  disabled role="button" id="undo" onclick="upload.undo()" title="{% trans 'undo changes'|capfirst|force_escape %}">
+{% endif %}
+{% endblock save_undo_buttons %}
+</div>
+
+<div id="toolicons" class="col-xs-4 hor-align-right ver-align-middle pull-right">{% block extra_toolicons %}{% endblock %}{% if reportclass.hasTimeBuckets and not args.0 %}
+	<div class="btn-group" role="group">
+
+		<button data-toggle="tooltip" data-placement="top" title="{% trans "display table"|capfirst|force_escape %}" class="btn btn-xs btn-primary{% if mode == 'table' %} active{% endif %}" type="button" id="gridmode" name="mode">
+		  <span class="fa fa-table fa-lg" style="margin: 2px 0 3px 0;"></span>
+		</button>
+		<button data-toggle="tooltip" data-placement="top" title="{% trans "display graph"|capfirst|force_escape %}" class="btn btn-xs btn-primary{% if mode == 'graph' %} active{% endif %}" type="button" id="graphmode" name="mode">
+		  <span class="fa fa-picture-o fa-lg fa-lg" style="margin: 2px 0 3px 0;"></span>
+		</button>
+
+	</div>
+	{% endif %}
+	{% if reportclass.filterable and not args.0 %}
+	  <button class="btn btn-xs btn-primary" onclick="grid.showFilter()">
+	    <span data-toggle="tooltip" data-placement="top" title="{% trans 'filter data'|capfirst|force_escape%}" class="fa fa-search"></span>
+	  </button>
+	{% endif %}
+	{% if reportclass.hasTimeBuckets %}
+	  <button class="btn btn-xs btn-primary" onclick="grid.showBucket()">
+	    <span data-toggle="tooltip" data-placement="top" title="{% trans 'configure time buckets'|capfirst|force_escape %}" class="fa fa-clock-o"></span>
+	  </button>
+  {% endif %}
+  {% if reportclass.editable and haschangeperm %}
+	    <button class="btn btn-xs btn-primary" onclick="import_show()" >
+        <span id="csvimport" data-toggle="tooltip" data-placement="top" title="{% trans 'import CSV or Excel file'|capfirst|force_escape %}" class="fa fa-arrow-up"></span>
+	    </button>
+  {% endif %}
+		  <button class="btn btn-xs btn-primary" onclick="grid.showExport(false)" >
+		    <span data-toggle="tooltip" data-placement="top" title="{% trans 'export as CSV or Excel file'|capfirst|force_escape %}" class="fa fa-arrow-down"></span>
+		  </button>
+  {% if reportclass.help_url %}
+  <button class="btn btn-xs btn-primary" onclick="window.open('https://frepple.com/docs/{% version_short %}/{{reportclass.help_url}}');" data-toggle="tooltip" data-placement="top" data-original-title="{% trans 'Help'|capfirst|force_escape %}">
+  <span class="fa fa-question"></span>
+  </button>{% endif %}
+	</div>
+</div>
+
+<div class="row">
+	<div id="content-main" class="col-md-12" style="min-height: 150px; margin-top: 0.7em">
+	 <table id="grid" class="table table-striped pivotgrid"></table>
+	</div>
+<div id="gridpager" class="col-md-12"></div>
+</div>
+{% block after_table %}{% endblock %}
+{% if reportclass.hasTimeBuckets %}
+{% include "admin/subtemplate_timebuckets.html" %}
+{% endif %}
+{% endblock %}

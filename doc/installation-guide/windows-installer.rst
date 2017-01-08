@@ -11,40 +11,12 @@ license agreement, the installer will guide you to select:
 * The language and database connection parameters
 * Whether or not to register the server as a service
 
-The installer has been tested on Windows XP, Windows 7 and Windows 8.
-
-#. **A prerequisite is to have PostgreSQL installed.**
-
-   Install postgreSQL 9.0 or higher, the world's most advanced open source database.
-
-   FrePPLe assumes that the database uses UTF-8 encoding.
-
-   FrePPLe needs the following settings for its database connections. If these
-   values are configured as default for the database (in the file postgresql.conf)
-   or the database role (using the 'alter role' command), a small performance
-   optimization is achieved:
-   ::
-
-       client_encoding: 'UTF8',
-       default_transaction_isolation: 'read committed',
-       timezone: 'UTC' when USE_TZ is True, value of TIME_ZONE otherwise.
-
-   The default installation of PostgreSQL is not configured right for
-   intensive use. We highly recommend using the pgtune utility (or its online
-   version at http://pgtune.leopard.in.ua/) to optimize the configuration for your
-   hardware.
-
-#. **Create a PostgreSQL database and a database user**
-
-   After the installation of the database, create a user and a database for
-   frePPLe.
-
-#. Prior to the installation, it is recommended to **uninstall any previous
-   version**.
+The installer is 64-bit and has been tested on Windows 7, Windows 8 and Windows 10.
 
 #. **Start the installer**
 
    .. image:: _images/wininstall0.png
+     :scale: 50 %
 
 #. **Accept the license agreement**
 
@@ -52,52 +24,101 @@ The installer has been tested on Windows XP, Windows 7 and Windows 8.
    GNU Affero General Public License (aka AGPL) or to buy a commercial license.
 
    .. image:: _images/wininstall1.png
-
-#. **Select the type of installation**
-
-   If you have administrator rights on your computer, the installer will allow you
-   choose to install frePPLe for your account only or for anybody logging in on
-   the machine.
-
-   If you don’t have administrator rights, this screen will automatically be
-   skipped. Nothing to worry about.
-
-   .. image:: _images/wininstall2.png
+     :scale: 50 %
 
 #. **Select the installation directory**
 
-   A default location is selected depending on the installation type.
+   A different location is selected depending on the user name.
 
    .. image:: _images/wininstall3.png
+     :scale: 50 %
 
 #. **Select the license file**
 
-   The enterprise edition requires a license file to be activated. You get the
+   The Enterprise Edition requires a license file to be activated. You get the
    license file when you register your copy on the support section of the website.
 
    .. image:: _images/wininstall4.png
+     :scale: 50 %
 
 #. **Select the components to install**
 
    Optional extra components can be enabled.
 
    .. image:: _images/wininstall5.png
+     :scale: 50 %
+
+   - **Install and configure the PostgreSQL database.**
+
+     PostgreSQL 9.4 or higher is required by frePPLe.
+     You can:
+
+     * either use the postgreSQL included with frePPLe
+
+     * either install and configure PostgreSQL yourself (advanced users only)
+
+     If you choose to download and install PostgreSQL manually please follow these instructions:
+
+     #. Cancel frePPLe installer.
+
+     #. Download and run the postgreSQL installer.
+
+     #. | Use the PgAdmin administration tool to create a login role for frePPLe.
+        | If you intend to use the default login role "postgres", you can skip this step.
+        | See http://www.postgresqltutorial.com/postgresql-roles/ for detailed steps.
+
+     #. | Use the PgAdmin administration tool to create a database for frePPLe.
+        | Make sure to assign the login role created in the previous step as the owner.
+        | See http://www.postgresqltutorial.com/postgresql-create-database/ for
+           detailed steps.
+
+     #. | Database connection parameters
+        | If you are upgrading frePPLe you should copy the following from the
+          old custom/djangosettings.py to the new custom/djangosettings.py
+
+        - | Default language for the user interface
+        - | Database connection parameters
+
+     | Advanced administrators can further fine-tune the database instance.
+     | For a simple trial installation, you want to skip this.
+
+        - | FrePPLe assumes that the database uses UTF-8 encoding.
+          | FrePPLe needs the following settings for its database connections. If these
+            values are configured as default for the database (in the file postgresql.conf)
+            or the database role (using the 'alter role' command), a small performance
+            optimization is achieved:
+
+        ::
+
+            client_encoding: 'UTF8',
+            default_transaction_isolation: 'read committed',
+            timezone: 'UTC' when USE_TZ is True, value of TIME_ZONE otherwise.
+
+        - | The default configuration of PostgreSQL is not configured right for
+            intensive use.
+          | We highly recommend using the pgtune utility (or its online
+            version at http://pgtune.leopard.in.ua/) to optimize the configuration
+            for your hardware.
+
+     6. Restart frePPLe installer without PostgreSQL option.
 
 #. **Select the installation parameters**
 
-   Two types of parameters are specified during the installation:
+   If you chose to install the database from the frePPLe installer,
+   two types of parameters will be specified during the installation:
 
    #. Default language for the user interface
 
    #. Database connection parameters
 
       You will not be able to the next screen when a test connection to the
-      database fails.
+      database fails, or if you followed the regular install.
+
+   .. image:: _images/wininstall6.png
+     :scale: 50 %
 
    Your selections are saved in the file custom/djangosettings.py. The file can
    later be edited with a text editor.
-
-   .. image:: _images/wininstall6.png
 
 #. **Installation**
 
@@ -105,6 +126,7 @@ The installer has been tested on Windows XP, Windows 7 and Windows 8.
    monitor the creation of the database schema.
 
    .. image:: _images/wininstall7.png
+     :scale: 50 %
 
 #. **Finish**
 
@@ -114,9 +136,11 @@ The installer has been tested on Windows XP, Windows 7 and Windows 8.
    a system tray application.
 
    For an installation in production mode AND when you have administrator rights on
-   your computer, you can chose to register and start a service instead.
+   your computer, you can chose to register and start a service instead (currently
+   in development).
 
    .. image:: _images/wininstall8.png
+     :scale: 50 %
 
 #. **Start the server**
 
@@ -156,7 +180,8 @@ The installer has been tested on Windows XP, Windows 7 and Windows 8.
 
 .. tip::
 
-  Multiple versions of frePPLe can be installed on the same machine.
+  Multiple versions of frePPLe can be installed on the same machine, but not when using the
+  PostgreSQL database included with the installer.
 
   Multiple installations of the same release can’t. If you’ld need such a setup, it is better to
   install once and create different copies of the custom folder. Each copy will get need different

@@ -24,9 +24,9 @@
 namespace frepple
 {
 
-DECLARE_EXPORT const MetaCategory* ItemDistribution::metacategory;
-DECLARE_EXPORT const MetaClass* ItemDistribution::metadata;
-DECLARE_EXPORT const MetaClass* OperationItemDistribution::metadata;
+const MetaCategory* ItemDistribution::metacategory;
+const MetaClass* ItemDistribution::metadata;
+const MetaClass* OperationItemDistribution::metadata;
 
 
 int ItemDistribution::initialize()
@@ -54,9 +54,7 @@ int ItemDistribution::initialize()
 }
 
 
-DECLARE_EXPORT ItemDistribution::ItemDistribution() : it(NULL),
-  size_minimum(1.0), size_multiple(0.0), cost(0.0), firstOperation(NULL),
-  next(NULL)
+ItemDistribution::ItemDistribution()
 {
   initType(metadata);
 
@@ -65,7 +63,7 @@ DECLARE_EXPORT ItemDistribution::ItemDistribution() : it(NULL),
 }
 
 
-DECLARE_EXPORT ItemDistribution::~ItemDistribution()
+ItemDistribution::~ItemDistribution()
 {
   // Delete the association from the related objects
   if (getOrigin())
@@ -77,7 +75,7 @@ DECLARE_EXPORT ItemDistribution::~ItemDistribution()
   while (firstOperation)
     delete firstOperation;
 
-  // Unlink from previous item
+  // Unlink from item
   if (it)
   {
     if (it->firstItemDistribution == this)
@@ -92,7 +90,7 @@ DECLARE_EXPORT ItemDistribution::~ItemDistribution()
       if (j)
         j->next = next;
       else
-        throw LogicException("Corrupted ItemDistribution list");
+        logger << "Error: Corrupted ItemDistribution list" << endl;
     }
   }
 
@@ -101,7 +99,7 @@ DECLARE_EXPORT ItemDistribution::~ItemDistribution()
 }
 
 
-DECLARE_EXPORT void ItemDistribution::setItem(Item* i)
+void ItemDistribution::setItem(Item* i)
 {
   // Unlink from previous item
   if (it)
@@ -207,12 +205,12 @@ PyObject* ItemDistribution::create(PyTypeObject* pytype, PyObject* args, PyObjec
   catch (...)
   {
     PythonType::evalException();
-    return NULL;
+    return nullptr;
   }
 }
 
 
-DECLARE_EXPORT void ItemDistribution::deleteOperationPlans(bool b)
+void ItemDistribution::deleteOperationPlans(bool b)
 {
   for (OperationItemDistribution* i = firstOperation; i; i = i->nextOperation)
     i->deleteOperationPlans(b);
@@ -231,16 +229,14 @@ int OperationItemDistribution::initialize()
   PythonType& x = FreppleCategory<OperationItemDistribution>::getPythonType();
   x.setName("operation_itemdistribution");
   x.setDoc("frePPLe operation_itemdistribution");
-  x.addMethod("createOrder", createOrder,
-    METH_STATIC | METH_VARARGS | METH_KEYWORDS,
-    "Create an operationplan representing a transfer order");
   x.supportgetattro();
+  x.supportsetattro();
   const_cast<MetaClass*>(metadata)->pythonClass = x.type_object();
   return x.typeReady();
 }
 
 
-DECLARE_EXPORT OperationItemDistribution::OperationItemDistribution(
+OperationItemDistribution::OperationItemDistribution(
   ItemDistribution* i, Buffer *src, Buffer* dest
   ) : itemdist(i)
 {
@@ -258,32 +254,20 @@ DECLARE_EXPORT OperationItemDistribution::OperationItemDistribution(
   setLocation(dest->getLocation());
   setSource(i->getSource());
   setCost(i->getCost());
+  setFence(i->getFence());
   setHidden(true);
   new FlowEnd(this, dest, 1);
   new FlowStart(this, src, -1);
   initType(metadata);
 
+  // Optionally, create a load
+  if (i->getResource())
+    new LoadDefault(this, i->getResource(), i->getResourceQuantity());
+
   // Insert in the list of ItemDistribution operations.
-  // We keep the list sorted by the operation name.
-  if (!i->firstOperation || getName() < i->firstOperation->getName())
-  {
-    // New head of the list
-    nextOperation = i->firstOperation;
-    i->firstOperation = this;
-  }
-  else
-  {
-    // Insert in the middle or at the tail
-    OperationItemDistribution* o = i->firstOperation;
-    while (o->nextOperation)
-    {
-      if (getName() < o->nextOperation->getName())
-        break;
-      o = o->nextOperation;
-    }
-    nextOperation = o->nextOperation;
-    o->nextOperation = this;
-  }
+  // The list is not sorted (for performance reasons).
+  nextOperation = i->firstOperation;
+  i->firstOperation = this;
 }
 
 
@@ -304,7 +288,7 @@ OperationItemDistribution::~OperationItemDistribution()
       while (i->nextOperation != this && i->nextOperation)
         i = i->nextOperation;
       if (!i)
-        throw LogicException("ItemDistribution operation list corrupted");
+        logger << "Error: ItemDistribution operation list corrupted" << endl;
       else
         i->nextOperation = nextOperation;
     }
@@ -312,7 +296,7 @@ OperationItemDistribution::~OperationItemDistribution()
 }
 
 
-DECLARE_EXPORT Buffer* OperationItemDistribution::getOrigin() const
+Buffer* OperationItemDistribution::getOrigin() const
 {
   for (flowlist::const_iterator i = getFlows().begin(); i != getFlows().end(); ++i)
     if (i->getQuantity() < 0.0)
@@ -321,7 +305,7 @@ DECLARE_EXPORT Buffer* OperationItemDistribution::getOrigin() const
 }
 
 
-DECLARE_EXPORT Buffer* OperationItemDistribution::getDestination() const
+Buffer* OperationItemDistribution::getDestination() const
 {
   for (flowlist::const_iterator i = getFlows().begin(); i != getFlows().end(); ++i)
     if (i->getQuantity() > 0.0)
@@ -330,196 +314,24 @@ DECLARE_EXPORT Buffer* OperationItemDistribution::getDestination() const
 }
 
 
-extern "C" PyObject* OperationItemDistribution::createOrder(
-  PyObject *self, PyObject *args, PyObject *kwdict
-  )
-{
-  // Parse the Python arguments
-  PyObject* pydest = NULL;
-  unsigned long id = 0;
-  const char* ref = NULL;
-  PyObject* pyitem = NULL;
-  PyObject* pyorigin = NULL;
-  double qty = 0;
-  PyObject* pystart = NULL;
-  PyObject* pyend = NULL;
-  int consume = 1;
-  const char* status = NULL;
-  const char* source = NULL;
-  static const char *kwlist[] = {
-    "destination", "id", "reference", "item", "origin", "quantity", "start",
-    "end", "consume_material", "status", "source", NULL
-    };
-  int ok = PyArg_ParseTupleAndKeywords(
-    args, kwdict, "|OkzOOdOOpzz:createOrder", const_cast<char**>(kwlist),
-    &pydest, &id, &ref, &pyitem, &pyorigin, &qty, &pystart, &pyend,
-    &consume, &status, &source
-    );
-  if (!ok)
-    return NULL;
-  Date start = pystart ? PythonData(pystart).getDate() : Date::infinitePast;
-  Date end = pyend ? PythonData(pyend).getDate() : Date::infinitePast;
-
-  // Validate all arguments
-  if (!pydest || !pyitem)
-  {
-    PyErr_SetString(PythonDataException, "item and destination arguments are mandatory");
-    return NULL;
-  }
-  PythonData dest_tmp(pydest);
-  if (!dest_tmp.check(Location::metadata))
-  {
-    PyErr_SetString(PythonDataException, "destination argument must be of type location");
-    return NULL;
-  }
-  PythonData item_tmp(pyitem);
-  if (!item_tmp.check(Item::metadata))
-  {
-    PyErr_SetString(PythonDataException, "item argument must be of type item");
-    return NULL;
-  }
-  PythonData origin_tmp(pyorigin);
-  if (pyorigin && !origin_tmp.check(Location::metadata))
-  {
-    PyErr_SetString(PythonDataException, "origin argument must be of type location");
-    return NULL;
-  }
-  Item *item = static_cast<Item*>(item_tmp.getObject());
-  Location *dest = static_cast<Location*>(dest_tmp.getObject());
-  Location *origin = pyorigin ? static_cast<Location*>(origin_tmp.getObject()) : NULL;
-
-  // Find or create the destination buffer.
-  Buffer* destbuffer = NULL;
-  for (Buffer::iterator bufiter = Buffer::begin(); bufiter != Buffer::end(); ++bufiter)
-  {
-    if (bufiter->getLocation() == dest && bufiter->getItem() == item)
-    {
-      if (destbuffer)
-      {
-        stringstream o;
-        o << "Multiple buffers found for item '" << item << "'' and location'" << dest << "'";
-        throw DataException(o.str());
-      }
-      destbuffer = &*bufiter;
-    }
-  }
-  if (!destbuffer)
-  {
-    // Create the destination buffer
-    destbuffer = new BufferDefault();
-    stringstream o;
-    o << item << " @ " << dest;
-    destbuffer->setName(o.str());
-    destbuffer->setItem(item);
-    destbuffer->setLocation(dest);
-  }
-
-  // Build the producing operation for this buffer.
-  destbuffer->getProducingOperation();
-
-  // Look for a matching operation replenishing this buffer.
-  Operation *oper = NULL;
-  for (Buffer::flowlist::const_iterator flowiter = destbuffer->getFlows().begin();
-    flowiter != destbuffer->getFlows().end() && !oper; ++flowiter)
-  {
-    if (flowiter->getOperation()->getType() != *OperationItemDistribution::metadata
-      || flowiter->getQuantity() <= 0)
-        continue;
-    OperationItemDistribution* opitemdist = static_cast<OperationItemDistribution*>(flowiter->getOperation());
-    if (origin)
-    {
-      // Origin must match as well
-      for (Operation::flowlist::const_iterator fl = opitemdist->getFlows().begin();
-          fl != opitemdist->getFlows().end(); ++ fl)
-      {
-        if (fl->getQuantity() < 0 && fl->getBuffer()->getLocation()->isMemberOf(origin))
-          oper = opitemdist;
-      }
-    }
-    else
-      oper = opitemdist;
-  }
-
-  // No matching operation is found.
-  if (!oper)
-  {
-    // We'll create one now, but that requires that we have an origin defined.
-    if (!origin)
-      throw DataException("Origin location is needed on this distribution order");
-    Buffer* originbuffer = NULL;
-    for (Buffer::iterator bufiter = Buffer::begin(); bufiter != Buffer::end(); ++bufiter)
-    {
-      if (bufiter->getLocation() == origin && bufiter->getItem() == item)
-      {
-        if (originbuffer)
-        {
-          stringstream o;
-          o << "Multiple buffers found for item '" << item << "'' and location'" << dest << "'";
-          throw DataException(o.str());
-        }
-        originbuffer = &*bufiter;
-      }
-    }
-    if (!originbuffer)
-    {
-      // Create the origin buffer
-      originbuffer = new BufferDefault();
-      stringstream o;
-      o << item << " @ " << origin;
-      originbuffer->setName(o.str());
-      originbuffer->setItem(item);
-      originbuffer->setLocation(origin);
-    }
-    // Note: We know that we need to create a new one. An existing one would
-    // have created an operation on the buffer already.
-    ItemDistribution *itemdist = new ItemDistribution();
-    itemdist->setOrigin(origin);
-    itemdist->setItem(item);
-    itemdist->setDestination(dest);
-    oper = new OperationItemDistribution(itemdist, originbuffer, destbuffer);
-    new ProblemInvalidData(oper, "Distribution orders on unauthorized lanes", "operation",
-      Date::infinitePast, Date::infiniteFuture, 1);
-  }
-
-  // Finally, create the operationplan
-  OperationPlan *opplan = oper->createOperationPlan(qty, start, end, NULL, NULL, 0, false);
-  if (id)
-    opplan->setIdentifier(id);
-  if (status)
-    opplan->setStatus(status);
-  if (ref)
-    opplan->setReference(ref);
-  // Reset quantity after the status update to assure that
-  // also non-valid quantities are getting accepted.
-  opplan->setQuantity(qty);
-  if (!consume)
-    opplan->setConsumeMaterial(false);
-  opplan->activate();
-
-  // Return result
-  Py_INCREF(opplan);
-  return opplan;
-}
-
-
-DECLARE_EXPORT Object* ItemDistribution::finder(const DataValueDict& d)
+Object* ItemDistribution::finder(const DataValueDict& d)
 {
   // Check item field
   const DataValue* tmp = d.get(Tags::item);
   if (!tmp)
-    return NULL;
+    return nullptr;
   Item* item = static_cast<Item*>(tmp->getObject());
 
   // Check origin field
   tmp = d.get(Tags::origin);
   if (!tmp)
-    return NULL;
+    return nullptr;
   Location* origin = static_cast<Location*>(tmp->getObject());
 
   // Check destination field
   tmp = d.get(Tags::destination);
   if (!tmp)
-    return NULL;
+    return nullptr;
   Location* destination = static_cast<Location*>(tmp->getObject());
 
   // Walk over all suppliers of the item, and return
@@ -533,7 +345,7 @@ DECLARE_EXPORT Object* ItemDistribution::finder(const DataValueDict& d)
   if (hasEffectiveEnd)
     effective_end = hasEffectiveEnd->getDate();
   const DataValue* hasPriority = d.get(Tags::priority);
-  int priority;
+  int priority = 0;
   if (hasPriority)
     priority = hasPriority->getInt();
   Item::distributionIterator itemdist_iter = item->getDistributionIterator();
@@ -551,7 +363,7 @@ DECLARE_EXPORT Object* ItemDistribution::finder(const DataValueDict& d)
       continue;
     return const_cast<ItemDistribution*>(&*i);
   }
-  return NULL;
+  return nullptr;
 }
 
 }

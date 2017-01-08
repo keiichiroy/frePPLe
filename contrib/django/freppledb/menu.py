@@ -29,7 +29,7 @@ menu = Menu()
 # Add our default topics.
 menu.addGroup("sales", label=_("Sales"), index=100)
 menu.addGroup("inventory", label=_("Inventory"), index=200)
-menu.addGroup("capacity", label=_("Capacity"), index=300)
+menu.addGroup("capacity", label=_("capacity"), index=300)
 menu.addGroup("purchasing", label=_("Purchasing"), index=400)
 menu.addGroup("distribution", label=_("Distribution"), index=500)
 menu.addGroup("manufacturing", label=_("Manufacturing"), index=600)

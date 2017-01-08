@@ -24,7 +24,7 @@
 
 // This is the name used for the dummy operation used to represent the
 // inventory.
-#define INVENTORY_OPERATION "Inventory " + string(getName())
+#define INVENTORY_OPERATION
 
 // This is the name used for the dummy operation used to represent procurements
 #define PURCHASE_OPERATION "Purchase " + string(getName())
@@ -32,13 +32,15 @@
 namespace frepple
 {
 
-template<class Buffer> DECLARE_EXPORT Tree utils::HasName<Buffer>::st;
-DECLARE_EXPORT const MetaCategory* Buffer::metadata;
-DECLARE_EXPORT const MetaClass* BufferDefault::metadata,
+template<class Buffer> Tree utils::HasName<Buffer>::st;
+const MetaCategory* Buffer::metadata;
+const MetaClass* BufferDefault::metadata,
                *BufferInfinite::metadata,
-               *BufferProcure::metadata;
-DECLARE_EXPORT const double Buffer::default_max = 1e37;
-DECLARE_EXPORT OperationFixedTime *Buffer::uninitializedProducing = NULL;
+               *BufferProcure::metadata,
+               *OperationInventory::metadata,
+               *OperationDelivery::metadata;
+const double Buffer::default_max = 1e37;
+OperationFixedTime *Buffer::uninitializedProducing = nullptr;
 
 
 int Buffer::initialize()
@@ -94,7 +96,103 @@ int BufferProcure::initialize()
 }
 
 
-DECLARE_EXPORT void Buffer::setItem(Item* i)
+int OperationInventory::initialize()
+{
+  // Initialize the metadata
+  metadata = MetaClass::registerClass<OperationInventory>(
+    "operation",
+    "operation_inventory");
+  registerFields<OperationInventory>(const_cast<MetaClass*>(metadata));
+
+  // Initialize the Python class
+  PythonType& x = FreppleCategory<OperationInventory>::getPythonType();
+  x.setName("operation_inventory");
+  x.setDoc("frePPLe operation_inventory");
+  x.supportgetattro();
+  x.supportsetattro();
+  const_cast<MetaClass*>(metadata)->pythonClass = x.type_object();
+  return x.typeReady();
+}
+
+
+int OperationDelivery::initialize()
+{
+  // Initialize the metadata
+  metadata = MetaClass::registerClass<OperationDelivery>(
+    "operation",
+    "operation_delivery");
+  registerFields<OperationDelivery>(const_cast<MetaClass*>(metadata));
+
+  // Initialize the Python class
+  PythonType& x = FreppleCategory<OperationDelivery>::getPythonType();
+  x.setName("operation_delivery");
+  x.setDoc("frePPLe operation_delivery");
+  x.supportgetattro();
+  x.supportsetattro();
+  const_cast<MetaClass*>(metadata)->pythonClass = x.type_object();
+  return x.typeReady();
+}
+
+
+OperationDelivery::OperationDelivery(Buffer *buf)
+{
+  setName("Ship " + string(buf->getName()));
+  setHidden(true);
+  setDetectProblems(false);
+  // When we set the size minimum to 0 for the automatically created
+  // delivery operations, they will be constrained by the minimum shipment
+  // size specified on the demand.
+  setSizeMinimum(0.0);
+  initType(metadata);
+
+  // Add a flow consuming from the buffer
+  new FlowStart(this, buf, -1);
+}
+
+
+Buffer* OperationDelivery::getBuffer() const
+{
+  return getFlows().begin()->getBuffer();
+}
+
+
+void Buffer::inspect(const string msg) const
+{
+  logger << "Inspecting buffer " << getName() << ": ";
+  if (!msg.empty()) logger  << msg;
+  logger << endl;
+
+  double curmin = 0.0;
+  for (flowplanlist::const_iterator oo = getFlowPlans().begin();
+    oo != getFlowPlans().end();
+    ++oo)
+  {
+    if (oo->getEventType() == 3)
+      curmin = oo->getMin();
+    logger << "  " << oo->getDate()
+      << " qty:" << oo->getQuantity()
+      << ", oh:" << oo->getOnhand()
+      << ", min:" << curmin;
+    switch(oo->getEventType())
+    {
+      case 1:
+        logger << ", oper:" << static_cast<const FlowPlan*>(&*oo)->getOperationPlan()->getOperation() << endl;
+        break;
+      case 2:
+        logger << ", event set-onhand" << endl;
+        break;
+      case 3:
+        logger << ", event update-minimum" << endl;
+        break;
+      case 4:
+        logger << ", event update-maximum" << endl;
+        break;
+    }
+  }
+}
+
+
+void Buffer::setItem(Item* i)
 {
   if (it == i)
     // No change
@@ -129,19 +227,18 @@ DECLARE_EXPORT void Buffer::setItem(Item* i)
 }
 
 
-DECLARE_EXPORT void Buffer::setOnHand(double f)
+void Buffer::setOnHand(double f)
 {
   // The dummy operation to model the inventory may need to be created
-  Operation *o = Operation::find(INVENTORY_OPERATION);
+  Operation *o = Operation::find("Inventory " + string(getName()));
   Flow *fl;
   if (!o)
   {
+    // Stop here if the quantity is 0
+    if (!f) return;
     // Create a fixed time operation with zero leadtime, hidden from the xml
     // output, hidden for the solver, and without problem detection.
-    o = new OperationFixedTime();
-    o->setName(INVENTORY_OPERATION);
-    o->setHidden(true);
-    o->setDetectProblems(false);
+    o = new OperationInventory(this);
     fl = new FlowEnd(o, this, 1);
   }
   else
@@ -177,14 +274,30 @@ DECLARE_EXPORT void Buffer::setOnHand(double f)
 }
 
 
-DECLARE_EXPORT double Buffer::getOnHand() const
+OperationInventory::OperationInventory(Buffer *buf)
 {
+  setName("Inventory " + string(buf->getName()));
+  setHidden(true);
+  setDetectProblems(false);
+  initType(metadata);
+}
+
+
+Buffer* OperationInventory::getBuffer() const
+{
+  return getFlows().begin()->getBuffer();
+}
+
+
+double Buffer::getOnHand() const
+{
+  string invop = "Inventory " + string(getName());
   for (flowplanlist::const_iterator i = flowplans.begin(); i!=flowplans.end(); ++i)
   {
     if(i->getDate()) return 0.0; // Inventory event is always at start of horizon
     if(i->getEventType() != 1) continue;
     const FlowPlan *fp = static_cast<const FlowPlan*>(&*i);
-    if (fp->getFlow()->getOperation()->getName() == string(INVENTORY_OPERATION)
+    if (fp->getFlow()->getOperation()->getName() == invop
       && fabs(fp->getQuantity()) > ROUNDING_ERROR)
         return fp->getQuantity();
   }
@@ -192,7 +305,7 @@ DECLARE_EXPORT double Buffer::getOnHand() const
 }
 
 
-DECLARE_EXPORT double Buffer::getOnHand(Date d) const
+double Buffer::getOnHand(Date d) const
 {
   double tmp(0.0);
   for (flowplanlist::const_iterator oo=flowplans.begin();
@@ -210,7 +323,7 @@ DECLARE_EXPORT double Buffer::getOnHand(Date d) const
 }
 
 
-DECLARE_EXPORT double Buffer::getOnHand(Date d1, Date d2, bool min) const
+double Buffer::getOnHand(Date d1, Date d2, bool min) const
 {
   // Swap parameters if required
   if (d2 < d1)
@@ -255,7 +368,7 @@ DECLARE_EXPORT double Buffer::getOnHand(Date d1, Date d2, bool min) const
 }
 
 
-DECLARE_EXPORT void Buffer::setMinimum(double m)
+void Buffer::setMinimum(double m)
 {
   // There is already a minimum calendar.
   if (min_cal)
@@ -286,7 +399,7 @@ DECLARE_EXPORT void Buffer::setMinimum(double m)
 }
 
 
-DECLARE_EXPORT void Buffer::setMinimumCalendar(Calendar *cal)
+void Buffer::setMinimumCalendar(Calendar *cal)
 {
   // Resetting the same calendar
   if (min_cal == cal) return;
@@ -296,16 +409,20 @@ DECLARE_EXPORT void Buffer::setMinimumCalendar(Calendar *cal)
 
   // Delete previous events.
   for (flowplanlist::iterator oo=flowplans.begin(); oo!=flowplans.end(); )
-    if (oo->getEventType() == 3)
+  {
+    flowplanlist::Event *tmp = &*oo;
+    ++oo;
+    if (tmp->getEventType() == 3)
     {
-      flowplans.erase(&(*oo));
-      delete &(*(oo++));
+      flowplans.erase(tmp);
+      delete tmp;
     }
-    else ++oo;
+  }
 
   // Null pointer passed. Change back to time independent min.
   if (!cal)
   {
+    min_cal = nullptr;
     setMinimum(min_val);
     return;
   }
@@ -325,7 +442,7 @@ DECLARE_EXPORT void Buffer::setMinimumCalendar(Calendar *cal)
 }
 
 
-DECLARE_EXPORT void Buffer::setMaximum(double m)
+void Buffer::setMaximum(double m)
 {
   // There is already a maximum calendar.
   if (max_cal)
@@ -356,7 +473,7 @@ DECLARE_EXPORT void Buffer::setMaximum(double m)
 }
 
 
-DECLARE_EXPORT void Buffer::setMaximumCalendar(Calendar *cal)
+void Buffer::setMaximumCalendar(Calendar *cal)
 {
   // Resetting the same calendar
   if (max_cal == cal) return;
@@ -395,7 +512,7 @@ DECLARE_EXPORT void Buffer::setMaximumCalendar(Calendar *cal)
 }
 
 
-DECLARE_EXPORT void Buffer::deleteOperationPlans(bool deleteLocked)
+void Buffer::deleteOperationPlans(bool deleteLocked)
 {
   // Delete the operationplans
   for (flowlist::iterator i=flows.begin(); i!=flows.end(); ++i)
@@ -406,7 +523,7 @@ DECLARE_EXPORT void Buffer::deleteOperationPlans(bool deleteLocked)
 }
 
 
-DECLARE_EXPORT Buffer::~Buffer()
+Buffer::~Buffer()
 {
   // Delete all operationplans.
   // An alternative logic would be to delete only the flowplans for this
@@ -428,18 +545,18 @@ DECLARE_EXPORT Buffer::~Buffer()
       while (buf && buf->nextItemBuffer != this)
         buf = buf->nextItemBuffer;
       if (!buf)
-        throw LogicException("corrupted buffer list for an item");
+        logger << "Error: Corrupted buffer list for an item" << endl;
       buf->nextItemBuffer = nextItemBuffer;
     }
   }
 
   // Remove the inventory operation
-  Operation *invoper = Operation::find(INVENTORY_OPERATION);
+  Operation *invoper = Operation::find("Inventory " + string(getName()));
   if (invoper) delete invoper;
 }
 
 
-DECLARE_EXPORT void Buffer::followPegging
+void Buffer::followPegging
 (PeggingIterator& iter, FlowPlan* curflowplan, double qty, double offset, short lvl)
 {
   if (!curflowplan->getOperationPlan()->getQuantity() || curflowplan->getBuffer()->getTool())
@@ -537,7 +654,10 @@ DECLARE_EXPORT void Buffer::followPegging
     double scale = curflowplan->getQuantity() / curflowplan->getOperationPlan()->getQuantity();
     double startQty = f->getCumulativeProduced() - f->getQuantity() + offset * scale;
     double endQty = startQty + qty * scale;
-    if (f->getCumulativeConsumed() <= startQty + ROUNDING_ERROR)
+    if (
+      (f->getQuantity() <= 0 && f->getCumulativeConsumed() + f->getQuantity() < endQty)
+      || (f->getQuantity() > 0 && f->getCumulativeConsumed() < endQty)
+      )
     {
       // CASE 2A: Not consumed enough yet: move forward
       while (f!=getFlowPlans().end()
@@ -607,7 +727,7 @@ DECLARE_EXPORT void Buffer::followPegging
 }
 
 
-DECLARE_EXPORT Operation* BufferProcure::getOperation() const
+Operation* BufferProcure::getOperation() const
 {
   if (!oper)
   {
@@ -635,7 +755,35 @@ DECLARE_EXPORT Operation* BufferProcure::getOperation() const
 }
 
 
-DECLARE_EXPORT void Buffer::buildProducingOperation()
+Buffer* Buffer::findOrCreate(Item* itm, Location* loc)
+{
+  if (!itm || !loc)
+    return nullptr;
+
+  // Return existing buffer if it exists
+  Buffer* destbuffer = nullptr;
+  Item::bufferIterator buf_iter(itm);
+  while (Buffer* tmpbuf = buf_iter.next())
+  {
+    if (tmpbuf->getLocation() == loc)
+      return tmpbuf;
+  }
+
+  // Create a new buffer with a unique name
+  stringstream o;
+  o << itm->getName() << " @ " << loc->getName();
+  Buffer* b;
+  while (b = find(o.str()))
+    o << '*';
+  b = new BufferDefault();
+  b->setItem(itm);
+  b->setLocation(loc);
+  b->setName(o.str());
+  return b;
+}
+
+
+void Buffer::buildProducingOperation()
 {
   if (producing_operation
     && producing_operation != uninitializedProducing
@@ -653,12 +801,11 @@ DECLARE_EXPORT void Buffer::buildProducingOperation()
     {
       // Verify whether the ItemSupplier is applicable to the buffer location
       // We need to reject the following 2 mismatches:
-      //   - buffer location is not null, and is not a member of the
-      //     ItemSupplier location
+      //   - buffer location is not null, and is not the ItemSupplier location
       //   - buffer location is null, and the ItemSupplier location isn't
       if (supitem->getLocation())
       {
-        if ((getLocation() && !getLocation()->isMemberOf(supitem->getLocation()))
+        if ((getLocation() && getLocation() != supitem->getLocation())
           || !getLocation())
           continue;
       }
@@ -716,8 +863,20 @@ DECLARE_EXPORT void Buffer::buildProducingOperation()
           subop->setOwner(producing_operation);
         }
         else
+        {
           // We are third or later: just add a suboperation
-          subop->setOwner(producing_operation);
+          if (producing_operation->getSubOperations().size() > 100)
+          {
+            new ProblemInvalidData(
+              this,
+              string("Excessive replenishments defined for '") + getName() + "'",
+              "material", Date::infinitePast, Date::infiniteFuture, 1
+            );
+            return;
+          }
+          else
+            subop->setOwner(producing_operation);
+        }
       }
       else
       {
@@ -751,15 +910,18 @@ DECLARE_EXPORT void Buffer::buildProducingOperation()
     {
       // Verify whether the ItemDistribution is applicable to the buffer location
       // We need to reject the following 2 mismatches:
-      //   - buffer location is not null, and is not a member of the
-      //     ItemDistribution destination location
+      //   - buffer location is not null, and is the ItemDistribution destination location
       //   - buffer location is null, and the ItemDistribution destination location isn't
+      if (getLocation() == itemdist->getOrigin())
+        continue;
       if (itemdist->getDestination())
       {
-        if ((getLocation() && !getLocation()->isMemberOf(itemdist->getDestination()))
+        if ((getLocation() && getLocation() != itemdist->getDestination())
           || !getLocation())
           continue;
       }
+      if (!itemdist->getOrigin())
+        continue;
 
       // Check if there is already a producing operation referencing this ItemDistribution
       if (producing_operation && producing_operation != uninitializedProducing)
@@ -785,32 +947,10 @@ DECLARE_EXPORT void Buffer::buildProducingOperation()
         }
       }
 
-      // New operation needs to be created for each allowed source location
-      for (Location::iterator loc = Location::begin(); loc != Location::end(); ++loc)
-      {
-        // Skip unqualified locations
-        if (itemdist->getOrigin() && !loc->isMemberOf(itemdist->getOrigin()))
-          continue;
+      // New operation needs to be created 
 
         // Find or create the source buffer
-        Buffer* originbuf = NULL;
-        for (Buffer::iterator buf = Buffer::begin(); buf != Buffer::end(); ++buf)
-          if (buf->getLocation() == &*loc && buf->getItem() == getItem())
-          {
-            originbuf = &*buf;
-            break;
-          }
-        if (!originbuf)
-        {
-          originbuf = new BufferDefault();
-          originbuf->setItem(getItem());
-          originbuf->setLocation(&*loc);
-          stringstream o;
-          o << getItem() << " @ " << loc->getName();
-          // We assume there is no buffer with that name yet. If there is,
-          // we'll get an error here.
-          originbuf->setName(o.str());
-        }
+        Buffer* originbuf = findOrCreate(getItem(), &*itemdist->getOrigin());
 
         // Create new operation
         OperationItemDistribution *oper = new OperationItemDistribution(itemdist, originbuf, this);
@@ -841,8 +981,20 @@ DECLARE_EXPORT void Buffer::buildProducingOperation()
             subop->setOwner(producing_operation);
           }
           else
+          {
             // We are third or later: just add a suboperation
-            subop->setOwner(producing_operation);
+            if (producing_operation->getSubOperations().size() > 100)
+            {
+              new ProblemInvalidData(
+                this,
+                string("Excessive replenishments defined for '") + getName() + "'",
+                "material", Date::infinitePast, Date::infiniteFuture, 1
+              );
+              return;
+            }
+            else
+              subop->setOwner(producing_operation);
+          }
         }
         else
         {
@@ -868,9 +1020,103 @@ DECLARE_EXPORT void Buffer::buildProducingOperation()
             subop->setOwner(superop);
           }
         }
-      } // End loop over origin locations
+      
 
     } // End loop over itemdistributions
+
+    // Loop over all item operations to replenish this item+location combination
+    Item::operationIterator itemoper_iter = getItem()->getOperationIterator();
+    while (Operation *itemoper = itemoper_iter.next())
+    {
+      // Verify whether the operation is applicable to the buffer
+      if (itemoper->getLocation() && itemoper->getLocation() != getLocation())
+        continue;
+
+      // Check if there is already a producing operation referencing this operation
+      if (producing_operation && producing_operation != uninitializedProducing)
+      {
+        if (producing_operation->getType() != *OperationAlternate::metadata)
+        {
+          if (producing_operation == itemoper)
+            // Already exists
+            continue;
+        }
+        else
+        {
+          SubOperation::iterator subiter(producing_operation->getSubOperations());
+          while (SubOperation *o = subiter.next())
+            if (o->getOperation() == itemoper)
+              // Already exists
+              continue;
+        }
+      }
+
+      // Merge the new operation in an alternate operation if required
+      if (producing_operation && producing_operation != uninitializedProducing)
+      {
+        // We're not the first
+        SubOperation* subop = new SubOperation();
+        subop->setOperation(itemoper);
+        subop->setPriority(itemoper->getPriority());
+        subop->setEffective(itemoper->getEffective());
+        if (producing_operation->getType() != *OperationAlternate::metadata)
+        {
+          // We are the second: create an alternate and add 2 suboperations
+          OperationAlternate *superop = new OperationAlternate();
+          stringstream o;
+          o << "Replenish " << getName();
+          superop->setName(o.str());
+          superop->setHidden(true);
+          superop->setSearch("PRIORITY");
+          SubOperation* subop2 = new SubOperation();
+          subop2->setOperation(producing_operation);
+          // Note that priority and effectivity are at default values.
+          // If not, the alternate would already have been created.
+          subop2->setOwner(superop);
+          producing_operation = superop;
+          subop->setOwner(producing_operation);
+        }
+        else
+        {
+          // We are third or later: just add a suboperation
+          if (producing_operation->getSubOperations().size() > 100)
+          {
+            new ProblemInvalidData(
+              this,             
+              string("Excessive replenishments defined for '") + getName() + "'",
+              "material", Date::infinitePast, Date::infiniteFuture, 1
+              );
+            return;
+          }
+          else
+            subop->setOwner(producing_operation);
+        }
+      }
+      else
+      {
+        // We are the first
+        if (itemoper->getEffective() == DateRange() && itemoper->getPriority() == 1)
+          // Use a single operation. If an alternate is required
+          // later on, we know it has the default priority and effectivity.
+          producing_operation = itemoper;
+        else
+        {
+          // Already create an alternate now
+          OperationAlternate *superop = new OperationAlternate();
+          producing_operation = superop;
+          stringstream o;
+          o << "Replenish " << getName();
+          superop->setName(o.str());
+          superop->setHidden(true);
+          superop->setSearch("PRIORITY");
+          SubOperation* subop = new SubOperation();
+          subop->setOperation(itemoper);
+          subop->setPriority(itemoper->getPriority());
+          subop->setEffective(itemoper->getEffective());
+          subop->setOwner(superop);
+        }
+      }
+    } // End loop over operations
 
     // While-loop to add suppliers defined at parent items
     item = item->getOwner();
@@ -879,10 +1125,24 @@ DECLARE_EXPORT void Buffer::buildProducingOperation()
   if (producing_operation == uninitializedProducing)
   {
     // No producer could be generated. No replenishment will be possible.
-    new ProblemInvalidData(this, "no replenishment defined", "buffer",
-      Date::infinitePast, Date::infiniteFuture, 1);
-    logger << "Warning: Can't replenish buffer '" << this << "'" << endl;
-    producing_operation = NULL;
+    new ProblemInvalidData(
+      this,
+      string("No replenishment defined for '") + getName() + "'",
+      "material", Date::infinitePast, Date::infiniteFuture, 1
+      );
+    producing_operation = nullptr;
+  }
+  else
+  {
+    // Remove eventual existing problem on the buffer
+    for (Problem::iterator j = Problem::begin(this, false); j != Problem::end(); ++j)
+    {
+      if (typeid(*j) == typeid(ProblemInvalidData))
+      {
+        delete &*j;
+        break;
+      }
+    }
   }
 }
 

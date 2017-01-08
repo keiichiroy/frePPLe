@@ -18,12 +18,15 @@
 from django.utils.translation import ugettext_lazy as _
 
 from freppledb.input.models import Resource, Operation, Location, SetupMatrix, SetupRule
-from freppledb.input.models import Buffer, Customer, Demand, Item, Load, Flow, Skill, ResourceSkill
-from freppledb.input.models import Calendar, CalendarBucket, OperationPlan, SubOperation, Supplier
-from freppledb.input.models import ItemSupplier, ItemDistribution, DistributionOrder, PurchaseOrder
+from freppledb.input.models import Buffer, Customer, Demand, Item, OperationResource
+from freppledb.input.models import OperationMaterial, Skill, ResourceSkill, Supplier
+from freppledb.input.models import Calendar, CalendarBucket, ManufacturingOrder, SubOperation
+from freppledb.input.models import ItemSupplier, ItemDistribution, DistributionOrder
+from freppledb.input.models import PurchaseOrder
 from freppledb.common.adminforms import MultiDBModelAdmin, MultiDBTabularInline
 
 from freppledb.admin import data_site
+
 
 class CalendarBucket_inline(MultiDBTabularInline):
   model = CalendarBucket
@@ -37,12 +40,12 @@ class CalendarBucket_admin(MultiDBModelAdmin):
   save_on_top = True
   fieldsets = (
     (None, {'fields': ('calendar', ('startdate', 'enddate'), 'value', 'priority')}),
-    (_('Repeating pattern'), {
+    (_('repeating pattern'), {
       'fields': (('starttime', 'endtime'), ('monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday')),
       }),
     )
   tabs = [
-    {"name": 'edit', "label": _("edit"), "view":  "admin:input_calendarbucket_change", "permissions": "input.change_calendarbucket"},
+    {"name": 'edit', "label": _("edit"), "view": "admin:input_calendarbucket_change", "permissions": "input.change_calendarbucket"},
     {"name": 'comments', "label": _("comments"), "view": "admin:input_calendarbucket_comment"},
     #. Translators: Translation included with Django
     {"name": 'history', "label": _("History"), "view": "admin:input_calendarbucket_history"},
@@ -95,10 +98,9 @@ data_site.register(Customer, Customer_admin)
 class ItemSupplier_inline(MultiDBTabularInline):
   model = ItemSupplier
   fk_name = 'item'
-  raw_id_fields = ('supplier','location')
+  raw_id_fields = ('supplier', 'location', 'resource')
   extra = 0
   exclude = ('source',)
-
 
 
 class Supplier_admin(MultiDBModelAdmin):
@@ -115,16 +117,36 @@ class Supplier_admin(MultiDBModelAdmin):
 data_site.register(Supplier, Supplier_admin)
 
 
+class OperationMaterial_inline(MultiDBTabularInline):
+  model = OperationMaterial
+  fields = ('item', 'operation', 'quantity', 'type', 'effective_start', 'effective_end')
+  raw_id_fields = ('operation', 'item',)
+  extra = 0
+  exclude = ('source',)
+
+
+class OperationResource_inline(MultiDBTabularInline):
+  model = OperationResource
+  raw_id_fields = ('operation', 'resource', 'skill')
+  fields = ('resource', 'operation', 'quantity', 'effective_start', 'effective_end', 'skill', 'setup')
+  sfieldsets = (
+    (None, {'fields': ['resource', 'operation', 'quantity', 'effective_start', 'effective_end', 'skill', 'setup']}),
+    (_('alternates'), {'fields': ('name', 'priority', 'search')}),
+    )
+  extra = 0
+  exclude = ('source',)
+
+
 class Item_admin(MultiDBModelAdmin):
   model = Item
   save_on_top = True
-  raw_id_fields = ('operation', 'owner',)
-  inlines = [ ItemSupplier_inline, ]
+  raw_id_fields = ('owner',)
+  inlines = [ ItemSupplier_inline, OperationMaterial_inline ]
   exclude = ('source',)
   tabs = [
     {"name": 'edit', "label": _("edit"), "view": "admin:input_item_change", "permissions": "input.change_item"},
     {"name": 'supplypath', "label": _("supply path"), "view": "supplypath_item"},
-    {"name": 'whereused', "label": _("where used"),"view": "whereused_item"},
+    {"name": 'whereused', "label": _("where used"), "view": "whereused_item"},
     {"name": 'plan', "label": _("plan"), "view": "output_demand_plandetail"},
     {"name": 'plandetail', "label": _("plan detail"), "view": "output_demandplan_plandetail"},
     {"name": 'comments', "label": _("comments"), "view": "admin:input_item_comment"},
@@ -137,7 +159,7 @@ data_site.register(Item, Item_admin)
 class ItemSupplier_admin(MultiDBModelAdmin):
   model = ItemSupplier
   save_on_top = True
-  raw_id_fields = ('item', 'supplier')
+  raw_id_fields = ('item', 'supplier', 'resource')
   exclude = ('source',)
   tabs = [
     {"name": 'edit', "label": _("edit"), "view": "admin:input_itemsupplier_change", "permissions": "input.change_itemsupplier"},
@@ -151,7 +173,7 @@ data_site.register(ItemSupplier, ItemSupplier_admin)
 class ItemDistribution_admin(MultiDBModelAdmin):
   model = ItemDistribution
   save_on_top = True
-  raw_id_fields = ('item',)
+  raw_id_fields = ('item', 'resource')
   exclude = ('source',)
   tabs = [
     {"name": 'edit', "label": _("edit"), "view": "admin:input_itemdistribution_change", "permissions": "input.change_itemdistribution"},
@@ -170,25 +192,6 @@ class SubOperation_inline(MultiDBTabularInline):
   exclude = ('source',)
 
 
-class Flow_inline(MultiDBTabularInline):
-  model = Flow
-  raw_id_fields = ('operation', 'thebuffer',)
-  extra = 0
-  exclude = ('source',)
-
-
-class Load_inline(MultiDBTabularInline):
-  model = Load
-  raw_id_fields = ('operation', 'resource', 'skill')
-  fields = ('resource', 'operation', 'quantity', 'effective_start', 'effective_end', 'skill', 'setup')
-  sfieldsets = (
-    (None, {'fields': ['resource', 'operation', 'quantity', 'effective_start', 'effective_end', 'skill', 'setup']}),
-    (_('Alternates'), {'fields': ('name', 'priority', 'search')}),
-    )
-  extra = 0
-  exclude = ('source',)
-
-
 class ResourceSkill_inline(MultiDBTabularInline):
   model = ResourceSkill
   fk_name = 'resource'
@@ -201,12 +204,11 @@ class Operation_admin(MultiDBModelAdmin):
   model = Operation
   raw_id_fields = ('location',)
   save_on_top = True
-  inlines = [ SubOperation_inline, Flow_inline, Load_inline, ]
+  inlines = [ SubOperation_inline, OperationMaterial_inline, OperationResource_inline, ]
   fieldsets = (
-    (None, {'fields': ('name', 'type', 'location', 'description', ('category', 'subcategory'))}),
-    (_('Planning parameters'), {
+    (None, {'fields': ('name', 'type', 'location', 'description', 'category', 'subcategory')}),
+    (_('planning parameters'), {
       'fields': ('fence', 'posttime', 'sizeminimum', 'sizemultiple', 'sizemaximum', 'cost', 'duration', 'duration_per', 'search'),
-        'classes': ('collapse',)
        }),
     )
   tabs = [
@@ -214,7 +216,7 @@ class Operation_admin(MultiDBModelAdmin):
     {"name": 'supplypath', "label": _("supply path"), "view": "supplypath_operation"},
     {"name": 'whereused', "label": _("where used"),"view": "whereused_operation"},
     {"name": 'plan', "label": _("plan"), "view": "output_operation_plandetail"},
-    {"name": 'plandetail', "label": _("plan detail"), "view": "output_operationplan_plandetail"},
+    # {"name": 'plandetail', "label": _("plan detail"), "view": "output_operationplan_plandetail"},
     {"name": 'constraint', "label": _("constrained demand"), "view": "output_constraint_operation"},
     {"name": 'comments', "label": _("comments"), "view": "admin:input_operation_comment"},
     #. Translators: Translation included with Django
@@ -232,21 +234,18 @@ data_site.register(SubOperation, SubOperation_admin)
 
 
 class Buffer_admin(MultiDBModelAdmin):
-  raw_id_fields = ('location', 'item', 'minimum_calendar', 'producing', 'owner', )
+  raw_id_fields = ('location', 'item', 'minimum_calendar', 'owner', )
   fieldsets = (
     (None, {
-      'fields': (('name'), ('item', 'location'), 'description', 'owner', ('category', 'subcategory'))}),
-    (_('Inventory'), {
-      'fields': ('onhand',)}),
-    (_('Planning parameters'), {
-      'fields': ('type', 'minimum', 'minimum_calendar', 'producing'),
-      'classes': ('collapse',)},),
-    (_('Planning parameters for procurement buffers'), {
-      'fields': ('leadtime', 'fence', 'min_inventory', 'max_inventory', 'min_interval', 'max_interval', 'size_minimum', 'size_multiple', 'size_maximum'),
-      'classes': ('collapse',)},),
+      'fields': ('item', 'location', 'description', 'owner', 'category', 'subcategory')}),
+    (_('inventory'), {
+      'fields': ('onhand',)
+      }),
+    (_('planning parameters'), {
+      'fields': ('type', 'minimum', 'minimum_calendar', 'min_interval'),
+      }),
     )
   save_on_top = True
-  inlines = [ Flow_inline, ]
   tabs = [
     {"name": 'edit', "label": _("edit"), "view": "admin:input_buffer_change", "permissions": "input.change_buffer"},
     {"name": 'supplypath', "label": _("supply path"), "view": "supplypath_buffer"},
@@ -312,7 +311,7 @@ class Resource_admin(MultiDBModelAdmin):
   model = Resource
   raw_id_fields = ('maximum_calendar', 'location', 'setupmatrix', 'owner')
   save_on_top = True
-  inlines = [ Load_inline, ResourceSkill_inline, ]
+  inlines = [ OperationResource_inline, ResourceSkill_inline, ]
   exclude = ('source',)
   tabs = [
     {"name": 'edit', "label": _("edit"), "view": "admin:input_resource_change", "permissions": "input.change_resource"},
@@ -328,64 +327,59 @@ class Resource_admin(MultiDBModelAdmin):
 data_site.register(Resource, Resource_admin)
 
 
-class Flow_admin(MultiDBModelAdmin):
-  model = Flow
-  raw_id_fields = ('operation', 'thebuffer',)
+class OperationMaterial_admin(MultiDBModelAdmin):
+  model = OperationMaterial
+  raw_id_fields = ('operation', 'item',)
   save_on_top = True
   fieldsets = (
-    (None, {'fields': ('thebuffer', 'operation', 'type', 'quantity', ('effective_start', 'effective_end'))}),
-    (_('Alternates'), {'fields': ('name', 'priority', 'search'),}),
+    (None, {'fields': ('item', 'operation', 'type', 'quantity', ('effective_start', 'effective_end'))}),
+    (_('alternates'), {'fields': ('name', 'priority', 'search'), }),
     )
   tabs = [
-    {"name": 'edit', "label": _("edit"), "view": "admin:input_flow_change", "permissions": "input.change_flow"},
-    {"name": 'comments', "label": _("comments"), "view": "admin:input_flow_comment"},
+    {"name": 'edit', "label": _("edit"), "view": "admin:input_operationmaterial_change", "permissions": "input.change_operationmaterial"},
+    {"name": 'comments', "label": _("comments"), "view": "admin:input_operationmaterial_comment"},
     #. Translators: Translation included with Django
-    {"name": 'history', "label": _("History"), "view": "admin:input_flow_history"},
+    {"name": 'history', "label": _("History"), "view": "admin:input_operationmaterial_history"},
     ]
-data_site.register(Flow, Flow_admin)
+data_site.register(OperationMaterial, OperationMaterial_admin)
 
 
-class Load_admin(MultiDBModelAdmin):
-  model = Load
+class OperationResource_admin(MultiDBModelAdmin):
+  model = OperationResource
   raw_id_fields = ('operation', 'resource', 'skill')
   save_on_top = True
   fieldsets = (
     (None, {'fields': ('resource', 'operation', 'quantity', 'skill', 'setup', ('effective_start', 'effective_end'))}),
-    (_('Alternates'), {'fields': ('name', 'priority', 'search'),}),
+    (_('alternates'), {'fields': ('name', 'priority', 'search'), }),
     )
   tabs = [
-    {"name": 'edit', "label": _("edit"), "view": "admin:input_load_change", "permissions": "input.change_load"},
-    {"name": 'comments', "label": _("comments"), "view": "admin:input_load_comment"},
+    {"name": 'edit', "label": _("edit"), "view": "admin:input_operationresource_change", "permissions": "input.change_operationresource"},
+    {"name": 'comments', "label": _("comments"), "view": "admin:input_operationresource_comment"},
     #. Translators: Translation included with Django
-    {"name": 'history', "label": _("History"), "view": "admin:input_load_history"},
+    {"name": 'history', "label": _("History"), "view": "admin:input_operationresource_history"},
     ]
-data_site.register(Load, Load_admin)
+data_site.register(OperationResource, OperationResource_admin)
 
 
-class OperationPlan_admin(MultiDBModelAdmin):
-  model = OperationPlan
+class ManufacturingOrder_admin(MultiDBModelAdmin):
+  model = ManufacturingOrder
   raw_id_fields = ('operation', 'owner',)
   save_on_top = True
-  exclude = ('source', 'criticality')
+  exclude = ('type', 'id', 'source', 'criticality', 'delay', 'origin', 'destination', 'item', 'supplier', 'location', 'demand', 'name', 'due')
   tabs = [
-    {"name": 'edit', "label": _("edit"), "view": "admin:input_operationplan_change", "permissions": "input.change_operationplan"},
-    {"name": 'supplypath', "label": _("supply path"), "view": "supplypath_operation"},
-    {"name": 'whereused', "label": _("where used"),"view": "whereused_operation"},
-    {"name": 'plan', "label": _("plan"), "view": "output_operation_plan"},
-    {"name": 'plandetail', "label": _("plan detail"), "view": "output_operation_plandetail"},
-    {"name": 'constraint', "label": _("constrained operation"), "view": "output_constraint_operationplan"},
-    {"name": 'comments', "label": _("comments"), "view": "admin:input_operationplan_comment"},
-    #. Translators: Translation included with Django
-    {"name": 'history', "label": _("History"), "view": "admin:input_operationplan_history"},
+    {"name": 'edit', "label": _("edit"), "view": "admin:input_manufacturingorder_change", "permissions": "input.change_manufacturingorder"},
     ]
-data_site.register(OperationPlan, OperationPlan_admin)
+data_site.register(ManufacturingOrder, ManufacturingOrder_admin)
 
 
 class DistributionOrder_admin(MultiDBModelAdmin):
   model = DistributionOrder
   raw_id_fields = ('item',)
   save_on_top = True
-  exclude = ('source', 'criticality')
+  exclude = ('type', 'id', 'source', 'criticality', 'delay', 'operation', 'owner', 'supplier', 'location', 'demand', 'name', 'due')
+  tabs = [
+    {"name": 'edit', "label": _("edit"), "view": "admin:input_distributionorder_change", "permissions": "input.change_distributionorder"},
+    ]
 data_site.register(DistributionOrder, DistributionOrder_admin)
 
 
@@ -393,7 +387,10 @@ class PurchaseOrder_admin(MultiDBModelAdmin):
   model = PurchaseOrder
   raw_id_fields = ('item', 'supplier',)
   save_on_top = True
-  exclude = ('source', 'criticality')
+  exclude = ('type', 'id', 'source', 'criticality', 'delay', 'operation', 'owner', 'origin', 'destination', 'demand', 'name', 'due')
+  tabs = [
+    {"name": 'edit', "label": _("edit"), "view": "admin:input_purchaseorder_change", "permissions": "input.change_purchaseorder"},
+    ]
 data_site.register(PurchaseOrder, PurchaseOrder_admin)
 
 
@@ -405,15 +402,15 @@ class Demand_admin(MultiDBModelAdmin):
       'name', 'item', 'location', 'customer', 'description', 'category',
       'subcategory', 'due', 'quantity', 'priority', 'status', 'owner'
       )}),
-    (_('Planning parameters'), {'fields': (
+    (_('planning parameters'), {'fields': (
       'operation', 'minshipment', 'maxlateness'
-      ), 'classes': ('collapse') }),
+      )}),
     )
   save_on_top = True
   tabs = [
     {"name": 'edit', "label": _("edit"), "view": "admin:input_demand_change", "permissions": "input.change_demand"},
     {"name": 'supplypath', "label": _("supply path"), "view": "supplypath_demand"},
-    {"name": 'constraint', "label": _("why short or late?"),"view": "output_constraint_demand"},
+    {"name": 'constraint', "label": _("why short or late?"), "view": "output_constraint_demand"},
     {"name": 'plan', "label": _("plan"), "view": "output_demand_pegging"},
     {"name": 'comments', "label": _("comments"), "view": "admin:input_demand_comment"},
     #. Translators: Translation included with Django

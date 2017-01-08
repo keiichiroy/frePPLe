@@ -88,7 +88,16 @@
 						<name>Regional DC 2</name>
 					</origin>
 					<destination>
-						<name>Region 2</name>
+						<name>Local DC 2b</name>
+					</destination>
+					<leadtime>P3D</leadtime>
+				</itemdistribution>
+				<itemdistribution>
+					<origin>
+						<name>Regional DC 2</name>
+					</origin>
+					<destination>
+						<name>Local DC 2a</name>
 					</destination>
 					<leadtime>P3D</leadtime>
 				</itemdistribution>
@@ -97,7 +106,16 @@
 						<name>Regional DC 1</name>
 					</origin>
 					<destination>
-						<name>Region 1</name>
+						<name>Local DC 1b</name>
+					</destination>
+					<leadtime>P3D</leadtime>
+				</itemdistribution>
+				<itemdistribution>
+					<origin>
+						<name>Regional DC 1</name>
+					</origin>
+					<destination>
+						<name>Local DC 1a</name>
 					</destination>
 					<leadtime>P3D</leadtime>
 				</itemdistribution>
@@ -127,6 +145,17 @@
 				<name>All products</name>
 			</owner>
 			<price>2</price>
+			<itemdistributions>
+				<itemdistribution>
+					<origin>
+						<name>Central WH</name>
+					</origin>
+					<destination>
+						<name>Local DC 2b</name>
+					</destination>
+					<priority>0</priority>
+				</itemdistribution>
+			</itemdistributions>
 		</item>
 	</items>
 	<buffers>
@@ -139,6 +168,24 @@
 				<name>Central WH</name>
 			</location>
 			<onhand>10</onhand>
+		</buffer>
+		<buffer>
+			<name>product A @ Local DC 2b</name>
+			<item>
+				<name>product A</name>
+			</item>
+			<location>
+				<name>Local DC 2b</name>
+			</location>
+		</buffer>
+		<buffer>
+			<name>product A @ Regional DC 2</name>
+			<item>
+				<name>product A</name>
+			</item>
+			<location>
+				<name>Regional DC 2</name>
+			</location>
 		</buffer>
 	</buffers>
 	<demands>
@@ -203,4 +250,32 @@
 			<priority>1</priority>
 		</demand>
 	</demands>
+	<operationplans>
+		<operationplan>
+			<id>2</id>
+			<operation xsi:type="operation_itemdistribution">
+				<name>Ship product A from product A @ Central WH to product A @ Local DC 2b</name>
+				<origin>
+					<name>product A @ Central WH</name>
+				</origin>
+				<destination>
+					<name>product A @ Local DC 2b</name>
+				</destination>
+			</operation>
+			<start>2015-06-06T00:00:00</start>
+			<end>2015-06-06T00:00:00</end>
+			<quantity>100</quantity>
+			<status>confirmed</status>
+			<ordertype>DO</ordertype>
+			<item>
+				<name>product A</name>
+			</item>
+			<location>
+				<name>Local DC 2b</name>
+			</location>
+			<origin>
+				<name>Central WH</name>
+			</origin>
+		</operationplan>
+	</operationplans>
 </plan>

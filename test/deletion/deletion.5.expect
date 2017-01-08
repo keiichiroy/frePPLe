@@ -40,7 +40,6 @@
 			<default>1</default>
 			<buckets>
 				<bucket>
-					<id>1</id>
 					<start>2009-01-01T00:00:00</start>
 					<value>2</value>
 				</bucket>
@@ -50,42 +49,34 @@
 			<name>months</name>
 			<buckets>
 				<bucket>
-					<id>1</id>
 					<start>2009-01-01T00:00:00</start>
 					<end>2009-01-01T00:00:00</end>
 				</bucket>
 				<bucket>
-					<id>2</id>
 					<start>2009-02-01T00:00:00</start>
 					<end>2009-02-01T00:00:00</end>
 				</bucket>
 				<bucket>
-					<id>3</id>
 					<start>2009-03-01T00:00:00</start>
 					<end>2009-03-01T00:00:00</end>
 				</bucket>
 				<bucket>
-					<id>4</id>
 					<start>2009-04-01T00:00:00</start>
 					<end>2009-04-01T00:00:00</end>
 				</bucket>
 				<bucket>
-					<id>5</id>
 					<start>2009-05-01T00:00:00</start>
 					<end>2009-05-01T00:00:00</end>
 				</bucket>
 				<bucket>
-					<id>6</id>
 					<start>2009-06-01T00:00:00</start>
 					<end>2009-06-01T00:00:00</end>
 				</bucket>
 				<bucket>
-					<id>7</id>
 					<start>2009-07-01T00:00:00</start>
 					<end>2009-07-01T00:00:00</end>
 				</bucket>
 				<bucket>
-					<id>8</id>
 					<start>2009-08-01T00:00:00</start>
 					<end>2009-08-01T00:00:00</end>
 				</bucket>
@@ -118,9 +109,6 @@
 		</item>
 		<item>
 			<name>item 1</name>
-			<operation>
-				<name>delivery 1</name>
-			</operation>
 		</item>
 	</items>
 	<buffers>
@@ -154,9 +142,9 @@
 			<name>delivery 1</name>
 			<flows>
 				<flow>
-					<buffer>
-						<name>buffer 1</name>
-					</buffer>
+					<item>
+						<name>item 1</name>
+					</item>
 					<quantity>-1</quantity>
 				</flow>
 			</flows>
@@ -173,21 +161,21 @@
 			</loads>
 			<flows>
 				<flow xsi:type="flow_end">
-					<buffer>
-						<name>buffer 1</name>
-					</buffer>
+					<item>
+						<name>item 1</name>
+					</item>
 					<quantity>1</quantity>
 				</flow>
 				<flow>
-					<buffer>
-						<name>buffer A</name>
-					</buffer>
+					<item>
+						<name>component A</name>
+					</item>
 					<quantity>-1</quantity>
 				</flow>
 				<flow>
-					<buffer>
-						<name>buffer B</name>
-					</buffer>
+					<item>
+						<name>component B</name>
+					</item>
 					<quantity>-1</quantity>
 				</flow>
 			</flows>
@@ -213,9 +201,9 @@
 			<name>supply component A from supplier 1</name>
 			<flows>
 				<flow xsi:type="flow_end">
-					<buffer>
-						<name>buffer A</name>
-					</buffer>
+					<item>
+						<name>component A</name>
+					</item>
 					<quantity>1</quantity>
 				</flow>
 			</flows>
@@ -225,9 +213,9 @@
 			<name>supply component A from supplier 2</name>
 			<flows>
 				<flow xsi:type="flow_end">
-					<buffer>
-						<name>buffer A</name>
-					</buffer>
+					<item>
+						<name>component A</name>
+					</item>
 					<quantity>1</quantity>
 				</flow>
 			</flows>
@@ -244,6 +232,9 @@
 			<customer>
 				<name>Customer 1</name>
 			</customer>
+			<operation>
+				<name>delivery 1</name>
+			</operation>
 			<due>2009-03-01T00:00:00</due>
 			<priority>1</priority>
 		</demand>
@@ -256,6 +247,9 @@
 			<customer>
 				<name>Customer 1</name>
 			</customer>
+			<operation>
+				<name>delivery 1</name>
+			</operation>
 			<due>2009-02-01T00:00:00</due>
 			<priority>1</priority>
 		</demand>
@@ -268,6 +262,9 @@
 			<customer>
 				<name>Customer 2</name>
 			</customer>
+			<operation>
+				<name>delivery 1</name>
+			</operation>
 			<due>2009-04-01T00:00:00</due>
 			<priority>1</priority>
 		</demand>

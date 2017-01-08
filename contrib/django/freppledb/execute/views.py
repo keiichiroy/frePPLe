@@ -18,10 +18,13 @@
 import os
 import os.path
 import sys
+import re
 from datetime import datetime
 from subprocess import Popen
+from time import localtime, strftime
 
 from django.conf import settings
+from django.views import static
 from django.views.decorators.cache import never_cache
 from django.shortcuts import render
 from django.db.models import get_apps
@@ -33,6 +36,7 @@ from django.http import Http404, HttpResponseRedirect, HttpResponseServerError, 
 from django.contrib import messages
 from django.utils.encoding import force_text
 
+from freppledb.common.commands import PlanTaskRegistry
 from freppledb.execute.models import Task
 from freppledb.common.models import Scenario
 from freppledb.common.report import exportWorkbook, importWorkbook
@@ -56,6 +60,7 @@ class TaskReport(GridReport):
   editable = False
   height = 150
   default_sort = (0, 'desc')
+  help_url = 'user-guide/user-interface/execute.html'
 
   rows = (
     GridFieldInteger('id', title=_('identifier'), key=True),
@@ -81,6 +86,10 @@ class TaskReport(GridReport):
     # Synchronize the scenario table with the settings
     Scenario.syncWithSettings()
 
+    # Collect optional tasks
+    PlanTaskRegistry.autodiscover()
+    planning_options = PlanTaskRegistry.getLabels()
+
     # Loop over all fixtures of all apps and directories
     fixtures = set()
     folders = list(settings.FIXTURE_DIRS)
@@ -98,19 +107,41 @@ class TaskReport(GridReport):
         pass  # Silently ignore failures
     fixtures = sorted(fixtures)
 
+    # Function to convert from bytes to human readabl format
+    def sizeof_fmt(num):
+      for unit in ['','Ki','Mi','Gi','Ti','Pi','Ei','Zi']:
+        if abs(num) < 1024.0:
+          return "%3.1f%sB" % (num, unit)
+        num /= 1024.0
+      return "%.1f%sB" % (num, 'Yi')
+
+    # List available data files
+    filestoupload = []
+    if 'FILEUPLOADFOLDER' in settings.DATABASES[request.database]:
+      uploadfolder = settings.DATABASES[request.database]['FILEUPLOADFOLDER']
+      if os.path.isdir(uploadfolder):
+        for file in os.listdir(uploadfolder):
+          if file.endswith('.csv') or file.endswith('.log'):
+            filestoupload.append([
+              file,
+              strftime("%Y-%m-%d %H:%M:%S",localtime(os.stat(os.path.join(uploadfolder, file)).st_mtime)),
+              sizeof_fmt(os.stat(os.path.join(uploadfolder, file)).st_size)
+              ])
+
     # Send to template
-    odoo = 'freppledb.odoo' in settings.INSTALLED_APPS
-    return {'capacityconstrained': constraint & 4,
-            'materialconstrained': constraint & 2,
-            'leadtimeconstrained': constraint & 1,
-            'fenceconstrained': constraint & 8,
-            'scenarios': Scenario.objects.all(),
-            'fixtures': fixtures,
-            'openbravo': 'freppledb.openbravo' in settings.INSTALLED_APPS,
-            'odoo': odoo,
-            'odoo_read': odoo and request.session.get('odoo_read', False),
-            'odoo_write': odoo and request.session.get('odoo_write', False)
-            }
+    return {
+      'capacityconstrained': constraint & 4,
+      'materialconstrained': constraint & 2,
+      'leadtimeconstrained': constraint & 1,
+      'fenceconstrained': constraint & 8,
+      'scenarios': Scenario.objects.all(),
+      'fixtures': fixtures,
+      'openbravo': 'freppledb.openbravo' in settings.INSTALLED_APPS,
+      'planning_options': planning_options,
+      'current_options': request.session.get('env', [ i[0] for i in planning_options ]),
+      'filestoupload': filestoupload,
+      'datafolderconfigured': 'FILEUPLOADFOLDER' in settings.DATABASES[request.database]
+      }
 
 
 @staff_member_required
@@ -163,18 +194,11 @@ def wrapTask(request, action):
     task = Task(name='generate plan', submitted=now, status='Waiting', user=request.user)
     task.arguments = "--constraint=%s --plantype=%s" % (constraint, request.POST.get('plantype'))
     env = []
-    if request.POST.get('odoo_read', None) == '1':
-      env.append("odoo_read")
-      request.session['odoo_read'] = True
-    else:
-      request.session['odoo_read'] = False
-    if request.POST.get('odoo_write', None) == '1':
-      env.append("odoo_write")
-      request.session['odoo_write'] = True
-    else:
-      request.session['odoo_write'] = False
+    for value in request.POST.getlist('optional'):
+      env.append(value)
     if env:
       task.arguments = "%s --env=%s" % (task.arguments, ','.join(env))
+    request.session['env'] = env
     task.save(using=request.database)
     # Update the session object
     request.session['plantype'] = request.POST.get('plantype')
@@ -224,6 +248,8 @@ def wrapTask(request, action):
             request.prefix = ''
     elif 'update' in request.POST:
       # Note: update is immediate and synchronous.
+      if not request.user.has_perm('execute.release_scenario'):
+        raise Exception('Missing execution privileges')
       for sc in Scenario.objects.all():
         if request.POST.get(sc.name, 'off') == 'on':
           sc.description = request.POST.get('description', None)
@@ -249,12 +275,29 @@ def wrapTask(request, action):
   # I
   elif action == 'openbravo_export' and 'freppledb.openbravo' in settings.INSTALLED_APPS:
     task = Task(name='Openbravo export', submitted=now, status='Waiting', user=request.user)
+    if 'filter_export' in request.POST:
+      task.arguments = "--filter"
+    task.save(using=request.database)
+  # J
+  elif action == 'odoo_import' and 'freppledb.odoo' in settings.INSTALLED_APPS:
+    task = Task(name='Odoo import', submitted=now, status='Waiting', user=request.user)
+    #task.arguments = "--filter"
+    task.save(using=request.database)
+  # M
+  elif action == 'frepple_importfromfolder':
+    task = Task(name='import from folder', submitted=now, status='Waiting', user=request.user)
+    task.save(using=request.database)
+  # N
+  elif action == 'frepple_exporttofolder':
+    task = Task(name='export to folder', submitted=now, status='Waiting', user=request.user)
     task.save(using=request.database)
   else:
     # Task not recognized
     raise Exception('Invalid launching task')
 
-  # Launch a worker process
+  # Launch a worker process, making sure it inherits the right
+  # environment variables from this parent
+  os.environ['FREPPLE_CONFIGDIR'] = settings.FREPPLE_CONFIGDIR
   if task and not checkActive(worker_database):
     if os.path.isfile(os.path.join(settings.FREPPLE_APP, "frepplectl.py")):
       if "python" in sys.executable:
@@ -295,7 +338,7 @@ def wrapTask(request, action):
 @csrf_protect
 def CancelTask(request, taskid):
   # Allow only post
-  if request.method != 'POST'or not request.is_ajax():
+  if request.method != 'POST' or not request.is_ajax():
     raise Http404('Only ajax post requests allowed')
   try:
     task = Task.objects.all().using(request.database).get(pk=taskid)
@@ -306,7 +349,7 @@ def CancelTask(request, taskid):
         fname = os.path.join(settings.FREPPLE_LOGDIR, 'frepple_%s.log' % request.database)
       try:
         # The second line in the log file has the id of the frePPLe process
-        with open(fname, 'rb') as f:
+        with open(fname, 'r') as f:
           t = 0
           for line in f:
             if t >= 1:
@@ -332,6 +375,36 @@ def CancelTask(request, taskid):
 
 @staff_member_required
 @never_cache
+def ViewFile(request, filename):
+  clean_filename = re.split(r'/|:|\\', filename)[-1]
+  if not clean_filename or not 'FILEUPLOADFOLDER' in settings.DATABASES[request.database]:
+    raise Http404('File not found')
+  response = static.serve(
+    request, clean_filename,
+    document_root=settings.DATABASES[request.database]['FILEUPLOADFOLDER']
+    )
+  response['Content-Disposition'] = 'inline; filename="%s"' % clean_filename
+  return response
+
+
+@staff_member_required
+@never_cache
+def DownloadLogFile(request):
+  if request.database == DEFAULT_DB_ALIAS:
+    filename = 'frepple.log'
+  else:
+    filename = 'frepple_%s.log' % request.database
+  response = static.serve(
+    request, filename,
+    document_root=settings.FREPPLE_LOGDIR
+    )
+  response['Content-Disposition'] = 'inline; filename="%s"' % filename
+  response['Content-Type'] = 'application/octet-stream'
+  return response
+
+
+@staff_member_required
+@never_cache
 def logfile(request):
   '''
   This view shows the frePPLe log file of the last planning run in this database.
@@ -351,7 +424,7 @@ def logfile(request):
         f.seek(-50000, os.SEEK_END)
         d = f.read(50000)
         d = d[d.index(b'\n'):] # Strip the first, incomplete line
-        logdata = force_text(_("Displaying only the last 50K from the log file")) + '...\n\n...' + force_text(d)
+        logdata = force_text(_("Displaying only the last 50K from the log file")) + '...\n\n...' + d.decode("utf8","ignore")
       else:
         # Displayed completely
         f.seek(0, os.SEEK_SET)

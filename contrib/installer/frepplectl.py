@@ -16,12 +16,14 @@
 #
 import sys, os, os.path
 from stat import S_ISDIR, ST_MODE
+from subprocess import call, DEVNULL
+from win32process import DETACHED_PROCESS, CREATE_NO_WINDOW
 
 # Environment settings (which are used in the Django settings file and need
 # to be updated BEFORE importing the settings)
-os.environ.setdefault('FREPPLE_HOME', os.path.split(sys.path[0])[0])
+os.environ.setdefault('FREPPLE_HOME', sys.path[0])
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', "freppledb.settings")
-os.environ.setdefault('FREPPLE_APP', os.path.join(os.path.split(sys.path[0])[0],'custom'))
+os.environ.setdefault('FREPPLE_APP', os.path.join(sys.path[0],'custom'))
 
 # Sys.path contains the zip file with all packages. We need to put the
 # application directory into the path as well.
@@ -32,38 +34,40 @@ import django
 django.setup()
 
 # Import django
-from django.core.management import execute_from_command_line, call_command
+from django.core.management import execute_from_command_line
 from django.conf import settings
 from django.db import DEFAULT_DB_ALIAS
 
-# Create the database if it doesn't exist yet
-noDatabaseSchema = False
-if settings.DATABASES[DEFAULT_DB_ALIAS]['ENGINE'] == 'django.db.backends.postgresql_psycopg2':
-  # PostgreSQL:
-  # Try connecting and check for a table called 'parameter'.
-  from django.db import connection
-  try: cursor = connection.cursor()
-  except Exception as e:
-    print("Aborting: Can't connect to the database")
-    print("   %s" % e)
-    input("Hit any key to continue...")
-    sys.exit(1)
-  try: cursor.execute("SELECT 1 FROM common_parameter")
-  except: noDatabaseSchema = True
-else:
-  print('Aborting: Unknown database engine %s' % settings.DATABASES[DEFAULT_DB_ALIAS]['ENGINE'])
-  input("Hit any key to continue...")
-  sys.exit(1)
+if os.path.exists(os.path.join(settings.FREPPLE_HOME, '..', 'pgsql', 'bin', 'pg_ctl.exe')):
+  # Using the included postgres database
+  # Check if the database is running. If not, start it.
+  os.environ['PATH'] = os.path.join(settings.FREPPLE_HOME, '..', 'pgsql', 'bin') + os.pathsep + os.environ['PATH']
+  status = call([
+    os.path.join(settings.FREPPLE_HOME, '..', 'pgsql', 'bin', 'pg_ctl.exe'),
+    "--pgdata", os.path.join(settings.FREPPLE_LOGDIR, 'database'),
+    "--silent",
+    "status"
+    ],
+    stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL,
+    creationflags=CREATE_NO_WINDOW
+    )
+  if status:
+    print("Starting the PostgreSQL database now", settings.FREPPLE_LOGDIR)
+    call([
+      os.path.join(settings.FREPPLE_HOME, '..', 'pgsql', 'bin', 'pg_ctl.exe'),
+      "--pgdata", os.path.join(settings.FREPPLE_LOGDIR, 'database'),
+      "--log", os.path.join(settings.FREPPLE_LOGDIR, 'database', 'server.log'),
+      "-w", # Wait till it's up
+      "start"
+      ],
+      stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL,
+      creationflags=CREATE_NO_WINDOW
+      )
 
-if noDatabaseSchema and len(sys.argv)>1 and sys.argv[1]!='migrate':
-  print("\nDatabase schema has not been initialized yet.")
-  confirm = input("Do you want to do that now? (yes/no): ")
-  while confirm not in ('yes', 'no'):
-    confirm = input('Please enter either "yes" or "no": ')
-  if confirm == 'yes':
-    # Create the database
-    print("\nCreating database scheme")
-    call_command('migrate', verbosity=1)
+
+# Synchronize the scenario table with the settings
+from freppledb.common.models import Scenario
+Scenario.syncWithSettings()
 
 # Execute the command
 execute_from_command_line(sys.argv)

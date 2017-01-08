@@ -75,7 +75,12 @@ template <class type> class TimeLine
       public:
         virtual ~Event() {};
 
-        /** Return the even type. */
+        /** Return the even type. 
+          *  - 1: change on hand
+          *  - 2: set on hand
+          *  - 3: set min on hand
+          *  - 4: set max on hand
+          */
         inline unsigned short getEventType() const
         {
           return tp;
@@ -474,19 +479,6 @@ template <class type> class TimeLine
       */
     void update(EventChangeOnhand*, double, const Date&);
 
-    /** This function is used for debugging purposes.<br>
-      * It prints a header line, followed by the date, quantity and on_hand
-      * of all events in the timeline.
-      */
-    void inspect(const string& name) const
-    {
-      logger << "Inspecting  " << this << ": \"" << name << "\":" << endl;
-      for (const_iterator oo=begin(); oo!=end(); ++oo)
-        logger << "  " << oo->getDate() << "   "
-            << oo->getQuantity() << "    " << oo->getOnhand()
-            << "    " << oo->getCumulativeProduced() <<  "    " << &*oo << endl;
-    }
-
     /** This functions returns the mimimum valid at a certain date. */
     virtual double getMin(Date d, bool inclusive = true) const
     {
@@ -761,8 +753,9 @@ template <class type> void TimeLine<type>::insert (Event* e)
       }
   }
 
-  // Final debugging check
-  assert(check());
+  // Final debugging check - commented out because of its performance impact
+  // on debugging builds.
+  // assert(check());
 }
 
 
@@ -770,7 +763,7 @@ template <class type> void TimeLine<type>::erase(Event* e)
 {
   // Update later entries
   double qty = e->getQuantity();
-  if (qty>0)
+  if (qty > 0.0)
   {
     bool update_oh = true;
     for (iterator i = begin(e); i!=end(); ++i)
@@ -785,7 +778,7 @@ template <class type> void TimeLine<type>::erase(Event* e)
       i->cum_prod -= qty;
     }
   }
-  else
+  else if (qty < 0.0)
     for (iterator i = begin(e); i!=end() && i->getEventType() != 2; ++i)
       i->oh -= qty;
 
@@ -853,8 +846,9 @@ template <class type> void TimeLine<type>::erase(Event* e)
       }
   }
 
-  // Final debugging check
-  assert(check());
+  // Final debugging check - commented out because of its performance impact
+  // on debugging builds.
+  // assert(check());
 }
 
 
@@ -904,7 +898,7 @@ template <class type> void TimeLine<type>::update(EventChangeOnhand* e, double n
     e->cum_prod = theNext->cum_prod;
     if (oldqty > 0) theNext->cum_prod -= oldqty;
   }
-  while ( e->prev && !(*e->prev<*e) )
+  while ( e->prev && !(*(e->prev) < *e) )
   {
     // Move to an earlier date
     Event *thePrev = e->prev;
@@ -970,11 +964,6 @@ template <class type> void TimeLine<type>::update(EventChangeOnhand* e, double n
       for (iterator i = begin(e); i != end() && i->getEventType() != 2; ++i)
         i->oh -= delta;
   }
-
-  // Final debugging check commented out, since loadplans change in pairs.
-  // After changing the first one the second is affected too but not
-  // repositioned yet...
-  //assert(check());
 }
 
 
@@ -994,22 +983,20 @@ template <class type> bool TimeLine<type>::check() const
       expectedCumProd += i->getQuantity();
     if (fabs(expectedOH - i->oh) > ROUNDING_ERROR)
     {
-      inspect("Error: timeline onhand value corrupted on "
-          + string(i->getDate()));
+      logger << "Error: timeline onhand value corrupted on " << i->getDate() << endl;
       return false;
     }
     // Problem 2: The cumulative produced quantity isn't correct
     if (fabs(expectedCumProd - i->cum_prod) > ROUNDING_ERROR)
     {
-      inspect("Error: timeline cumulative produced value corrupted on "
-          + string(i->getDate()));
+      logger << "Error: timeline cumulative produced value corrupted on " << i->getDate() << endl;
       return false;
     }
     // Problem 3: Timeline is not sorted correctly
     if (prev && !(*prev<*i)
         && fabs(prev->getQuantity() - i->getQuantity())>ROUNDING_ERROR)
     {
-      inspect("Error: timeline sort corrupted on " + string(i->getDate()));
+      logger << "Error: timeline sort corrupted on " << i->getDate() << endl;
       return false;
     }
     prev = &*i;

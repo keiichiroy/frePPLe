@@ -66,12 +66,19 @@ data_site.register(User, MyUserAdmin)
 
 
 class MyGroupAdmin(MultiDBModelAdmin):
-  pass
+  # This class re-implements the GroupAdmin class from 
+  # django.contrib.auth.admin, but without the performance optimization
+  # trick it uses. Our version of the Admin is slower (as it generates much
+  # more database queries), but it works on frepple's multi-database setups. 
+  search_fields = ('name',)
+  ordering = ('name',)
+  filter_horizontal = ('permissions',)
+  save_on_top = True  
   tabs = [
-    {"name": 'edit', "label": _("edit"), "view": "admin:common_group_change", "permission": 'auth.change_group'},
-    {"name": 'comments', "label": _("comments"), "view": "admin:common_group_comment"},
+    {"name": 'edit', "label": _("edit"), "view": "admin:auth_group_change", "permission": 'auth.change_group'},
+    {"name": 'comments', "label": _("comments"), "view": "admin:auth_group_comment"},
     # Translators: Translation included with Django
-    {"name": 'history', "label": _("History"), "view": "admin:common_group_history"},
+    {"name": 'history', "label": _("History"), "view": "admin:auth_group_history"},
     ]
 data_site.register(Group, MyGroupAdmin)
 
@@ -144,6 +151,6 @@ class Bucket_admin(MultiDBModelAdmin):
     {"name": 'edit', "label": _("edit"), "view": "admin:common_bucket_change", "permission": 'common.change_bucket'},
     {"name": 'comments', "label": _("comments"), "view": "admin:common_bucket_comment"},
     # Translators: Translation included with Django
-    {"name": 'history', "label": _("History"), "view": "admin:common_group_history"},
+    {"name": 'history', "label": _("History"), "view": "admin:common_bucket_history"},
     ]
 data_site.register(Bucket, Bucket_admin)

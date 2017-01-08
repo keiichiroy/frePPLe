@@ -24,7 +24,7 @@
 namespace frepple
 {
 
-DECLARE_EXPORT const MetaCategory* LoadPlan::metadata;
+const MetaCategory* LoadPlan::metadata;
 
 
 int LoadPlan::initialize()
@@ -44,7 +44,7 @@ int LoadPlan::initialize()
 }
 
 
-DECLARE_EXPORT LoadPlan::LoadPlan(OperationPlan *o, const Load *r)
+LoadPlan::LoadPlan(OperationPlan *o, const Load *r)
 {
   assert(o);
   ld = const_cast<Load*>(r);
@@ -55,7 +55,7 @@ DECLARE_EXPORT LoadPlan::LoadPlan(OperationPlan *o, const Load *r)
   res = r->getResource();
 
   // Add to the operationplan
-  nextLoadPlan = NULL;
+  nextLoadPlan = nullptr;
   if (o->firstloadplan)
   {
     // Append to the end
@@ -89,7 +89,7 @@ DECLARE_EXPORT LoadPlan::LoadPlan(OperationPlan *o, const Load *r)
 }
 
 
-DECLARE_EXPORT LoadPlan::LoadPlan(OperationPlan *o, const Load *r, LoadPlan *lp)
+LoadPlan::LoadPlan(OperationPlan *o, const Load *r, LoadPlan *lp)
 {
   ld = const_cast<Load*>(r);
   oper = o;
@@ -99,7 +99,7 @@ DECLARE_EXPORT LoadPlan::LoadPlan(OperationPlan *o, const Load *r, LoadPlan *lp)
   res = lp->getResource();
 
   // Add to the operationplan
-  nextLoadPlan = NULL;
+  nextLoadPlan = nullptr;
   if (o->firstloadplan)
   {
     // Append to the end
@@ -123,13 +123,13 @@ DECLARE_EXPORT LoadPlan::LoadPlan(OperationPlan *o, const Load *r, LoadPlan *lp)
 }
 
 
-DECLARE_EXPORT void LoadPlan::setResource(Resource* newres, bool check)
+void LoadPlan::setResource(Resource* newres, bool check)
 {
   // Nothing to do
   if (res == newres) return;
 
   // Validate the argument
-  if (!newres) throw DataException("Can't switch to NULL resource");
+  if (!newres) throw DataException("Can't switch to nullptr resource");
   if (check)
   {
     // New resource must be a subresource of the load's resource.
@@ -167,7 +167,7 @@ DECLARE_EXPORT void LoadPlan::setResource(Resource* newres, bool check)
         && res && res->getSetupMatrix();
     bool newHasSetup = ld && !ld->getSetup().empty()
         && newres->getSetupMatrix();
-    OperationPlan *setupOpplan = NULL;
+    OperationPlan *setupOpplan = nullptr;
     if (oldHasSetup)
     {
       for (OperationPlan::iterator i(oper); i != oper->end(); ++i)
@@ -183,7 +183,7 @@ DECLARE_EXPORT void LoadPlan::setResource(Resource* newres, bool check)
       if (newHasSetup)
       {
         // Case 1: Both the old and new load require a setup
-        LoadPlan *setupLdplan = NULL;
+        LoadPlan *setupLdplan = nullptr;
         for (OperationPlan::LoadPlanIterator j = setupOpplan->beginLoadPlans();
             j != setupOpplan->endLoadPlans(); ++j)
           if (j->getLoad() == ld)
@@ -208,7 +208,7 @@ DECLARE_EXPORT void LoadPlan::setResource(Resource* newres, bool check)
       {
         // Case 3: Create a new setup operationplan
         OperationSetup::setupoperation->createOperationPlan(
-          1, Date::infinitePast, oper->getDates().getEnd(), NULL, oper);
+          1, Date::infinitePast, oper->getDates().getEnd(), nullptr, oper);
       }
       //else:
       // Case 4: No setup for the old or new load
@@ -216,7 +216,7 @@ DECLARE_EXPORT void LoadPlan::setResource(Resource* newres, bool check)
   }
 
   // Find the loadplan before the setup
-  LoadPlan *prevldplan = NULL;
+  LoadPlan *prevldplan = nullptr;
   if (getOperationPlan()->getOperation() == OperationSetup::setupoperation)
   {
     for (TimeLine<LoadPlan>::const_iterator i = getResource()->getLoadPlans().begin(isStart() ? getOtherLoadPlan() : this);
@@ -281,7 +281,7 @@ DECLARE_EXPORT void LoadPlan::setResource(Resource* newres, bool check)
 }
 
 
-DECLARE_EXPORT LoadPlan* LoadPlan::getOtherLoadPlan() const
+LoadPlan* LoadPlan::getOtherLoadPlan() const
 {
   for (LoadPlan *i = oper->firstloadplan; i; i = i->nextLoadPlan)
     if (i->ld == ld && i != this) return i;
@@ -289,7 +289,7 @@ DECLARE_EXPORT LoadPlan* LoadPlan::getOtherLoadPlan() const
 }
 
 
-DECLARE_EXPORT void LoadPlan::update()
+void LoadPlan::update()
 {
   // Update the timeline data structure
   getResource()->getLoadPlans().update(
@@ -308,7 +308,7 @@ DECLARE_EXPORT void LoadPlan::update()
 }
 
 
-DECLARE_EXPORT string LoadPlan::getSetup(bool current) const
+string LoadPlan::getSetup(bool current) const
 {
   // This resource has no setupmatrix
   static string nosetup;
@@ -332,10 +332,10 @@ DECLARE_EXPORT string LoadPlan::getSetup(bool current) const
 }
 
 
-DECLARE_EXPORT LoadPlan::~LoadPlan()
+LoadPlan::~LoadPlan()
 {
   getResource()->setChanged();
-  LoadPlan *prevldplan = NULL;
+  LoadPlan *prevldplan = nullptr;
   if (!isStart() && oper->getOperation() == OperationSetup::setupoperation)
   {
     for (TimeLine<LoadPlan>::const_iterator i = getResource()->getLoadPlans().begin(isStart() ? getOtherLoadPlan() : this);
@@ -371,13 +371,13 @@ DECLARE_EXPORT LoadPlan::~LoadPlan()
 }
 
 
-DECLARE_EXPORT void LoadPlan::setLoad(Load* newld)
+void LoadPlan::setLoad(Load* newld)
 {
   // No change
   if (newld == ld) return;
 
   // Verify the data
-  if (!newld) throw DataException("Can't switch to NULL load");
+  if (!newld) throw DataException("Can't switch to nullptr load");
   if (ld && ld->getOperation() != newld->getOperation())
     throw DataException("Only switching to a load on the same operation is allowed");
 
@@ -408,7 +408,7 @@ PyObject* LoadPlanIterator::iternext()
     // Skip zero quantity loadplans
     while (*resiter != res->getLoadPlans().end() && (*resiter)->getQuantity()==0.0)
       ++(*resiter);
-    if (*resiter == res->getLoadPlans().end()) return NULL;
+    if (*resiter == res->getLoadPlans().end()) return nullptr;
 
     // Return result
     ld = const_cast<LoadPlan*>(static_cast<const LoadPlan*>(&*((*resiter)++)));
@@ -417,7 +417,7 @@ PyObject* LoadPlanIterator::iternext()
   {
     while (*opplaniter != opplan->endLoadPlans() && (*opplaniter)->getQuantity()==0.0)
       ++(*opplaniter);
-    if (*opplaniter == opplan->endLoadPlans()) return NULL;
+    if (*opplaniter == opplan->endLoadPlans()) return nullptr;
     ld = static_cast<LoadPlan*>(&*((*opplaniter)++));
   }
   Py_INCREF(ld);

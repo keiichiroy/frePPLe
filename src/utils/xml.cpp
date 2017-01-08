@@ -57,7 +57,7 @@ namespace frepple
 namespace utils
 {
 
-xercesc::XMLTranscoder* XMLInput::utf8_encoder = NULL;
+xercesc::XMLTranscoder* XMLInput::utf8_encoder = nullptr;
 
 
 char* XMLInput::transcodeUTF8(const XMLCh* xercesChars)
@@ -72,9 +72,7 @@ char* XMLInput::transcodeUTF8(const XMLCh* xercesChars)
 }
 
 
-DECLARE_EXPORT XMLInput::XMLInput() : parser(NULL), objects(maxobjects),
-  data(maxdata), objectindex(-1), dataindex(-1), numElements(-1),
-  reading(false), ignore(0), abortOnDataException(true)
+XMLInput::XMLInput() : objects(maxobjects), data(maxdata)
 {
   if (!utf8_encoder)
   {
@@ -86,7 +84,7 @@ DECLARE_EXPORT XMLInput::XMLInput() : parser(NULL), objects(maxobjects),
 }
 
 
-DECLARE_EXPORT void  XMLInput::processingInstruction
+void  XMLInput::processingInstruction
 (const XMLCh *const target, const XMLCh *const data)
 {
   char* type = xercesc::XMLString::transcode(target);
@@ -126,7 +124,7 @@ DECLARE_EXPORT void  XMLInput::processingInstruction
 }
 
 
-DECLARE_EXPORT void XMLInput::startElement(const XMLCh* const uri,
+void XMLInput::startElement(const XMLCh* const uri,
   const XMLCh* const ename, const XMLCh* const qname,
   const xercesc::Attributes& atts)
 {
@@ -158,7 +156,7 @@ DECLARE_EXPORT void XMLInput::startElement(const XMLCh* const uri,
 
   // Look up the field
   data[dataindex].hash = Keyword::hash(ename_utf8);
-  data[dataindex].field = NULL;
+  data[dataindex].field = nullptr;
   if (dataindex >= 1 && data[dataindex-1].field && data[dataindex-1].field->isGroup()
     && data[dataindex].hash == data[dataindex-1].field->getKeyword()->getHash())
   {
@@ -168,7 +166,7 @@ DECLARE_EXPORT void XMLInput::startElement(const XMLCh* const uri,
       // You're joking?
       throw DataException("XML-document nested excessively deep");
     // New object on the stack
-    objects[objectindex].object = NULL;
+    objects[objectindex].object = nullptr;
     objects[objectindex].start = dataindex;
     objects[objectindex].cls = data[dataindex-1].field->getClass();
     objects[objectindex].hash = data[dataindex].hash;
@@ -227,7 +225,7 @@ DECLARE_EXPORT void XMLInput::startElement(const XMLCh* const uri,
       else if (data[dataindex].hash == Tags::action.getHash())
       {
         // Action attribute is special, as it's not a field
-        data[dataindex].field = NULL;
+        data[dataindex].field = nullptr;
       }
       else
       {
@@ -309,7 +307,7 @@ DECLARE_EXPORT void XMLInput::startElement(const XMLCh* const uri,
       throw DataException("XML-document with elements nested excessively deep");
 
     // New object on the stack
-    objects[objectindex].object = NULL;
+    objects[objectindex].object = nullptr;
     objects[objectindex].cls = data[dataindex].field->getClass();
     objects[objectindex].start = dataindex + 1;
     objects[objectindex].hash = Keyword::hash(ename_utf8);
@@ -369,7 +367,7 @@ DECLARE_EXPORT void XMLInput::startElement(const XMLCh* const uri,
       else if (data[dataindex].hash == Tags::action.getHash())
       {
         // Action attribute is special, as it's not a field
-        data[dataindex].field = NULL;
+        data[dataindex].field = nullptr;
       }
       else
       {
@@ -389,7 +387,7 @@ DECLARE_EXPORT void XMLInput::startElement(const XMLCh* const uri,
 }
 
 
-DECLARE_EXPORT void XMLInput::endElement(const XMLCh* const uri,
+void XMLInput::endElement(const XMLCh* const uri,
     const XMLCh* const ename,
     const XMLCh* const qname)
 {
@@ -426,7 +424,7 @@ DECLARE_EXPORT void XMLInput::endElement(const XMLCh* const uri,
     #ifdef PARSE_DEBUG
     logger << "Updating field " << data[dataindex].field->getName().getName() << " on the root object" << endl;
     #endif
-    data[dataindex].field->setField(objects[objectindex].object, data[dataindex].value);
+    data[dataindex].field->setField(objects[objectindex].object, data[dataindex].value, getCommandManager());
     --dataindex;
   }
 
@@ -461,7 +459,7 @@ DECLARE_EXPORT void XMLInput::endElement(const XMLCh* const uri,
 
     // Check if we need to add a parent object to the dict
     bool found_parent = false;
-    if (objects[objectindex].cls->parent)
+    if (objectindex > 0 && objects[objectindex].cls->parent)
     {
       assert(objects[objectindex-1].cls);
       const MetaClass* cl = objects[objectindex-1].cls;
@@ -488,7 +486,8 @@ DECLARE_EXPORT void XMLInput::endElement(const XMLCh* const uri,
                 objects[objectindex-1].object =
                   objects[objectindex-1].cls->category->readFunction(
                     objects[objectindex-1].cls,
-                    dict_parent
+                    dict_parent,
+                    getCommandManager()
                     );
               }
               else
@@ -497,7 +496,8 @@ DECLARE_EXPORT void XMLInput::endElement(const XMLCh* const uri,
                 objects[objectindex-1].object =
                   static_cast<const MetaCategory*>(objects[objectindex-1].cls)->readFunction(
                     objects[objectindex-1].cls,
-                    dict_parent
+                    dict_parent,
+                    getCommandManager()
                     );
               }
               // Set fields already available now on the parent object
@@ -507,17 +507,25 @@ DECLARE_EXPORT void XMLInput::endElement(const XMLCh* const uri,
                   continue;
                 if (data[idx].field && !data[idx].field->isGroup())
                 {
-                    data[idx].field->setField(objects[objectindex-1].object, data[idx].value);
-                    data[idx].field = NULL; // Mark as already applied
+                    data[idx].field->setField(objects[objectindex-1].object, data[idx].value, getCommandManager());
+                    data[idx].field = nullptr; // Mark as already applied
                 }
                 else if (data[idx].hash == Tags::booleanproperty.getHash())
-                  objects[objectindex].object->setProperty(data[idx].name, data[idx].value, 1);
+                  objects[objectindex].object->setProperty(
+                    data[idx].name, data[idx].value, 1, getCommandManager()
+                    );
                 else if (data[idx].hash == Tags::dateproperty.getHash())
-                  objects[objectindex].object->setProperty(data[idx].name, data[idx].value, 2);
+                  objects[objectindex].object->setProperty(
+                    data[idx].name, data[idx].value, 2, getCommandManager()
+                    );
                 else if (data[idx].hash == Tags::doubleproperty.getHash())
-                  objects[objectindex].object->setProperty(data[idx].name, data[idx].value, 3);
+                  objects[objectindex].object->setProperty(
+                    data[idx].name, data[idx].value, 3, getCommandManager()
+                    );
                 else if (data[idx].hash == Tags::stringproperty.getHash())
-                  objects[objectindex].object->setProperty(data[idx].name, data[idx].value, 4);
+                  objects[objectindex].object->setProperty(
+                    data[idx].name, data[idx].value, 4, getCommandManager()
+                    );
               }
 
             }
@@ -531,7 +539,7 @@ DECLARE_EXPORT void XMLInput::endElement(const XMLCh* const uri,
           }
         }
     }
-    if (!found_parent && objects[objectindex].cls->category && objects[objectindex].cls->category->parent)
+    if (!found_parent && objectindex > 0 && objects[objectindex].cls->category && objects[objectindex].cls->category->parent)
     {
       assert(objects[objectindex-1].cls);
       const MetaClass* cl = objects[objectindex-1].cls;
@@ -558,7 +566,8 @@ DECLARE_EXPORT void XMLInput::endElement(const XMLCh* const uri,
                 objects[objectindex-1].object =
                   objects[objectindex-1].cls->category->readFunction(
                     objects[objectindex-1].cls,
-                    dict_parent
+                    dict_parent,
+                    getCommandManager()
                     );
               }
               else
@@ -567,7 +576,8 @@ DECLARE_EXPORT void XMLInput::endElement(const XMLCh* const uri,
                 objects[objectindex-1].object =
                   static_cast<const MetaCategory*>(objects[objectindex-1].cls)->readFunction(
                     objects[objectindex-1].cls,
-                    dict_parent
+                    dict_parent,
+                    getCommandManager()
                     );
               }
               // Set fields already available now on the parent object
@@ -577,17 +587,25 @@ DECLARE_EXPORT void XMLInput::endElement(const XMLCh* const uri,
                   continue;
                 if (data[idx].field && !data[idx].field->isGroup())
                 {
-                    data[idx].field->setField(objects[objectindex-1].object, data[idx].value);
-                    data[idx].field = NULL; // Mark as already applied
+                    data[idx].field->setField(objects[objectindex-1].object, data[idx].value, getCommandManager());
+                    data[idx].field = nullptr; // Mark as already applied
                 }
                 else if (data[idx].hash == Tags::booleanproperty.getHash())
-                  objects[objectindex].object->setProperty(data[idx].name, data[idx].value, 1);
+                  objects[objectindex].object->setProperty(
+                    data[idx].name, data[idx].value, 1, getCommandManager()
+                    );
                 else if (data[idx].hash == Tags::dateproperty.getHash())
-                  objects[objectindex].object->setProperty(data[idx].name, data[idx].value, 2);
+                  objects[objectindex].object->setProperty(
+                    data[idx].name, data[idx].value, 2, getCommandManager()
+                    );
                 else if (data[idx].hash == Tags::doubleproperty.getHash())
-                  objects[objectindex].object->setProperty(data[idx].name, data[idx].value, 3);
+                  objects[objectindex].object->setProperty(
+                    data[idx].name, data[idx].value, 3, getCommandManager()
+                    );
                 else if (data[idx].hash == Tags::stringproperty.getHash())
-                  objects[objectindex].object->setProperty(data[idx].name, data[idx].value, 4);
+                  objects[objectindex].object->setProperty(
+                    data[idx].name, data[idx].value, 4, getCommandManager()
+                    );
               }
             }
             // Add reference to parent to the current dict
@@ -622,7 +640,8 @@ DECLARE_EXPORT void XMLInput::endElement(const XMLCh* const uri,
         objects[objectindex].object =
           objects[objectindex].cls->category->readFunction(
             objects[objectindex].cls,
-            dict
+            dict,
+            getCommandManager()
             );
       }
       else
@@ -631,7 +650,8 @@ DECLARE_EXPORT void XMLInput::endElement(const XMLCh* const uri,
         objects[objectindex].object =
           static_cast<const MetaCategory*>(objects[objectindex].cls)->readFunction(
             objects[objectindex].cls,
-            dict
+            dict,
+            getCommandManager()
             );
       }
     }
@@ -644,15 +664,23 @@ DECLARE_EXPORT void XMLInput::endElement(const XMLCh* const uri,
         if (data[idx].hash == Tags::type.getHash() || data[idx].hash == Tags::action.getHash())
           continue;
         if (data[idx].field && !data[idx].field->isGroup())
-          data[idx].field->setField(objects[objectindex].object, data[idx].value);
+          data[idx].field->setField(objects[objectindex].object, data[idx].value, getCommandManager());
         else if (data[idx].hash == Tags::booleanproperty.getHash())
-          objects[objectindex].object->setProperty(data[idx].name, data[idx].value, 1);
+          objects[objectindex].object->setProperty(
+            data[idx].name, data[idx].value, 1, getCommandManager()
+            );
         else if (data[idx].hash == Tags::dateproperty.getHash())
-          objects[objectindex].object->setProperty(data[idx].name, data[idx].value, 2);
+          objects[objectindex].object->setProperty(
+            data[idx].name, data[idx].value, 2, getCommandManager()
+            );
         else if (data[idx].hash == Tags::doubleproperty.getHash())
-          objects[objectindex].object->setProperty(data[idx].name, data[idx].value, 3);
+          objects[objectindex].object->setProperty(
+            data[idx].name, data[idx].value, 3, getCommandManager()
+            );
         else if (data[idx].hash == Tags::stringproperty.getHash())
-          objects[objectindex].object->setProperty(data[idx].name, data[idx].value, 4);
+          objects[objectindex].object->setProperty(
+            data[idx].name, data[idx].value, 4, getCommandManager()
+            );
       }
     }
 
@@ -675,14 +703,14 @@ DECLARE_EXPORT void XMLInput::endElement(const XMLCh* const uri,
 }
 
 
-DECLARE_EXPORT void XMLInput::characters(const XMLCh *const c, const XMLSize_t n)
+void XMLInput::characters(const XMLCh *const c, const XMLSize_t n)
 {
   if (reading && dataindex >= 0)
     data[dataindex].value.appendString(transcodeUTF8(c));
 }
 
 
-DECLARE_EXPORT void XMLInput::warning(const xercesc::SAXParseException& e)
+void XMLInput::warning(const xercesc::SAXParseException& e)
 {
   char* message = xercesc::XMLString::transcode(e.getMessage());
   logger << "Warning: " << message;
@@ -693,7 +721,7 @@ DECLARE_EXPORT void XMLInput::warning(const xercesc::SAXParseException& e)
 }
 
 
-DECLARE_EXPORT void XMLInput::fatalError(const xercesc::SAXParseException& e)
+void XMLInput::fatalError(const xercesc::SAXParseException& e)
 {
   char* message = xercesc::XMLString::transcode(e.getMessage());
   ostringstream ch;
@@ -705,7 +733,7 @@ DECLARE_EXPORT void XMLInput::fatalError(const xercesc::SAXParseException& e)
 }
 
 
-DECLARE_EXPORT void XMLInput::error(const xercesc::SAXParseException& e)
+void XMLInput::error(const xercesc::SAXParseException& e)
 {
   char* message = xercesc::XMLString::transcode(e.getMessage());
   ostringstream ch;
@@ -717,7 +745,7 @@ DECLARE_EXPORT void XMLInput::error(const xercesc::SAXParseException& e)
 }
 
 
-DECLARE_EXPORT XMLInput::~XMLInput()
+XMLInput::~XMLInput()
 {
   // Delete the xerces parser object
   delete parser;
@@ -759,7 +787,7 @@ void XMLInput::parse(xercesc::InputSource &in, Object *pRoot, bool validate)
 
     if (pRoot)
     {
-      // Set the event handler. If we are reading into a NULL object, there is
+      // Set the event handler. If we are reading into a nullptr object, there is
       // no need to use a content handler.
       parser->setContentHandler(this);
 
@@ -797,13 +825,13 @@ void XMLInput::parse(xercesc::InputSource &in, Object *pRoot, bool validate)
     string msg(message);
     xercesc::XMLString::release(&message);
     delete parser;
-    parser = NULL;
+    parser = nullptr;
     throw RuntimeException("Parsing error: " + msg);
   }
   catch (const exception& toCatch)
   {
     delete parser;
-    parser = NULL;
+    parser = nullptr;
     ostringstream msg;
     msg << "Error during XML parsing: " << toCatch.what();
     throw RuntimeException(msg.str());
@@ -811,16 +839,16 @@ void XMLInput::parse(xercesc::InputSource &in, Object *pRoot, bool validate)
   catch (...)
   {
     delete parser;
-    parser = NULL;
+    parser = nullptr;
     throw RuntimeException(
       "Parsing error: Unexpected exception during XML parsing");
   }
   delete parser;
-  parser = NULL;
+  parser = nullptr;
 }
 
 
-DECLARE_EXPORT void XMLSerializer::escape(const string& x)
+void XMLSerializer::escape(const string& x)
 {
   for (const char* p = x.c_str(); *p; ++p)
   {
@@ -837,7 +865,7 @@ DECLARE_EXPORT void XMLSerializer::escape(const string& x)
 }
 
 
-DECLARE_EXPORT void XMLSerializer::incIndent()
+void XMLSerializer::incIndent()
 {
   indentstring[m_nIndent++] = '\t';
   if (m_nIndent > 40) m_nIndent = 40;
@@ -845,14 +873,14 @@ DECLARE_EXPORT void XMLSerializer::incIndent()
 }
 
 
-DECLARE_EXPORT void XMLSerializer::decIndent()
+void XMLSerializer::decIndent()
 {
   if (--m_nIndent < 0) m_nIndent = 0;
   indentstring[m_nIndent] = '\0';
 }
 
 
-DECLARE_EXPORT void Serializer::setContentType(const string& c)
+void Serializer::setContentType(const string& c)
 {
   if (c == "base")
     setContentType(BASE);
@@ -866,10 +894,10 @@ DECLARE_EXPORT void Serializer::setContentType(const string& c)
 }
 
 
-DECLARE_EXPORT void Serializer::writeElement
+void Serializer::writeElement
 (const Keyword& tag, const Object* object, FieldCategory m)
 {
-  // Avoid NULL pointers and skip hidden objects
+  // Avoid nullptr pointers and skip hidden objects
   if (!object || (object->getHidden() && !writeHidden))
     return;
 
@@ -878,7 +906,6 @@ DECLARE_EXPORT void Serializer::writeElement
   parentObject = currentObject;
   currentObject = object;
   ++numObjects;
-  ++numParents;
 
   // Call the write method on the object
   if (m != BASE)
@@ -888,21 +915,20 @@ DECLARE_EXPORT void Serializer::writeElement
     // Choose wether to save a reference of the object.
     // The root object can't be saved as a reference.
     object->writeElement(
-      this, tag, numParents > 2 ? MANDATORY : BASE
+      this, tag, getSaveReferences() ? MANDATORY : content
       );
 
   // Adjust current and parent object pointer
-  --numParents;
   currentObject = parentObject;
   parentObject = previousParent;
 }
 
 
-DECLARE_EXPORT void XMLSerializer::writeElementWithHeader(const Keyword& tag, const Object* object)
+void XMLSerializer::writeElementWithHeader(const Keyword& tag, const Object* object)
 {
   // Root object can't be null...
   if (!object)
-    throw RuntimeException("Can't accept a NULL object as XML root");
+    throw RuntimeException("Can't accept a nullptr object as XML root");
 
   // There should not be any saved objects yet
   if (numObjects > 0)
@@ -918,48 +944,22 @@ DECLARE_EXPORT void XMLSerializer::writeElementWithHeader(const Keyword& tag, co
 
   // Write the object
   ++numObjects;
-  ++numParents;
   BeginObject(tag, getHeaderAtts());
   skipHead();
   object->writeElement(this, tag, getContentType());
 
   // Adjust current and parent object pointer
-  currentObject = NULL;
-  parentObject = NULL;
+  currentObject = nullptr;
+  parentObject = nullptr;
 }
 
 
-DECLARE_EXPORT void XMLSerializer::writeHeader(const Keyword& t)
-{
-  // Write the first line and the opening tag
-  writeString(getHeaderStart());
-  *m_fp << indentstring << t.stringStartElement() << " " << headerAtts << ">\n";
-  incIndent();
-
-  // Fake a dummy parent
-  numParents += 2;
-}
-
-
-DECLARE_EXPORT void XMLSerializer::writeHeader(const Keyword& t, const Keyword& t1, const string& val1)
-{
-  // Write the first line and the opening tag
-  writeString(getHeaderStart());
-  *m_fp << indentstring << t.stringStartElement() << " " << headerAtts
-    << t1.stringAttribute() << val1 << "\">\n";
-  incIndent();
-
-  // Fake a dummy parent
-  numParents += 2;
-}
-
-
-DECLARE_EXPORT const XMLData* XMLDataValueDict::get(const Keyword& key) const
+const XMLData* XMLDataValueDict::get(const Keyword& key) const
 {
   for (int i = strt; i <= nd; ++i)
     if (fields[i].hash == key.getHash())
       return &fields[i].value;
-  return NULL;
+  return nullptr;
 }
 
 
@@ -980,7 +980,7 @@ void XMLDataValueDict::print()
 }
 
 
-DECLARE_EXPORT bool XMLData::getBool() const
+bool XMLData::getBool() const
 {
   switch (getData()[0])
   {
@@ -997,7 +997,7 @@ DECLARE_EXPORT bool XMLData::getBool() const
 }
 
 
-DECLARE_EXPORT const char* DataKeyword::getName() const
+const char* DataKeyword::getName() const
 {
   if (ch) return ch;
   Keyword::tagtable::const_iterator i = Keyword::getTags().find(hash);
@@ -1007,7 +1007,7 @@ DECLARE_EXPORT const char* DataKeyword::getName() const
 }
 
 
-DECLARE_EXPORT Keyword::Keyword(const string& name) : strName(name)
+Keyword::Keyword(const string& name) : strName(name)
 {
   // Error condition: name is empty
   if (name.empty()) throw LogicException("Creating keyword without name");
@@ -1017,6 +1017,7 @@ DECLARE_EXPORT Keyword::Keyword(const string& name) : strName(name)
   strEndElement = string("</") + name + ">\n";
   strElement = string("<") + name + ">";
   strAttribute = string(" ") + name + "=\"";
+  strQuoted = string("\"") + name + "\":";
 
   // Compute the hash value
   dw = hash(name.c_str());
@@ -1026,7 +1027,7 @@ DECLARE_EXPORT Keyword::Keyword(const string& name) : strName(name)
 }
 
 
-DECLARE_EXPORT Keyword::Keyword(const string& name, const string& nspace)
+Keyword::Keyword(const string& name, const string& nspace)
   : strName(name)
 {
   // Error condition: name is empty
@@ -1040,6 +1041,7 @@ DECLARE_EXPORT Keyword::Keyword(const string& name, const string& nspace)
   strEndElement = string("</") + nspace + ":" + name + ">\n";
   strElement = string("<") + nspace + ":" + name + ">";
   strAttribute = string(" ") + nspace + ":" + name + "=\"";
+  strQuoted = string("\"") + name + "\":";
 
   // Compute the hash value
   dw = hash(name);
@@ -1053,9 +1055,9 @@ void Keyword::check()
 {
   // To be thread-safe we make sure only a single thread at a time
   // can execute this check.
-  static Mutex dd;
+  static mutex dd;
   {
-    ScopeMutexLock l(dd);
+    lock_guard<mutex> l(dd);
     tagtable::const_iterator i = getTags().find(dw);
     if (i!=getTags().end() && i->second->getName()!=strName)
       throw LogicException("Tag XML-tag hash function clashes for "
@@ -1065,7 +1067,7 @@ void Keyword::check()
 }
 
 
-DECLARE_EXPORT Keyword::~Keyword()
+Keyword::~Keyword()
 {
   // Remove from the tag list
   tagtable::iterator i = getTags().find(dw);
@@ -1073,21 +1075,21 @@ DECLARE_EXPORT Keyword::~Keyword()
 }
 
 
-DECLARE_EXPORT const Keyword& Keyword::find(const char* name)
+const Keyword& Keyword::find(const char* name)
 {
   tagtable::const_iterator i = getTags().find(hash(name));
   return *(i!=getTags().end() ? i->second : new Keyword(name));
 }
 
 
-DECLARE_EXPORT Keyword::tagtable& Keyword::getTags()
+Keyword::tagtable& Keyword::getTags()
 {
   static tagtable alltags;
   return alltags;
 }
 
 
-DECLARE_EXPORT hashtype Keyword::hash(const char* c)
+hashtype Keyword::hash(const char* c)
 {
   if (c == 0 || *c == 0) return 0;
 
@@ -1102,14 +1104,14 @@ DECLARE_EXPORT hashtype Keyword::hash(const char* c)
 }
 
 
-DECLARE_EXPORT void Keyword::printTags()
+void Keyword::printTags()
 {
   for (tagtable::iterator i = getTags().begin(); i != getTags().end(); ++i)
     logger << i->second->getName() << "   " << i->second->dw << endl;
 }
 
 
-DECLARE_EXPORT void XMLInputFile::parse(Object *pRoot, bool validate)
+void XMLInputFile::parse(Object *pRoot, bool validate)
 {
   // Check if string has been set
   if (filename.empty())
@@ -1141,7 +1143,7 @@ DECLARE_EXPORT void XMLInputFile::parse(Object *pRoot, bool validate)
   #elif HAVE_DIRENT_H
     struct dirent *dir_entry_p;
     DIR *dir_p = opendir(filename.c_str());
-    while (NULL != (dir_entry_p = readdir(dir_p)))
+    while (nullptr != (dir_entry_p = readdir(dir_p)))
     {
       int n = NAMLEN(dir_entry_p);
       if (n > 4 && !strcmp(".xml", dir_entry_p->d_name + n - 4))

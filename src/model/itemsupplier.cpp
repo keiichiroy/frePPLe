@@ -24,9 +24,9 @@
 namespace frepple
 {
 
-DECLARE_EXPORT const MetaCategory* ItemSupplier::metacategory;
-DECLARE_EXPORT const MetaClass* ItemSupplier::metadata;
-DECLARE_EXPORT const MetaClass* OperationItemSupplier::metadata;
+const MetaCategory* ItemSupplier::metacategory;
+const MetaClass* ItemSupplier::metadata;
+const MetaClass* OperationItemSupplier::metadata;
 
 
 int ItemSupplier::initialize()
@@ -54,7 +54,7 @@ int ItemSupplier::initialize()
 }
 
 
-DECLARE_EXPORT ItemSupplier::~ItemSupplier()
+ItemSupplier::~ItemSupplier()
 {
   // Delete the association from the related objects
   if (getSupplier())
@@ -71,8 +71,7 @@ DECLARE_EXPORT ItemSupplier::~ItemSupplier()
 }
 
 
-DECLARE_EXPORT ItemSupplier::ItemSupplier() : loc(NULL),
-  size_minimum(1.0), size_multiple(0.0), cost(0.0), firstOperation(NULL)
+ItemSupplier::ItemSupplier()
 {
   initType(metadata);
 
@@ -81,8 +80,7 @@ DECLARE_EXPORT ItemSupplier::ItemSupplier() : loc(NULL),
 }
 
 
-DECLARE_EXPORT ItemSupplier::ItemSupplier(Supplier* s, Item* r, int u)
-  : loc(NULL), size_minimum(1.0), size_multiple(0.0), cost(0.0), firstOperation(NULL)
+ItemSupplier::ItemSupplier(Supplier* s, Item* r, int u)
 {
   setSupplier(s);
   setItem(r);
@@ -94,8 +92,7 @@ DECLARE_EXPORT ItemSupplier::ItemSupplier(Supplier* s, Item* r, int u)
 }
 
 
-DECLARE_EXPORT ItemSupplier::ItemSupplier(Supplier* s, Item* r, int u, DateRange e)
-  : loc(NULL), size_minimum(1.0), size_multiple(0.0), cost(0.0), firstOperation(NULL)
+ItemSupplier::ItemSupplier(Supplier* s, Item* r, int u, DateRange e)
 {
   setSupplier(s);
   setItem(r);
@@ -165,7 +162,7 @@ PyObject* ItemSupplier::create(PyTypeObject* pytype, PyObject* args, PyObject* k
         Py_DECREF(key_utf8);
         if (!attr.isA(Tags::effective_end) && !attr.isA(Tags::effective_start)
           && !attr.isA(Tags::supplier) && !attr.isA(Tags::item)
-          && !attr.isA(Tags::type) && !attr.isA(Tags::action))
+          && !attr.isA(Tags::type) && !attr.isA(Tags::priority) && !attr.isA(Tags::action))
         {
           const MetaFieldBase* fmeta = l->getType().findField(attr.getHash());
           if (!fmeta && l->getType().category)
@@ -186,12 +183,12 @@ PyObject* ItemSupplier::create(PyTypeObject* pytype, PyObject* args, PyObject* k
   catch (...)
   {
     PythonType::evalException();
-    return NULL;
+    return nullptr;
   }
 }
 
 
-DECLARE_EXPORT void ItemSupplier::deleteOperationPlans(bool b)
+void ItemSupplier::deleteOperationPlans(bool b)
 {
   for (OperationItemSupplier* i = firstOperation; i; i = i->nextOperation)
     i->deleteOperationPlans(b);
@@ -210,16 +207,14 @@ int OperationItemSupplier::initialize()
   PythonType& x = FreppleCategory<OperationItemSupplier>::getPythonType();
   x.setName("operation_itemsupplier");
   x.setDoc("frePPLe operation_itemsupplier");
-  x.addMethod("createOrder", createOrder,
-    METH_STATIC | METH_VARARGS | METH_KEYWORDS,
-    "Create an operationplan representing a purchase order");
   x.supportgetattro();
+  x.supportsetattro();
   const_cast<MetaClass*>(metadata)->pythonClass = x.type_object();
   return x.typeReady();
 }
 
 
-DECLARE_EXPORT OperationItemSupplier* OperationItemSupplier::findOrCreate(
+OperationItemSupplier* OperationItemSupplier::findOrCreate(
   ItemSupplier* i, Buffer *b
   )
 {
@@ -245,7 +240,7 @@ DECLARE_EXPORT OperationItemSupplier* OperationItemSupplier::findOrCreate(
 }
 
 
-DECLARE_EXPORT OperationItemSupplier::OperationItemSupplier(
+OperationItemSupplier::OperationItemSupplier(
   ItemSupplier* i, Buffer *b
   ) : supitem(i)
 {
@@ -263,31 +258,19 @@ DECLARE_EXPORT OperationItemSupplier::OperationItemSupplier(
   setLocation(b->getLocation());
   setSource(i->getSource());
   setCost(i->getCost());
+  setFence(i->getFence());
   setHidden(true);
-  FlowEnd* fl = new FlowEnd(this, b, 1);
+  new FlowEnd(this, b, 1);
   initType(metadata);
 
+  // Optionally, create a load
+  if (i->getResource())
+    new LoadDefault(this, i->getResource(), i->getResourceQuantity());
+
   // Insert in the list of ItemSupplier operations.
-  // We keep the list sorted by the operation name.
-  if (!i->firstOperation || getName() < i->firstOperation->getName())
-  {
-    // New head of the list
-    nextOperation = i->firstOperation;
-    i->firstOperation = this;
-  }
-  else
-  {
-    // Insert in the middle or at the tail
-    OperationItemSupplier* o = i->firstOperation;
-    while (o->nextOperation)
-    {
-      if (b->getName() < o->nextOperation->getName())
-        break;
-      o = o->nextOperation;
-    }
-    nextOperation = o->nextOperation;
-    o->nextOperation = this;
-  }
+  // The list is not sorted (for performance reasons).
+  nextOperation = i->firstOperation;
+  i->firstOperation = this;
 }
 
 
@@ -308,7 +291,7 @@ OperationItemSupplier::~OperationItemSupplier()
       while (i->nextOperation != this && i->nextOperation)
         i = i->nextOperation;
       if (!i)
-        throw LogicException("ItemSupplier operation list corrupted");
+        logger << "Error: ItemSupplier operation list corrupted" << endl;
       else
         i->nextOperation = nextOperation;
     }
@@ -316,163 +299,93 @@ OperationItemSupplier::~OperationItemSupplier()
 }
 
 
-DECLARE_EXPORT Buffer* OperationItemSupplier::getBuffer() const
+Buffer* OperationItemSupplier::getBuffer() const
 {
   return getFlows().begin()->getBuffer();
 }
 
 
-extern "C" PyObject* OperationItemSupplier::createOrder(
-  PyObject *self, PyObject *args, PyObject *kwdict
-  )
+void OperationItemSupplier::trimExcess(bool zero_or_minimum) const
 {
-  // Parse the Python arguments
-  PyObject* pylocation = NULL;
-  unsigned long id = 0;
-  const char* ref = NULL;
-  PyObject* pyitem = NULL;
-  PyObject* pysupplier = NULL;
-  double qty = 0;
-  PyObject* pystart = NULL;
-  PyObject* pyend = NULL;
-  const char* status = NULL;
-  const char* source = NULL;
-  static const char *kwlist[] = {
-    "location", "id", "reference", "item", "supplier", "quantity", "start",
-    "end", "status", "source", NULL
-    };
-  int ok = PyArg_ParseTupleAndKeywords(
-    args, kwdict, "|OkzOOdOOzz:createOrder", const_cast<char**>(kwlist),
-    &pylocation, &id, &ref, &pyitem, &pysupplier, &qty, &pystart,
-    &pyend, &status, &source
-    );
-  if (!ok)
-    return NULL;
-  Date start = pystart ? PythonData(pystart).getDate() : Date::infinitePast;
-  Date end = pyend ? PythonData(pyend).getDate() : Date::infinitePast;
+  // This method can only trim operations not loading a resource
+  if (getLoads().begin() != getLoads().end())
+    return;
 
-  // Validate all arguments
-  if (!pylocation || !pyitem)
+  for (Operation::flowlist::const_iterator fliter = getFlows().begin();
+    fliter != getFlows().end(); ++fliter)
   {
-    PyErr_SetString(PythonDataException, "item and location arguments are mandatory");
-    return NULL;
-  }
-  PythonData location_tmp(pylocation);
-  if (!location_tmp.check(Location::metadata))
-  {
-    PyErr_SetString(PythonDataException, "location argument must be of type location");
-    return NULL;
-  }
-  PythonData item_tmp(pyitem);
-  if (!item_tmp.check(Item::metadata))
-  {
-    PyErr_SetString(PythonDataException, "item argument must be of type item");
-    return NULL;
-  }
-  PythonData supplier_tmp(pysupplier);
-  if (pysupplier && !supplier_tmp.check(Supplier::metadata))
-  {
-    PyErr_SetString(PythonDataException, "supplier argument must be of type supplier");
-    return NULL;
-  }
-  Item *item = static_cast<Item*>(item_tmp.getObject());
-  Location *location = static_cast<Location*>(location_tmp.getObject());
-  Supplier *supplier = pysupplier ? static_cast<Supplier*>(supplier_tmp.getObject()) : NULL;
-
-  // Find or create the destination buffer.
-  Buffer* destbuffer = NULL;
-  for (Buffer::iterator bufiter = Buffer::begin(); bufiter != Buffer::end(); ++bufiter)
-  {
-    if (bufiter->getLocation() == location && bufiter->getItem() == item)
-    {
-      if (destbuffer)
-      {
-        stringstream o;
-        o << "Multiple buffers found for item '" << item << "'' and location'" << location << "'";
-        throw DataException(o.str());
-      }
-      destbuffer = &*bufiter;
-    }
-  }
-  if (!destbuffer)
-  {
-    // Create the destination buffer
-    destbuffer = new BufferDefault();
-    stringstream o;
-    o << item << " @ " << location;
-    destbuffer->setName(o.str());
-    destbuffer->setItem(item);
-    destbuffer->setLocation(location);
-  }
-
-  // Build the producing operation for this buffer.
-  destbuffer->getProducingOperation();
-
-  // Look for a matching operation replenishing this buffer.
-  Operation *oper = NULL;
-  for (Buffer::flowlist::const_iterator flowiter = destbuffer->getFlows().begin();
-    flowiter != destbuffer->getFlows().end() && !oper; ++flowiter)
-  {
-    if (flowiter->getOperation()->getType() != *OperationItemSupplier::metadata)
+    if (fliter->getQuantity() <= 0)
+      // Strange, shouldn't really happen
       continue;
-    OperationItemSupplier* opitemsupplier = static_cast<OperationItemSupplier*>(flowiter->getOperation());
-    if (supplier)
+    FlowPlan* candidate = nullptr;
+    double curmin = 0;
+    double oh = 0;
+    double excess_min = DBL_MAX;
+
+    for (Buffer::flowplanlist::const_iterator flplniter = fliter->getBuffer()->getFlowPlans().begin();
+      flplniter != fliter->getBuffer()->getFlowPlans().end();
+      ++flplniter)
     {
-      if (supplier->isMemberOf(opitemsupplier->getItemSupplier()->getSupplier()))
-        oper = opitemsupplier;
+      // For any operationplan we get the onhand when its successor
+      // replenishment arrives. If that onhand is higher than the minimum
+      // onhand value we can resize it.
+      // This is only valid in unconstrained plans and when there are
+      // no upstream activities.
+      if (flplniter->getEventType() == 3 && zero_or_minimum)
+        curmin = flplniter->getMin();
+      else if (flplniter->getEventType() == 1)
+      {
+        const FlowPlan* flpln = static_cast<const FlowPlan*>(&*flplniter);
+        if (oh - curmin < excess_min)
+        {
+          excess_min = oh - curmin;
+          if (excess_min < 0)
+            excess_min = 0;
+        }
+        if (flpln->getQuantity() > 0 && !flpln->getOperationPlan()->getLocked() && (!candidate || candidate->getDate() != flpln->getDate()))
+        {
+          if (candidate
+            && excess_min > ROUNDING_ERROR
+            && candidate->getQuantity() > excess_min + ROUNDING_ERROR
+            && candidate->getQuantity() > getSizeMinimum() + ROUNDING_ERROR
+            )
+          {
+            // This candidate can now be resized
+            candidate->setQuantity(candidate->getQuantity() - excess_min, false);
+            candidate = nullptr;
+          }
+          else if (flpln->getOperation() == this)
+            candidate = const_cast<FlowPlan*>(flpln);
+          else
+            candidate = nullptr;
+          excess_min = DBL_MAX;
+        }
+      }
+      oh = flplniter->getOnhand();
     }
-    else
-      oper = opitemsupplier;
+    if (candidate
+      && excess_min > ROUNDING_ERROR
+      && candidate->getQuantity() > excess_min + ROUNDING_ERROR
+      && candidate->getQuantity() > getSizeMinimum() + ROUNDING_ERROR
+      )
+      // Resize the last candidate at the end of the horizon
+      candidate->setQuantity(candidate->getQuantity() - excess_min, false);
   }
-
-  // No matching operation is found.
-  if (!oper)
-  {
-    // We'll create one now, but that requires that we have a supplier defined.
-    if (!supplier)
-      throw DataException("Supplier is needed on this purchase order");
-    // Note: We know that we need to create a new one. An existing one would
-    // have created an operation on the buffer already.
-    ItemSupplier *itemsupplier = new ItemSupplier();
-    itemsupplier->setSupplier(supplier);
-    itemsupplier->setItem(item);
-    itemsupplier->setLocation(location);
-    oper = new OperationItemSupplier(itemsupplier, destbuffer);
-    new ProblemInvalidData(oper, "Purchase orders on unauthorized supplier", "operation",
-      Date::infinitePast, Date::infiniteFuture, 1);
-  }
-
-  // Finally, create the operationplan
-  OperationPlan *opplan = oper->createOperationPlan(qty, start, end);
-  if (id)
-    opplan->setIdentifier(id);
-  if (status)
-    opplan->setStatus(status);
-  // Reset quantity after the status update to assure that
-  // also non-valid quantities are getting accepted.
-  opplan->setQuantity(qty);
-  if (ref)
-    opplan->setReference(ref);
-  opplan->activate();
-
-  // Return result
-  Py_INCREF(opplan);
-  return opplan;
 }
 
 
-DECLARE_EXPORT Object* ItemSupplier::finder(const DataValueDict& d)
+Object* ItemSupplier::finder(const DataValueDict& d)
 {
   // Check item
   const DataValue* tmp = d.get(Tags::item);
   if (!tmp)
-    return NULL;
+    return nullptr;
   Item* item = static_cast<Item*>(tmp->getObject());
 
   // Check supplier field
   tmp = d.get(Tags::supplier);
   if (!tmp)
-    return NULL;
+    return nullptr;
   Supplier* sup = static_cast<Supplier*>(tmp->getObject());
 
   // Walk over all suppliers of the item, and return
@@ -502,7 +415,7 @@ DECLARE_EXPORT Object* ItemSupplier::finder(const DataValueDict& d)
       continue;
     return const_cast<ItemSupplier*>(&*fl);
   }
-  return NULL;
+  return nullptr;
 }
 
 }

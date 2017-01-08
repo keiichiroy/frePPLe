@@ -39,35 +39,35 @@ namespace utils
 {
 
 // Repository of all categories and commands
-DECLARE_EXPORT const MetaCategory* MetaCategory::firstCategory = NULL;
-DECLARE_EXPORT MetaCategory::CategoryMap MetaCategory::categoriesByTag;
-DECLARE_EXPORT MetaCategory::CategoryMap MetaCategory::categoriesByGroupTag;
+const MetaCategory* MetaCategory::firstCategory = nullptr;
+MetaCategory::CategoryMap MetaCategory::categoriesByTag;
+MetaCategory::CategoryMap MetaCategory::categoriesByGroupTag;
 
-DECLARE_EXPORT const MetaCategory* Object::metadata = NULL;
+const MetaCategory* Object::metadata = nullptr;
 
 // Generic Python type for timeline events
-DECLARE_EXPORT PythonType* EventPythonType = NULL;
+PythonType* EventPythonType = nullptr;
 
 // Repository of loaded modules
-DECLARE_EXPORT set<string> Environment::moduleRegistry;
+set<string> Environment::moduleRegistry;
 
 // Number of processors.
 // The value initialized here is updated when the getProcessorCores function
 // is called the first time.
-DECLARE_EXPORT int Environment::processorcores = -1;
+int Environment::processorcores = -1;
 
 // Output logging stream, whose input buffer is shared with either
 // Environment::logfile or cout.
-DECLARE_EXPORT ostream logger(cout.rdbuf());
+ostream logger(cout.rdbuf());
 
 // Output file stream
-DECLARE_EXPORT ofstream Environment::logfile;
+ofstream Environment::logfile;
 
 // Name of the log file
-DECLARE_EXPORT string Environment::logfilename;
+string Environment::logfilename;
 
 // Hash value computed only once
-DECLARE_EXPORT const hashtype MetaCategory::defaultHash(Keyword::hash("default"));
+const hashtype MetaCategory::defaultHash(Keyword::hash("default"));
 
 vector<PythonType*> Object::table;
 
@@ -97,7 +97,7 @@ void LibraryUtils::initialize()
 }
 
 
-DECLARE_EXPORT string Environment::searchFile(const string filename)
+string Environment::searchFile(const string filename)
 {
 #ifdef _MSC_VER
   static char pathseperator = '\\';
@@ -165,7 +165,7 @@ DECLARE_EXPORT string Environment::searchFile(const string filename)
 }
 
 
-DECLARE_EXPORT int Environment::getProcessorCores()
+int Environment::getProcessorCores()
 {
   // Previously detected already
   if (processorcores >= 1) return processorcores;
@@ -187,7 +187,7 @@ DECLARE_EXPORT int Environment::getProcessorCores()
 }
 
 
-DECLARE_EXPORT void Environment::setLogFile(const string& x)
+void Environment::setLogFile(const string& x)
 {
   // Bye bye message
   if (!logfilename.empty())
@@ -229,10 +229,10 @@ DECLARE_EXPORT void Environment::setLogFile(const string& x)
 }
 
 
-DECLARE_EXPORT void Environment::loadModule(string lib, ParameterList& parameters)
+void Environment::loadModule(string lib)
 {
   // Type definition of the initialization function
-  typedef const char* (*func)(const ParameterList&);
+  typedef const char* (*func)();
 
   // Validate
   if (lib.empty())
@@ -243,20 +243,20 @@ DECLARE_EXPORT void Environment::loadModule(string lib, ParameterList& parameter
 
   // Change the error mode: we handle errors now, not the operating system
   UINT em = SetErrorMode(SEM_FAILCRITICALERRORS);
-  HINSTANCE handle = LoadLibraryEx(lib.c_str(),NULL,LOAD_WITH_ALTERED_SEARCH_PATH);
-  if (!handle) handle = LoadLibraryEx(lib.c_str(), NULL, 0);
+  HINSTANCE handle = LoadLibraryEx(lib.c_str(),nullptr,LOAD_WITH_ALTERED_SEARCH_PATH);
+  if (!handle) handle = LoadLibraryEx(lib.c_str(), nullptr, 0);
   if (!handle)
   {
     // Get the error description
     char error[256];
     FormatMessage(
       FORMAT_MESSAGE_IGNORE_INSERTS | FORMAT_MESSAGE_FROM_SYSTEM,
-      NULL,
+      nullptr,
       GetLastError(),
       0,
       error,
       256,
-      NULL );
+      nullptr );
     throw RuntimeException(error);
   }
   SetErrorMode(em);  // Restore the previous error mode
@@ -270,12 +270,12 @@ DECLARE_EXPORT void Environment::loadModule(string lib, ParameterList& parameter
     char error[256];
     FormatMessage(
       FORMAT_MESSAGE_IGNORE_INSERTS | FORMAT_MESSAGE_FROM_SYSTEM,
-      NULL,
+      nullptr,
       GetLastError(),
       0,
       error,
       256,
-      NULL );
+      nullptr );
     throw RuntimeException(error);
   }
 
@@ -305,7 +305,7 @@ DECLARE_EXPORT void Environment::loadModule(string lib, ParameterList& parameter
 #endif
 
   // Call the initialization routine with the parameter list
-  string x = (inithandle)(parameters);
+  string x = (inithandle)();
   if (x.empty()) throw DataException("Invalid module");
 
   // Insert the new module in the registry
@@ -313,7 +313,7 @@ DECLARE_EXPORT void Environment::loadModule(string lib, ParameterList& parameter
 }
 
 
-DECLARE_EXPORT void MetaClass::addClass (const string& a, const string& b,
+void MetaClass::addClass (const string& a, const string& b,
     bool def, creatorDefault f)
 {
   // Find or create the category
@@ -337,12 +337,12 @@ DECLARE_EXPORT void MetaClass::addClass (const string& a, const string& b,
   if (isDefault)
     cat->classes[Keyword::hash("default")] = this;
 
-  // Set method pointers to NULL
+  // Set method pointers to nullptr
   factoryMethod = f;
 }
 
 
-DECLARE_EXPORT MetaCategory::MetaCategory (const string& a, const string& gr,
+MetaCategory::MetaCategory (const string& a, const string& gr,
     size_t sz, readController f, findController s)
 {
   // Update registry
@@ -359,7 +359,7 @@ DECLARE_EXPORT MetaCategory::MetaCategory (const string& a, const string& gr,
   grouptag = &Keyword::find(group.c_str());
 
   // Maintain a linked list of all registered categories
-  nextCategory = NULL;
+  nextCategory = nullptr;
   if (!firstCategory)
     firstCategory = this;
   else
@@ -371,55 +371,55 @@ DECLARE_EXPORT MetaCategory::MetaCategory (const string& a, const string& gr,
 }
 
 
-DECLARE_EXPORT const MetaCategory* MetaCategory::findCategoryByTag(const char* c)
+const MetaCategory* MetaCategory::findCategoryByTag(const char* c)
 {
   // Loop through all categories
   CategoryMap::const_iterator i = categoriesByTag.find(Keyword::hash(c));
-  return (i!=categoriesByTag.end()) ? i->second : NULL;
+  return (i!=categoriesByTag.end()) ? i->second : nullptr;
 }
 
 
-DECLARE_EXPORT const MetaCategory* MetaCategory::findCategoryByTag(const hashtype h)
+const MetaCategory* MetaCategory::findCategoryByTag(const hashtype h)
 {
   // Loop through all categories
   CategoryMap::const_iterator i = categoriesByTag.find(h);
-  return (i!=categoriesByTag.end()) ? i->second : NULL;
+  return (i!=categoriesByTag.end()) ? i->second : nullptr;
 }
 
 
-DECLARE_EXPORT const MetaCategory* MetaCategory::findCategoryByGroupTag(const char* c)
+const MetaCategory* MetaCategory::findCategoryByGroupTag(const char* c)
 {
   // Loop through all categories
   CategoryMap::const_iterator i = categoriesByGroupTag.find(Keyword::hash(c));
-  return (i!=categoriesByGroupTag.end()) ? i->second : NULL;
+  return (i!=categoriesByGroupTag.end()) ? i->second : nullptr;
 }
 
 
-DECLARE_EXPORT const MetaCategory* MetaCategory::findCategoryByGroupTag(const hashtype h)
+const MetaCategory* MetaCategory::findCategoryByGroupTag(const hashtype h)
 {
   // Loop through all categories
   CategoryMap::const_iterator i = categoriesByGroupTag.find(h);
-  return (i!=categoriesByGroupTag.end()) ? i->second : NULL;
+  return (i!=categoriesByGroupTag.end()) ? i->second : nullptr;
 }
 
 
-DECLARE_EXPORT const MetaClass* MetaCategory::findClass(const char* c) const
+const MetaClass* MetaCategory::findClass(const char* c) const
 {
   // Look up in the registered classes
   MetaCategory::ClassMap::const_iterator j = classes.find(Keyword::hash(c));
-  return (j == classes.end()) ? NULL : j->second;
+  return (j == classes.end()) ? nullptr : j->second;
 }
 
 
-DECLARE_EXPORT const MetaClass* MetaCategory::findClass(const hashtype h) const
+const MetaClass* MetaCategory::findClass(const hashtype h) const
 {
   // Look up in the registered classes
   MetaCategory::ClassMap::const_iterator j = classes.find(h);
-  return (j == classes.end()) ? NULL : j->second;
+  return (j == classes.end()) ? nullptr : j->second;
 }
 
 
-DECLARE_EXPORT const MetaClass* MetaClass::findClass(const char* c)
+const MetaClass* MetaClass::findClass(const char* c)
 {
   // Loop through all categories
   for (MetaCategory::CategoryMap::const_iterator i = MetaCategory::categoriesByTag.begin();
@@ -431,11 +431,11 @@ DECLARE_EXPORT const MetaClass* MetaClass::findClass(const char* c)
     if (j != i->second->classes.end()) return j->second;
   }
   // Not found...
-  return NULL;
+  return nullptr;
 }
 
 
-DECLARE_EXPORT void MetaClass::printClasses()
+void MetaClass::printClasses()
 {
   logger << "Registered classes:" << endl;
   // Loop through all categories
@@ -456,29 +456,29 @@ DECLARE_EXPORT void MetaClass::printClasses()
 }
 
 
-DECLARE_EXPORT const MetaFieldBase* MetaClass::findField(const Keyword& key) const
+const MetaFieldBase* MetaClass::findField(const Keyword& key) const
 {
   for (fieldlist::const_iterator i = fields.begin(); i != fields.end(); ++i)
     if ((*i)->getName() == key)
       return *i;
-  return NULL;
+  return nullptr;
 }
 
 
-DECLARE_EXPORT const MetaFieldBase* MetaClass::findField(hashtype h) const
+const MetaFieldBase* MetaClass::findField(hashtype h) const
 {
   for (fieldlist::const_iterator i = fields.begin(); i != fields.end(); ++i)
     if ((*i)->getHash() == h)
       return *i;
-  return NULL;
+  return nullptr;
 }
 
 
-DECLARE_EXPORT Action MetaClass::decodeAction(const char *x)
+Action MetaClass::decodeAction(const char *x)
 {
   // Validate the action
   if (!x)
-    throw LogicException("Invalid action NULL");
+    throw LogicException("Invalid action nullptr");
   else if (!strcmp(x, "AC"))
     return ADD_CHANGE;
   else if (!strcmp(x, "A"))
@@ -492,7 +492,7 @@ DECLARE_EXPORT Action MetaClass::decodeAction(const char *x)
 }
 
 
-DECLARE_EXPORT Action MetaClass::decodeAction(const DataValueDict& atts)
+Action MetaClass::decodeAction(const DataValueDict& atts)
 {
   // Decode the string and return the default in the absence of the attribute
   const DataValue* c = atts.get(Tags::action);
@@ -500,7 +500,7 @@ DECLARE_EXPORT Action MetaClass::decodeAction(const DataValueDict& atts)
 }
 
 
-DECLARE_EXPORT bool MetaClass::raiseEvent(Object* v, Signal a) const
+bool MetaClass::raiseEvent(Object* v, Signal a) const
 {
   bool result(true);
   for (list<Functor*>::const_iterator i = subscribers[a].begin();
@@ -517,7 +517,9 @@ DECLARE_EXPORT bool MetaClass::raiseEvent(Object* v, Signal a) const
 }
 
 
-Object* MetaCategory::ControllerDefault (const MetaClass* cat, const DataValueDict& in)
+Object* MetaCategory::ControllerDefault (
+  const MetaClass* cat, const DataValueDict& in, CommandManager* mgr
+  )
 {
   Action act = MetaClass::decodeAction(in);
   switch (act)
@@ -560,20 +562,24 @@ Object* MetaCategory::ControllerDefault (const MetaClass* cat, const DataValueDi
         throw DataException("Can't create object");
       }
 
+      // Report the creation to the manager
+      if (mgr)
+        mgr->add(new CommandCreateObject(result));
+
       // Creation accepted
       return result;
   }
   throw LogicException("Unreachable code reached");
-  return NULL;
+  return nullptr;
 }
 
 
-DECLARE_EXPORT bool matchWildcard(const char* wild, const char *str)
+bool matchWildcard(const char* wild, const char *str)
 {
   // Empty arguments: always return a match
   if (!wild || !str) return 1;
 
-  const char *cp = NULL, *mp = NULL;
+  const char *cp = nullptr, *mp = nullptr;
 
   while ((*str) && *wild != '*')
   {

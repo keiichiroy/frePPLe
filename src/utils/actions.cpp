@@ -33,10 +33,10 @@ namespace utils
 //
 
 
-DECLARE_EXPORT void CommandList::add(Command* c)
+void CommandList::add(Command* c)
 {
   // Validity check
-  if (!c) throw LogicException("Adding NULL command to a command list");
+  if (!c) throw LogicException("Adding nullptr command to a command list");
 
   // Set the owner of the command
   c->owner = this;
@@ -53,7 +53,7 @@ DECLARE_EXPORT void CommandList::add(Command* c)
 }
 
 
-DECLARE_EXPORT void CommandList::rollback()
+void CommandList::rollback()
 {
   // Undo all commands and delete them.
   // Note that undoing an operation that hasn't been executed yet or has been
@@ -63,16 +63,17 @@ DECLARE_EXPORT void CommandList::rollback()
   {
     Command *t = i;  // Temporarily store the pointer to be deleted
     i = i->prev;
+    t->next = nullptr;
     delete t; // The delete is expected to also revert the change!
   }
 
   // Reset the list
-  firstCommand = NULL;
-  lastCommand = NULL;
+  firstCommand = nullptr;
+  lastCommand = nullptr;
 }
 
 
-DECLARE_EXPORT void CommandList::undo()
+void CommandList::undo()
 {
   // Undo all commands and delete them.
   // Note that undoing an operation that hasn't been executed yet or has been
@@ -83,7 +84,7 @@ DECLARE_EXPORT void CommandList::undo()
 }
 
 
-DECLARE_EXPORT void CommandList::commit()
+void CommandList::commit()
 {
   // Commit the commands
   for (Command *i = firstCommand; i;)
@@ -91,16 +92,17 @@ DECLARE_EXPORT void CommandList::commit()
     Command *t = i;  // Temporarily store the pointer to be deleted
     i->commit();
     i = i->next;
+    t->prev = nullptr;
     delete t;
   }
 
   // Reset the list
-  firstCommand = NULL;
-  lastCommand = NULL;
+  firstCommand = nullptr;
+  lastCommand = nullptr;
 }
 
 
-DECLARE_EXPORT void CommandList::redo()
+void CommandList::redo()
 {
   // Redo the commands
   for (Command* c = firstCommand; c; c = c->next)
@@ -108,7 +110,7 @@ DECLARE_EXPORT void CommandList::redo()
 }
 
 
-DECLARE_EXPORT CommandList::~CommandList()
+CommandList::~CommandList()
 {
   if (firstCommand)
   {
@@ -124,7 +126,7 @@ DECLARE_EXPORT CommandList::~CommandList()
 //
 
 
-DECLARE_EXPORT CommandManager::Bookmark* CommandManager::setBookmark()
+CommandManager::Bookmark* CommandManager::setBookmark()
 {
   Bookmark* n = new Bookmark(currentBookmark);
   lastBookmark->nextBookmark = n;
@@ -135,9 +137,9 @@ DECLARE_EXPORT CommandManager::Bookmark* CommandManager::setBookmark()
 }
 
 
-DECLARE_EXPORT void CommandManager::undoBookmark(CommandManager::Bookmark* b)
+void CommandManager::undoBookmark(CommandManager::Bookmark* b)
 {
-  if (!b) throw LogicException("Can't undo NULL bookmark");
+  if (!b) throw LogicException("Can't undo nullptr bookmark");
 
   Bookmark* i = lastBookmark;
   for (; i && i != b; i = i->prevBookmark)
@@ -148,18 +150,20 @@ DECLARE_EXPORT void CommandManager::undoBookmark(CommandManager::Bookmark* b)
       i->active = false;
     }
   }
-  if (!i) throw LogicException("Can't find bookmark to undo");
+  if (!i)
+    throw LogicException("Can't find bookmark to undo");
+  i->undo();
   currentBookmark = b->parent;
 }
 
 
-DECLARE_EXPORT void CommandManager::redoBookmark(CommandManager::Bookmark* b)
+void CommandManager::redoBookmark(CommandManager::Bookmark* b)
 {
-  if (!b) throw LogicException("Can't redo NULL bookmark");
+  if (!b) throw LogicException("Can't redo nullptr bookmark");
 
   for (Bookmark* i = b; i; i = i->nextBookmark)
   {
-    if (i->isChildOf(b) && !i->active)
+    if (i->isChildOf(b) && i->active)
     {
       i->redo();
       i->active = true;
@@ -169,10 +173,10 @@ DECLARE_EXPORT void CommandManager::redoBookmark(CommandManager::Bookmark* b)
 }
 
 
-DECLARE_EXPORT void CommandManager::rollback(CommandManager::Bookmark* b)
+void CommandManager::rollback(CommandManager::Bookmark* b)
 {
   if (!b)
-    throw LogicException("Can't rollback NULL bookmark");
+    throw LogicException("Can't rollback nullptr bookmark");
   if (b == &firstBookmark)
     throw LogicException("Can't rollback default bookmark");
 
@@ -205,7 +209,7 @@ DECLARE_EXPORT void CommandManager::rollback(CommandManager::Bookmark* b)
 }
 
 
-DECLARE_EXPORT void CommandManager::commit()
+void CommandManager::commit()
 {
   if (firstBookmark.active) firstBookmark.commit();
   for (Bookmark* i = firstBookmark.nextBookmark; i; )
@@ -215,13 +219,13 @@ DECLARE_EXPORT void CommandManager::commit()
     i = i->nextBookmark;
     delete tmp;
   }
-  firstBookmark.nextBookmark = NULL;
+  firstBookmark.nextBookmark = nullptr;
   currentBookmark = &firstBookmark;
   lastBookmark = &firstBookmark;
 }
 
 
-DECLARE_EXPORT void CommandManager::rollback()
+void CommandManager::rollback()
 {
   for (Bookmark* i = lastBookmark; i != &firstBookmark;)
   {
@@ -231,9 +235,175 @@ DECLARE_EXPORT void CommandManager::rollback()
     delete tmp;
   }
   firstBookmark.rollback();
-  firstBookmark.nextBookmark = NULL;
+  firstBookmark.nextBookmark = nullptr;
   currentBookmark = &firstBookmark;
   lastBookmark = &firstBookmark;
+}
+
+
+//
+// COMMAND SETPROPERTY
+//
+
+
+CommandSetProperty::CommandSetProperty(
+  Object *o, const string& nm, const DataValue& value, short tp
+  ) : obj(o), name(nm), type(tp)
+{
+  if (!o || nm.empty())
+    return;
+
+  // Store old value
+  old_exists = o->hasProperty(name);
+  if (old_exists)
+  {
+    switch (type)
+    {
+      case 1: // Boolean
+        old_bool = obj->getBoolProperty(name);
+        break;
+      case 2: // Date
+        old_date = obj->getDateProperty(name);
+        break;
+      case 3: // Double
+        old_double = obj->getDoubleProperty(name);
+        break;
+      case 4: // String
+        old_string = obj->getStringProperty(name);
+        break;
+      default:
+        break;
+    }
+  }
+}
+
+
+void CommandSetProperty::undo()
+{
+  if (!obj || name.empty())
+    return;
+
+  if (old_exists)
+  {
+    switch (type)
+    {
+      case 1: // Boolean
+        {
+        bool tmp_bool = obj->getBoolProperty(name);
+        obj->setBoolProperty(name, old_bool);
+        old_bool = tmp_bool;
+        }
+        break;
+      case 2: // Date
+        {
+        Date tmp_date = obj->getDateProperty(name);
+        obj->setDateProperty(name, old_date);
+        old_date = tmp_date;
+        }
+        break;
+      case 3: // Double
+        {
+        double tmp_double = obj->getDoubleProperty(name);
+        obj->setDoubleProperty(name, old_double);
+        old_double = tmp_double;
+        }
+        break;
+      case 4: // String
+        {
+        string tmp_string = obj->getStringProperty(name);
+        obj->setStringProperty(name, old_string);
+        old_string = tmp_string;
+        }
+        break;
+      default:
+        break;
+    }
+  }
+  else
+  {
+    switch (type)
+    {
+      case 1: // Boolean
+        old_bool = obj->getBoolProperty(name);
+        break;
+      case 2: // Date
+        old_date = obj->getDateProperty(name);
+        break;
+      case 3: // Double
+        old_double = obj->getDoubleProperty(name);
+        break;
+      case 4: // String
+        old_string = obj->getStringProperty(name);
+        break;
+      default:
+        break;
+    }
+    obj->deleteProperty(name);
+  }
+}
+
+
+void CommandSetProperty::redo()
+{
+  if (!obj || name.empty())
+    return;
+
+  if (old_exists)
+  {
+    switch (type)
+    {
+      case 1: // Boolean
+        {
+        bool tmp_bool = obj->getBoolProperty(name);
+        obj->setBoolProperty(name, old_bool);
+        old_bool = tmp_bool;
+        }
+        break;
+      case 2: // Date
+        {
+        Date tmp_date = obj->getDateProperty(name);
+        obj->setDateProperty(name, old_date);
+        old_date = tmp_date;
+        }
+        break;
+      case 3: // Double
+        {
+        double tmp_double = obj->getDateProperty(name);
+        obj->setDoubleProperty(name, old_double);
+        old_double = tmp_double;
+        }
+        break;
+      case 4:
+        {
+        string tmp_string = obj->getStringProperty(name);
+        obj->setStringProperty(name, old_string);
+        old_string = tmp_string;
+        }
+        break;
+      default:
+        break;
+    }
+  }
+  else
+  {
+    switch (type)
+    {
+      case 1: // Boolean
+        obj->setBoolProperty(name, old_bool);
+        break;
+      case 2: // Date
+        obj->setDateProperty(name, old_date);
+        break;
+      case 3: // Double
+        obj->setDoubleProperty(name, old_double);
+        break;
+      case 4: // String
+        obj->setStringProperty(name, old_string);
+        break;
+      default:
+        break;
+    }
+  }
 }
 
 
@@ -242,7 +412,7 @@ DECLARE_EXPORT void CommandManager::rollback()
 //
 
 
-DECLARE_EXPORT void ThreadGroup::execute()
+void ThreadGroup::execute()
 {
   // CASE 1: No need to create worker threads when either a) only a single
   // worker is allowed or b) only a single function needs to be called.
@@ -267,7 +437,7 @@ DECLARE_EXPORT void ThreadGroup::execute()
   for (; worker<numthreads; ++worker)
   {
     if ((errcode=pthread_create(&threads[worker],  // thread struct
-        NULL,                  // default thread attributes
+        nullptr,                  // default thread attributes
         wrapper,               // start routine
         this)))                // arg to routine
     {
@@ -287,9 +457,9 @@ DECLARE_EXPORT void ThreadGroup::execute()
   // Wait for the threads as they exit
   for (--worker; worker>=0; --worker)
     // Wait for thread to terminate.
-    // The second arg is NULL, since we don't care about the return status
+    // The second arg is nullptr, since we don't care about the return status
     // of the finished threads.
-    if ((errcode=pthread_join(threads[worker],NULL)))
+    if ((errcode=pthread_join(threads[worker],nullptr)))
     {
       ostringstream ch;
       ch << "Can't join with thread " << worker << ", error " << errcode;
@@ -335,12 +505,12 @@ DECLARE_EXPORT void ThreadGroup::execute()
     char error[256];
     FormatMessage(
       FORMAT_MESSAGE_IGNORE_INSERTS | FORMAT_MESSAGE_FROM_SYSTEM,
-      NULL,
+      nullptr,
       GetLastError(),
       0,
       error,
       256,
-      NULL );
+      nullptr );
     delete[] threads;
     delete[] m_id;
     throw RuntimeException(string("Can't join threads: ") + error);
@@ -355,14 +525,14 @@ DECLARE_EXPORT void ThreadGroup::execute()
 }
 
 
-DECLARE_EXPORT ThreadGroup::callableWithArgument ThreadGroup::selectNextCallable()
+ThreadGroup::callableWithArgument ThreadGroup::selectNextCallable()
 {
-  ScopeMutexLock l(lock);
+  lock_guard<mutex> l(lock);
   if (callables.empty())
   {
     // No more functions
     assert( countCallables == 0 );
-    return callableWithArgument(static_cast<callable>(NULL),static_cast<void*>(NULL));
+    return callableWithArgument(static_cast<callable>(nullptr),static_cast<void*>(nullptr));
   }
   callableWithArgument c = callables.top();
   callables.pop();
@@ -412,24 +582,14 @@ unsigned __stdcall ThreadGroup::wrapper(void *arg)
 //
 
 
-DECLARE_EXPORT PyObject* loadModule
+PyObject* loadModule
 (PyObject* self, PyObject* args, PyObject* kwds)
 {
 
   // Create the command
-  char *data = NULL;
+  char *data = nullptr;
   int ok = PyArg_ParseTuple(args, "s:loadmodule", &data);
-  if (!ok) return NULL;
-
-  // Load parameters for the module
-  Environment::ParameterList params;
-  if (kwds)
-  {
-    PyObject *key, *value;
-    Py_ssize_t pos = 0;
-    while (PyDict_Next(kwds, &pos, &key, &value))
-      params[PythonData(key).getString()] = PythonData(value).getString();
-  }
+  if (!ok) return nullptr;
 
   // Free Python interpreter for other threads.
   // This is important since the module may also need access to Python
@@ -438,28 +598,32 @@ DECLARE_EXPORT PyObject* loadModule
   try
   {
     // Load the library
-    Environment::loadModule(data, params);
+    Environment::loadModule(data);
   }
   catch(...)
   {
     Py_BLOCK_THREADS;
     PythonType::evalException();
-    return NULL;
+    return nullptr;
   }
   Py_END_ALLOW_THREADS   // Reclaim Python interpreter
   return Py_BuildValue("");
 }
 
 
-DECLARE_EXPORT void Environment::printModules()
+void Environment::printModules()
 {
-  logger << "Loaded modules:" << endl;
-  for (set<string>::const_iterator i=moduleRegistry.begin(); i!=moduleRegistry.end(); ++i)
+  bool first = true;
+  for (set<string>::const_iterator i = moduleRegistry.begin(); i != moduleRegistry.end(); ++i) {
+    if (first) {
+      logger << "Loaded modules:" << endl;
+      first = false;
+    }
     logger << "   " << *i << endl;
-  logger << endl;
+  }
+  if (!first)
+    logger << endl;
 }
-
-
 
 
 } // end namespace

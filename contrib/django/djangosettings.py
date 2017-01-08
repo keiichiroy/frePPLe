@@ -41,58 +41,98 @@ DATABASES = {
   'default': {
     'ENGINE': 'django.db.backends.postgresql_psycopg2',
     'NAME': 'frepple',
-    'USER': 'frepple',
-    'PASSWORD': 'frepple',
-    'HOST': '',     # Set to empty string for localhost.
-    'OPTIONS': {},  # Backend specific configuration parameters.
-    'PORT': '',     # Set to empty string for default.
+    'USER': 'frepple',     # Role name when using md5 authentication.
+                           # Leave as an empty string when using peer or
+                           # ident authencation.
+    'PASSWORD': 'frepple', # Role password when using md5 authentication.
+                           # Leave as an empty string when using peer or
+                           # ident authencation.
+    'HOST': '',            # When using TCP sockets specify the hostname,
+                           # the ip4 address or the ip6 address here.
+                           # Leave as an empty string to use Unix domain
+                           # socket ("local" lines in pg_hba.conf).
+    'PORT': '',            # Leave to empty string when using Unix domain sockets.
+                           # Specify the port number when using a TCP socket.
+    'OPTIONS': {},         # Backend specific configuration parameters.
     'TEST': {
       'NAME': 'test_frepple' # Database name used when running the test suite.
-      }
+      },
+    'FILEUPLOADFOLDER': os.path.normpath(os.path.join(FREPPLE_LOGDIR,'data','default')),
+    'SECRET_WEBTOKEN_KEY': SECRET_KEY,
     },
-  'scenario1': {
-    'ENGINE': 'django.db.backends.postgresql_psycopg2',
-    'NAME': 'scenario1',
-    'USER': 'frepple',
-    'PASSWORD': 'frepple',
-    'HOST': '',     # Set to empty string for localhost.
-    'OPTIONS': {},  # Backend specific configuration parameters.
-    'PORT': '',     # Set to empty string for default.
-    'TEST': {
-      'NAME': 'test_scenario1' # Database name used when running the test suite.
-      }
-    },
-  'scenario2': {
-    'ENGINE': 'django.db.backends.postgresql_psycopg2',
-    'NAME': 'scenario2',
-    'USER': 'frepple',
-    'PASSWORD': 'frepple',
-    'HOST': '',     # Set to empty string for localhost.
-    'OPTIONS': {},  # Backend specific configuration parameters.
-    'PORT': '',     # Set to empty string for default.
-    'TEST': {
-      'NAME': 'test_scenario2' # Database name used when running the test suite.
-      }
-    },
-  'scenario3': {
-    'ENGINE': 'django.db.backends.postgresql_psycopg2',
-    'NAME': 'scenario3',
-    'USER': 'frepple',
-    'PASSWORD': 'frepple',
-    'HOST': '',     # Set to empty string for localhost.
-    'OPTIONS': {},  # Backend specific configuration parameters.
-    'PORT': '',     # Set to empty string for default.
-    'TEST': {
-      'NAME': 'test_scenario3' # Database name used when running the test suite.
-      }
-    },
+   'scenario1': {
+     'ENGINE': 'django.db.backends.postgresql_psycopg2',
+     'NAME': 'scenario1_4.0',
+     'USER': 'frepple',     # Role name when using md5 authentication.
+                            # Leave as an empty string when using peer or
+                            # ident authencation.
+     'PASSWORD': 'frepple', # Role password when using md5 authentication.
+                            # Leave as an empty string when using peer or
+                            # ident authencation.
+     'HOST': '',            # When using TCP sockets specify the hostname,
+                            # the ip4 address or the ip6 address here.
+                            # Leave as an empty string to use Unix domain
+                            # socket ("local" lines in pg_hba.conf).
+     'PORT': '',            # Leave to empty string when using Unix domain sockets.
+                            # Specify the port number when using a TCP socket.
+     'OPTIONS': {},         # Backend specific configuration parameters.
+     'TEST': {
+       'NAME': 'test_scenario1' # Database name used when running the test suite.
+       },
+     'FILEUPLOADFOLDER': os.path.normpath(os.path.join(FREPPLE_LOGDIR,'data','scenario1')),
+     'SECRET_WEBTOKEN_KEY': SECRET_KEY,
+     },
+   'scenario2': {
+     'ENGINE': 'django.db.backends.postgresql_psycopg2',
+     'NAME': 'scenario2_4.0',
+     'USER': 'frepple',     # Role name when using md5 authentication.
+                            # Leave as an empty string when using peer or
+                            # ident authencation.
+     'PASSWORD': 'frepple', # Role password when using md5 authentication.
+                            # Leave as an empty string when using peer or
+                            # ident authencation.
+     'HOST': '',            # When using TCP sockets specify the hostname,
+                            # the ip4 address or the ip6 address here.
+                            # Leave as an empty string to use Unix domain
+                            # socket ("local" lines in pg_hba.conf).
+     'PORT': '',            # Leave to empty string when using Unix domain sockets.
+                            # Specify the port number when using a TCP socket.
+     'OPTIONS': {},         # Backend specific configuration parameters.
+     'TEST': {
+       'NAME': 'test_scenario2' # Database name used when running the test suite.
+       },
+     'FILEUPLOADFOLDER': os.path.normpath(os.path.join(FREPPLE_LOGDIR,'data','scenario2')),
+     'SECRET_WEBTOKEN_KEY': SECRET_KEY,
+     },
+   'scenario3': {
+     'ENGINE': 'django.db.backends.postgresql_psycopg2',
+     'NAME': 'scenario3_4.0',
+     'USER': 'frepple',     # Role name when using md5 authentication.
+                            # Leave as an empty string when using peer or
+                            # ident authencation.
+     'PASSWORD': 'frepple', # Role password when using md5 authentication.
+                            # Leave as an empty string when using peer or
+                            # ident authencation.
+     'HOST': '',            # When using TCP sockets specify the hostname,
+                            # the ip4 address or the ip6 address here.
+                            # Leave as an empty string to use Unix domain
+                            # socket ("local" lines in pg_hba.conf).
+     'PORT': '',            # Leave to empty string when using Unix domain sockets.
+                            # Specify the port number when using a TCP socket.
+     'OPTIONS': {},         # Backend specific configuration parameters.
+     'TEST': {
+       'NAME': 'test_scenario3' # Database name used when running the test suite.
+       },
+     'FILEUPLOADFOLDER': os.path.normpath(os.path.join(FREPPLE_LOGDIR,'data','scenario3')),
+     'SECRET_WEBTOKEN_KEY': SECRET_KEY,
+     },
   }
 
 LANGUAGE_CODE = 'en'
 # ================= END UPDATED BLOCK BY WINDOWS INSTALLER =================
 
 # If passwords are set in this file they will be used instead of the ones set in the database parameters table
-OODO_PASSWORDS = {
+ODOO_PASSWORDS = {
   'default': '',
   'scenario1': '',
   'scenario2': '',
@@ -106,23 +146,6 @@ OPENBRAVO_PASSWORDS = {
   'scenario2': '',
   'scenario3': ''
   }
-
-# Keep each database connection alive for 10 minutes.
-CONN_MAX_AGE = 600
-
-# A list of strings representing the host/domain names the application can serve.
-# This is a security measure to prevent an attacker from poisoning caches and
-# password reset emails with links to malicious hosts by submitting requests
-# with a fake HTTP Host header, which is possible even under many seemingly-safe
-# webserver configurations.
-# Values in this list can be fully qualified names (e.g. 'www.example.com'),
-# in which case they will be matched against the request's Host header exactly
-# (case-insensitive, not including port).
-# A value beginning with a period can be used as a subdomain wildcard: '.example.com'
-# will match example.com, www.example.com, and any other subdomain of example.com.
-# A value of '*' will match anything, effectively disabling this feature.
-# This option is only active when DEBUG = false.
-ALLOWED_HOSTS = [ '*' ]
 
 # Local time zone for this installation. Choices can be found here:
 # http://en.wikipedia.org/wiki/List_of_tz_zones_by_name
@@ -171,10 +194,11 @@ MIDDLEWARE_CLASSES = (
     'freppledb.common.middleware.LocaleMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
 )
 
-CURRENCY=("","$")    # Prefix and suffix for currency strings
+# Prefix and suffix for currency strings
+CURRENCY=("", "$")           # Dollar symbol
+#CURRENCY=("", u"\u20AC")    # Euro symbol
 
 # Installed applications.
 # The order is important: urls, templates and menus of the earlier entries
@@ -182,17 +206,20 @@ CURRENCY=("","$")    # Prefix and suffix for currency strings
 INSTALLED_APPS = (
     'django.contrib.auth',
     'django.contrib.contenttypes',
-    'django.contrib.admin',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'bootstrap3',
     'freppledb.boot',
-    'freppledb.odoo',
-    'freppledb.openbravo',
+    # Add any project specific apps here
+    #'freppledb.odoo',
+    #'freppledb.openbravo',
     'freppledb.input',
     'freppledb.output',
     'freppledb.execute',
     'freppledb.common',
     'rest_framework',
+    'django_admin_bootstrapped',
+    'django.contrib.admin',
 )
 
 # Custom attribute fields in the database
@@ -228,22 +255,6 @@ INSTALLED_APPS = (
 #    ]
 ATTRIBUTES = []
 
-REST_FRAMEWORK = {
-  # Use Django's standard `django.contrib.auth` permissions,
-  # or allow read-only access for unauthenticated users.
-  'DEFAULT_PERMISSION_CLASSES': [
-    'rest_framework.permissions.DjangoModelPermissions'
-  ],
-  'DEFAULT_AUTHENTICATION_CLASSES': (
-    'rest_framework.authentication.BasicAuthentication',
-    'rest_framework.authentication.SessionAuthentication',
-  ),
-  'DEFAULT_RENDERER_CLASSES': (
-    'rest_framework.renderers.JSONRenderer',
-    'freppledb.common.api.renderers.freppleBrowsableAPI',
-  )
-}
-
 import django.contrib.admindocs
 LOCALE_PATHS = (
     os.path.normpath(os.path.join(FREPPLE_HOME,'locale','django')),
@@ -256,16 +267,28 @@ LOCALE_PATHS = (
     os.path.normpath(os.path.join(os.path.dirname(django.contrib.admindocs.__file__),'locale')),
 )
 
-TEMPLATE_DIRS = (
-    os.path.normpath(os.path.join(FREPPLE_APP,'freppledb','templates')),
-    os.path.normpath(os.path.join(FREPPLE_HOME,'templates')),
-)
-
-STATICFILES_DIRS = ()
-if os.path.isdir(os.path.normpath(os.path.join(FREPPLE_HOME,'static'))):
-  STATICFILES_DIRS += (os.path.normpath(os.path.join(FREPPLE_HOME,'static')),)
-if os.path.isdir(os.path.normpath(os.path.join(FREPPLE_HOME,'..','doc','output'))):
-  STATICFILES_DIRS += (('doc', os.path.normpath(os.path.join(FREPPLE_HOME,'..','doc','output')),),)
+TEMPLATES_TODO = [ #to be used in the future, now interferes with middleware
+    {
+        'BACKEND': 'django.template.backends.django.DjangoTemplates',
+        'DIRS': [
+            #os.path.normpath(os.path.join(FREPPLE_HOME,'templates')),
+        ],
+        'APP_DIRS': True,
+        'OPTIONS': {
+            'context_processors': [
+                # Insert your TEMPLATE_CONTEXT_PROCESSORS here or use this
+                # list if you haven't customized them:
+                'django.contrib.auth.context_processors.auth',
+                'django.template.context_processors.debug',
+                'django.template.context_processors.i18n',
+                'django.template.context_processors.media',
+                'django.template.context_processors.static',
+                'django.template.context_processors.tz',
+                'django.contrib.messages.context_processors.messages',
+            ],
+        },
+    },
+]
 
 LOGGING = {
     'version': 1,
@@ -286,7 +309,7 @@ LOGGING = {
     'handlers': {
         'null': {
             'level':'DEBUG',
-            'class':'django.utils.log.NullHandler',
+            'class':'logging.NullHandler',
         },
         'console':{
             'level':'DEBUG',
@@ -318,68 +341,76 @@ LOGGING = {
     }
 }
 
-# Backends for user authentication and authorization.
-# FrePPLe currently supports only this custom one.
-AUTHENTICATION_BACKENDS = (
-    "freppledb.common.auth.MultiDBBackend",
-)
-
-# IP address of the machine you are browsing from. When logging in from this
-# machine additional debugging statements can be shown.
-INTERNAL_IPS = ( '127.0.0.1', )
-
-# Default charset to use for all ``HttpResponse`` objects, if a MIME type isn't
-# manually specified.
-DEFAULT_CHARSET = 'utf-8'
-
-# Default characterset for writing and reading CSV files.
-# FrePPLe versions < 3 used the default encoding of the server as default.
-# From version 3 onwards the default is UTF-8.
-CSV_CHARSET = 'utf-8' # locale.getdefaultlocale()[1]
-
 # A list of available user interface themes.
 # If multiple themes are configured in this list, the user's can change their
 # preferences among the ones listed here.
 # If the list contains only a single value, the preferences screen will not
 # display users an option to choose the theme.
 THEMES = [
-  'earth', 'grass', 'lemon', 'snow', 'strawberry', 'water'
+  'earth', 'grass', 'lemon', 'odoo', 'openbravo', 'orange', 'snow', 'strawberry', 'water'
   ]
 
 # A default user-group to which new users are automatically added
 DEFAULT_USER_GROUP = None
 
 # The default user interface theme
-DEFAULT_THEME = 'grass'
+DEFAULT_THEME = 'earth'
 
 # The default number of records to pull from the server as a page
 DEFAULT_PAGESIZE = 100
 
 # Configuration of the default dashboard
 DEFAULT_DASHBOARD = [
-  {'width':'50%', 'widgets':[
-    ("welcome",{}),
-    ("resource_queue",{"limit":20}),
-    ("purchase_queue",{"limit":20}),
-    ("shipping_queue",{"limit":20}),
+  { 'rowname': 'Welcome', 'cols': [
+    {'width':8, 'widgets':[
+      ("welcome",{}),
+      ("news",{}),
+    ]},
+    {'width':4, 'widgets':[
+      #("execute",{}),
+      ("recent_comments",{"limit":10}),
+      ("recent_actions",{"limit":10}),
+      ("wizard",{}),
+    ]},
   ]},
-  {'width':'25%', 'widgets':[
-    ("recent_actions",{"limit":10}),
-    ("recent_comments",{"limit":10}),
-    ("execute",{}),
-    ("alerts",{}),
-    ("late_orders",{"limit":20}),
-    ("short_orders",{"limit":20}),
-    ("purchase_order_analysis",{"limit":20}),
+  { 'rowname': 'sales', 'cols': [
+    {'width':9, 'widgets':[
+      ("late_orders",{"limit":20}),
+      ("short_orders",{"limit":20}),
+    ]},
+    {'width':3, 'widgets':[
+      ("demand_alerts", {}),
+      ("delivery_performance",{"green": 90, "yellow": 80}),
+    ]},
   ]},
-  {'width':'25%', 'widgets':[
-    ("news",{}),
-    ('resource_utilization',{"limit":5, "medium": 80, "high": 90}),
-    ("delivery_performance",{"green": 90, "yellow": 80}),
-    ("inventory_by_location",{"limit":5}),
-    ("inventory_by_item",{"limit":10}),
+  { 'rowname': 'purchasing', 'cols': [
+    {'width':9, 'widgets':[
+      ("purchase_orders",{"fence1": 7, "fence2": 30}),
+      #("purchase_queue",{"limit":20}),
+      ("purchase_order_analysis",{"limit":20}),
+    ]},
+    {'width':3, 'widgets':[
+      ("inventory_by_location",{"limit":5}),
+      ("inventory_by_item",{"limit":10}),
+    ]},
   ]},
-  ]
+  { 'rowname': 'distribution', 'cols': [
+    {'width':12, 'widgets':[
+      ("distribution_orders",{"fence1":7, "fence2": 30}),
+      #("shipping_queue",{"limit":20}),
+    ]},
+  ]},
+  { 'rowname': 'manufacturing', 'cols': [
+    {'width':9, 'widgets':[
+      ("manufacturing_orders",{"fence1":7, "fence2": 30}),
+      #("resource_queue",{"limit":20}),
+    ]},
+    {'width':3, 'widgets':[
+      ('capacity_alerts',{}),
+      ('resource_utilization',{"limit":5, "medium": 80, "high": 90}),
+    ]},
+  ]},
+]
 
 # Port number for the CherryPy web server
 PORT = 8000

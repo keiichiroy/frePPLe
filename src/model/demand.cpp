@@ -24,11 +24,11 @@
 namespace frepple
 {
 
-template<class Demand> DECLARE_EXPORT Tree utils::HasName<Demand>::st;
-DECLARE_EXPORT const MetaCategory* Demand::metadata;
-DECLARE_EXPORT const MetaClass* DemandDefault::metadata;
+template<class Demand> Tree utils::HasName<Demand>::st;
+const MetaCategory* Demand::metadata;
+const MetaClass* DemandDefault::metadata;
 
-DECLARE_EXPORT OperationFixedTime *Demand::uninitializedDelivery = NULL;
+OperationFixedTime *Demand::uninitializedDelivery = nullptr;
 
 
 int Demand::initialize()
@@ -51,13 +51,14 @@ int DemandDefault::initialize()
     "demand",
     "demand_default",
     Object::create<DemandDefault>, true);
+  registerFields<DemandDefault>(const_cast<MetaClass*>(metadata));
 
   // Initialize the Python class
   return FreppleClass<DemandDefault,Demand>::initialize();
 }
 
 
-DECLARE_EXPORT void Demand::setQuantity(double f)
+void Demand::setQuantity(double f)
 {
   // Reject negative quantities, and no-change updates
   double delta(f - qty);
@@ -69,14 +70,30 @@ DECLARE_EXPORT void Demand::setQuantity(double f)
 }
 
 
-DECLARE_EXPORT Demand::~Demand()
+Demand::~Demand()
 {
   // Remove the delivery operationplans
   deleteOperationPlans(true);
+
+  // Unlink from the item
+  if (it)
+  {
+    if (it->firstItemDemand == this)
+      it->firstItemDemand = nextItemDemand;
+    else
+    {
+      Demand* dmd = it->firstItemDemand;
+      while (dmd && dmd->nextItemDemand != this)
+        dmd = dmd->nextItemDemand;
+      if (!dmd)
+        logger << "corrupted demand list for an item" << endl;
+      dmd->nextItemDemand = nextItemDemand;
+    }
+  }
 }
 
 
-DECLARE_EXPORT void Demand::deleteOperationPlans
+void Demand::deleteOperationPlans
 (bool deleteLocked, CommandManager* cmds)
 {
   // Delete all delivery operationplans.
@@ -85,7 +102,7 @@ DECLARE_EXPORT void Demand::deleteOperationPlans
   while (true)
   {
     // Find a candidate to delete
-    OperationPlan *candidate = NULL;
+    OperationPlan *candidate = nullptr;
     for (OperationPlanList::iterator i = deli.begin(); i!=deli.end(); ++i)
       if (deleteLocked || !(*i)->getLocked())
       {
@@ -107,7 +124,7 @@ DECLARE_EXPORT void Demand::deleteOperationPlans
 }
 
 
-DECLARE_EXPORT void Demand::removeDelivery(OperationPlan * o)
+void Demand::removeDelivery(OperationPlan * o)
 {
   // Valid opplan check
   if (!o) return;
@@ -117,8 +134,8 @@ DECLARE_EXPORT void Demand::removeDelivery(OperationPlan * o)
     throw LogicException("Delivery operationplan incorrectly registered");
 
   // Remove the reference on the operationplan
-  o->dmd = NULL;  // Required to avoid endless loop
-  o->setDemand(NULL);
+  o->dmd = nullptr;  // Required to avoid endless loop
+  o->setDemand(nullptr);
 
   // Find in the list of deliveries
   OperationPlanList::iterator j = deli.begin();
@@ -137,7 +154,7 @@ DECLARE_EXPORT void Demand::removeDelivery(OperationPlan * o)
 }
 
 
-DECLARE_EXPORT const Demand::OperationPlanList& Demand::getDelivery() const
+const Demand::OperationPlanList& Demand::getDelivery() const
 {
   // We need to check the sorting order of the list first! It could be disturbed
   // when operationplans are being moved around.
@@ -167,24 +184,24 @@ DECLARE_EXPORT const Demand::OperationPlanList& Demand::getDelivery() const
 }
 
 
-DECLARE_EXPORT OperationPlan* Demand::getLatestDelivery() const
+OperationPlan* Demand::getLatestDelivery() const
 {
   const Demand::OperationPlanList& l = getDelivery();
-  return l.empty() ? NULL : *(l.begin());
+  return l.empty() ? nullptr : *(l.begin());
 }
 
 
-DECLARE_EXPORT OperationPlan* Demand::getEarliestDelivery() const
+OperationPlan* Demand::getEarliestDelivery() const
 {
   const Demand::OperationPlanList& l = getDelivery();
-  OperationPlan *last = NULL;
+  OperationPlan *last = nullptr;
   for (Demand::OperationPlanList::const_iterator i = l.begin(); i!=l.end(); ++i)
     last = *i;
   return last;
 }
 
 
-DECLARE_EXPORT void Demand::addDelivery (OperationPlan * o)
+void Demand::addDelivery (OperationPlan * o)
 {
   // Dummy call to this function
   if (!o) return;
@@ -221,20 +238,20 @@ DECLARE_EXPORT void Demand::addDelivery (OperationPlan * o)
 }
 
 
-DECLARE_EXPORT Operation* Demand::getDeliveryOperation() const
+Operation* Demand::getDeliveryOperation() const
 {
   // Case 1: Operation specified on the demand itself,
   // or the delivery operation was computed earlier.
   if (oper && oper != uninitializedDelivery)
     return oper;
 
-  // Case 2: Operation specified on the item.
-  // Note that we don't accept a delivery operation at the parent level
-  // as a valid operation to plan the demand.
-  if (it && it->getOperation())
-    return it->getOperation();
-
-  // Case 3: Create a delivery operation automatically
+  // Case 2: Create a delivery operation automatically
+  if (!getItem())
+  {
+    // Not possible to create an operation when we don't know the item
+    const_cast<Demand*>(this)->oper = nullptr;
+    return nullptr;
+  }
   Location *l = getLocation();
   if (!l)
   {
@@ -245,14 +262,14 @@ DECLARE_EXPORT Operation* Demand::getDeliveryOperation() const
       l = &*l_iter;
       if (++l_iter != Location::end())
         // No, multiple locations
-        l = NULL;
+        l = nullptr;
     }
   }
   if (l)
   {
     // Search for buffers for the requested item and location.
     bool ok = true;
-    Buffer* buf = NULL;
+    Buffer* buf = nullptr;
     Item::bufferIterator buf_iter(getItem());
     while (Buffer* tmpbuf = buf_iter.next())
     {
@@ -272,27 +289,13 @@ DECLARE_EXPORT Operation* Demand::getDeliveryOperation() const
     if (ok)
     {
       if (!buf)
-      {
         // Create a new buffer
-        buf = new BufferDefault();
-        buf->setItem(getItem());
-        buf->setLocation(l);
-        stringstream o;
-        o << getItem() << " @ " << l;
-        buf->setName(o.str());
-      }
+        buf = Buffer::findOrCreate(getItem(), l);
 
       // Find an existing operation consuming from this buffer
-      stringstream o;
-      o << "Ship " << buf;
-      const_cast<Demand*>(this)->oper = Operation::find(o.str());
+      const_cast<Demand*>(this)->oper = Operation::find("Ship " + string(buf->getName()));
       if (!oper)
-      {
-        const_cast<Demand*>(this)->oper = new OperationFixedTime();
-        oper->setName(o.str());
-        oper->setHidden(true);
-        FlowStart* fl = new FlowStart(oper, buf, -1);
-      }
+        const_cast<Demand*>(this)->oper = new OperationDelivery(buf);
 
       // Success!
       return oper;
@@ -300,12 +303,12 @@ DECLARE_EXPORT Operation* Demand::getDeliveryOperation() const
   }
 
   // Case 4: Tough luck. Not possible to ship this demand.
-  const_cast<Demand*>(this)->oper = NULL;
-  return NULL;
+  const_cast<Demand*>(this)->oper = nullptr;
+  return nullptr;
 }
 
 
-DECLARE_EXPORT double Demand::getPlannedQuantity() const
+double Demand::getPlannedQuantity() const
 {
   double delivered(0.0);
   for (OperationPlanList::const_iterator i=deli.begin(); i!=deli.end(); ++i)
@@ -314,13 +317,13 @@ DECLARE_EXPORT double Demand::getPlannedQuantity() const
 }
 
 
-DECLARE_EXPORT PeggingIterator Demand::getPegging() const
+PeggingIterator Demand::getPegging() const
 {
   return PeggingIterator(this);
 }
 
 
-DECLARE_EXPORT Problem::List::iterator Demand::getConstraintIterator() const
+Problem::List::iterator Demand::getConstraintIterator() const
 {
   return constraints.begin();
 }

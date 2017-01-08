@@ -33,7 +33,7 @@ class MenuItem:
 
   def __init__(self, name, model=None, report=None, url=None, javascript=None,
                label=None, index=None, prefix=True, window=False,
-               separator=False):
+               separator=False, identifier=None):
     self.name = name
     self.url = url
     self.javascript = javascript
@@ -51,6 +51,7 @@ class MenuItem:
     self.prefix = prefix
     self.window = window
     self.separator = separator
+    self.identifier = identifier
     self.excludeFromBulkOperations = model in EXCLUDE_FROM_BULK_OPERATIONS
 
   def __str__(self):
@@ -64,13 +65,11 @@ class MenuItem:
       for perm in self.report.permissions:
         if not user.has_perm("%s.%s" % (self.report.getAppLabel(), perm[0])):
           return False
-      return True
-    elif self.model:
+    if self.model:
       # The menu item is a model
       return user.has_perm("%s.%s" % (self.model._meta.app_label, get_permission_codename('view', self.model._meta)))
-    else:
-      # Other item is always available
-      return True
+    # Other item is always available
+    return True
 
   def can_add(self, user):
     return self.model and user.has_perm("%s.%s" % (self.model._meta.app_label, get_permission_codename('add', self.model._meta)))
@@ -124,7 +123,7 @@ class Menu:
 
   def addItem(self, group, name, separator=False, report=None,
               url=None, javascript=None, label=None, index=None,
-              prefix=True, window=False, model=None):
+              prefix=True, window=False, model=None, identifier=None):
     for i in range(len(self._groups)):
       if self._groups[i][0] == group:
         # Found the group
@@ -151,7 +150,7 @@ class Menu:
         self._groups[i][3].append( MenuItem(
           name, report=report, url=url, javascript=javascript, label=label,
           index=index, prefix=prefix, window=window, separator=separator,
-          model=model
+          model=model, identifier=identifier
           ) )
         return
     # Couldn't locate the group
@@ -206,7 +205,7 @@ class Menu:
           for k in j.report.permissions:
             if content_type is None:
               # Create a dummy contenttype in the app
-              content_type = ContentType.objects.get_or_create(model="reports", app_label=app.split('.')[-1])[0]
+              content_type = ContentType.objects.get_or_create(model="permission", app_label="auth")[0]
             # Create the permission object
             # TODO: cover the case where the permission refers to a permission of a model in the same app.
             # TODO: cover the case where app X wants to refer to a permission defined in app Y.

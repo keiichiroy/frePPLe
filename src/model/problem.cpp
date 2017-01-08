@@ -24,10 +24,10 @@
 namespace frepple
 {
 
-DECLARE_EXPORT bool Plannable::anyChange = false;
-DECLARE_EXPORT bool Plannable::computationBusy = false;
-DECLARE_EXPORT const MetaCategory* Problem::metadata;
-DECLARE_EXPORT const MetaClass* ProblemMaterialExcess::metadata,
+bool Plannable::anyChange = false;
+bool Plannable::computationBusy = false;
+const MetaCategory* Problem::metadata;
+const MetaClass* ProblemMaterialExcess::metadata,
                *ProblemMaterialShortage::metadata,
                *ProblemExcess::metadata,
                *ProblemShort::metadata,
@@ -77,7 +77,7 @@ int Problem::initialize()
 }
 
 
-DECLARE_EXPORT bool Problem::operator < (const Problem& a) const
+bool Problem::operator < (const Problem& a) const
 {
   // 1. Sort based on entity
   assert(owner == a.owner);
@@ -90,7 +90,7 @@ DECLARE_EXPORT bool Problem::operator < (const Problem& a) const
 }
 
 
-DECLARE_EXPORT void Problem::addProblem()
+void Problem::addProblem()
 {
   assert(owner);
   if ((owner->firstProblem && *this < *(owner->firstProblem))
@@ -116,7 +116,7 @@ DECLARE_EXPORT void Problem::addProblem()
 }
 
 
-DECLARE_EXPORT void Problem::removeProblem()
+void Problem::removeProblem()
 {
   // Fast delete method: the code triggering this method is responsible of
   // maintaining the problem container
@@ -145,7 +145,7 @@ DECLARE_EXPORT void Problem::removeProblem()
 }
 
 
-DECLARE_EXPORT void Plannable::setDetectProblems(bool b)
+void Plannable::setDetectProblems(bool b)
 {
   if (useProblemDetection && !b)
     // We are switching from 'yes' to 'no': delete all existing problems
@@ -159,16 +159,16 @@ DECLARE_EXPORT void Plannable::setDetectProblems(bool b)
 }
 
 
-DECLARE_EXPORT void Plannable::computeProblems()
+void Plannable::computeProblems()
 {
   // Exit immediately if the list is up to date
   if (!anyChange && !computationBusy) return;
 
   computationBusy = true;
   // Get exclusive access to this function in a multi-threaded environment.
-  static Mutex computationbusy;
+  static mutex computationbusy;
   {
-    ScopeMutexLock l(computationbusy);
+    lock_guard<mutex> l(computationbusy);
 
     // Another thread may already have computed it while this thread was
     // waiting for the lock
@@ -199,7 +199,7 @@ DECLARE_EXPORT void Plannable::computeProblems()
 }
 
 
-DECLARE_EXPORT void Problem::clearProblems()
+void Problem::clearProblems()
 {
   // Loop through all entities, and call clearProblems(i)
   for (HasProblems::EntityIterator i = HasProblems::beginEntity();
@@ -211,27 +211,40 @@ DECLARE_EXPORT void Problem::clearProblems()
 }
 
 
-DECLARE_EXPORT void Problem::clearProblems(HasProblems& p, bool setchanged)
+void Problem::clearProblems(
+  HasProblems& p, bool setchanged, bool includeInvalidData
+  )
 {
   // Nothing to do
   if (!p.firstProblem) return;
 
   // Delete all problems in the list
+  Problem *keepfirst = nullptr;
   for (Problem *cur=p.firstProblem; cur; )
   {
     Problem *del = cur;
     cur = cur->nextProblem;
-    del->owner = NULL;
-    delete del;
+    if (includeInvalidData || typeid(*del) != typeid(ProblemInvalidData))
+    {
+      del->owner = nullptr;
+      delete del;
+    }
+    else if (!keepfirst)
+    {
+      keepfirst = del;
+      if (keepfirst)
+        keepfirst->nextProblem = del;
+      del->nextProblem = NULL;
+    }
   }
-  p.firstProblem = NULL;
+  p.firstProblem = keepfirst;
 
   // Mark as changed
   if (setchanged) p.getEntity()->setChanged();
 }
 
 
-DECLARE_EXPORT Problem::iterator Plannable::getProblems() const
+Problem::iterator Plannable::getProblems() const
 {
   if (getChanged())
     const_cast<Plannable*>(this)->updateProblems();
@@ -239,7 +252,7 @@ DECLARE_EXPORT Problem::iterator Plannable::getProblems() const
 }
 
 
-DECLARE_EXPORT HasProblems::EntityIterator::EntityIterator() : type(0)
+HasProblems::EntityIterator::EntityIterator() : type(0)
 {
   // Buffer
   bufIter = new Buffer::iterator(Buffer::begin());
@@ -270,7 +283,7 @@ DECLARE_EXPORT HasProblems::EntityIterator::EntityIterator() : type(0)
 }
 
 
-DECLARE_EXPORT HasProblems::EntityIterator& HasProblems::EntityIterator::operator++()
+HasProblems::EntityIterator& HasProblems::EntityIterator::operator++()
 {
   switch (type)
   {
@@ -308,14 +321,14 @@ DECLARE_EXPORT HasProblems::EntityIterator& HasProblems::EntityIterator::operato
       // Ended recursing of all entities
       ++type;
       delete demIter;
-      demIter = NULL;
+      demIter = nullptr;
       return *this;
   }
   throw LogicException("Unreachable code reached");
 }
 
 
-DECLARE_EXPORT HasProblems::EntityIterator::~EntityIterator()
+HasProblems::EntityIterator::~EntityIterator()
 {
   switch (type)
   {
@@ -339,7 +352,7 @@ DECLARE_EXPORT HasProblems::EntityIterator::~EntityIterator()
 }
 
 
-DECLARE_EXPORT HasProblems::EntityIterator::EntityIterator(const EntityIterator& o)
+HasProblems::EntityIterator::EntityIterator(const EntityIterator& o)
 {
   // Delete old iterator
   this->~EntityIterator();
@@ -356,7 +369,7 @@ DECLARE_EXPORT HasProblems::EntityIterator::EntityIterator(const EntityIterator&
 }
 
 
-DECLARE_EXPORT HasProblems::EntityIterator&
+HasProblems::EntityIterator&
 HasProblems::EntityIterator::operator=(const EntityIterator& o)
 {
   // Gracefully handle self assignment
@@ -377,7 +390,7 @@ HasProblems::EntityIterator::operator=(const EntityIterator& o)
 }
 
 
-DECLARE_EXPORT bool
+bool
 HasProblems::EntityIterator::operator != (const EntityIterator& t) const
 {
   // Different iterator type, thus always different and return false
@@ -406,7 +419,7 @@ HasProblems::EntityIterator::operator != (const EntityIterator& t) const
 }
 
 
-DECLARE_EXPORT HasProblems& HasProblems::EntityIterator::operator*() const
+HasProblems& HasProblems::EntityIterator::operator*() const
 {
   switch (type)
   {
@@ -428,7 +441,7 @@ DECLARE_EXPORT HasProblems& HasProblems::EntityIterator::operator*() const
 }
 
 
-DECLARE_EXPORT HasProblems* HasProblems::EntityIterator::operator->() const
+HasProblems* HasProblems::EntityIterator::operator->() const
 {
   switch (type)
   {
@@ -450,13 +463,13 @@ DECLARE_EXPORT HasProblems* HasProblems::EntityIterator::operator->() const
 }
 
 
-DECLARE_EXPORT HasProblems::EntityIterator HasProblems::beginEntity()
+HasProblems::EntityIterator HasProblems::beginEntity()
 {
   return EntityIterator();
 }
 
 
-DECLARE_EXPORT HasProblems::EntityIterator HasProblems::endEntity()
+HasProblems::EntityIterator HasProblems::endEntity()
 {
   // Note that we give call a constructor with type 4, in order to allow
   // a fast comparison.
@@ -464,7 +477,7 @@ DECLARE_EXPORT HasProblems::EntityIterator HasProblems::endEntity()
 }
 
 
-DECLARE_EXPORT Problem::iterator& Problem::iterator::operator++()
+Problem::iterator& Problem::iterator::operator++()
 {
   // Incrementing beyond the end
   if (!iter) return *this;
@@ -484,13 +497,13 @@ DECLARE_EXPORT Problem::iterator& Problem::iterator::operator++()
 }
 
 
-DECLARE_EXPORT Problem::iterator Problem::begin()
+Problem::iterator Problem::begin()
 {
   return iterator();
 }
 
 
-DECLARE_EXPORT Problem::iterator Problem::begin(HasProblems* i, bool refresh)
+Problem::iterator Problem::begin(HasProblems* i, bool refresh)
 {
   // Null pointer passed, loop through the full list anyway
   if (!i) return begin();
@@ -502,13 +515,13 @@ DECLARE_EXPORT Problem::iterator Problem::begin(HasProblems* i, bool refresh)
 }
 
 
-DECLARE_EXPORT const Problem::iterator Problem::end()
+const Problem::iterator Problem::end()
 {
-  return iterator(static_cast<Problem*>(NULL));
+  return iterator(static_cast<Problem*>(nullptr));
 }
 
 
-DECLARE_EXPORT void Problem::List::clear(Problem *c)
+void Problem::List::clear(Problem *c)
 {
   // Unchain the predecessor
   if (c)
@@ -516,7 +529,7 @@ DECLARE_EXPORT void Problem::List::clear(Problem *c)
     for (Problem *x = first; x; x = x->nextProblem)
       if (x->nextProblem == c)
       {
-        x->nextProblem = NULL;
+        x->nextProblem = nullptr;
         break;
       }
   }
@@ -526,16 +539,16 @@ DECLARE_EXPORT void Problem::List::clear(Problem *c)
   {
     Problem *del = cur;
     cur = cur->nextProblem;
-    del->owner = NULL;
+    del->owner = nullptr;
     delete del;
   }
 
-  // Set the header to NULL
-  if (!c) first = NULL;
+  // Set the header to nullptr
+  if (!c) first = nullptr;
 }
 
 
-DECLARE_EXPORT Problem* Problem::List::push(const MetaClass* m,
+Problem* Problem::List::push(const MetaClass* m,
     const Object* o, Date st, Date nd, double w)
 {
   // Find the end of the list
@@ -568,20 +581,20 @@ DECLARE_EXPORT Problem* Problem::List::push(const MetaClass* m,
 }
 
 
-DECLARE_EXPORT void Problem::List::pop(Problem *p)
+void Problem::List::pop(Problem *p)
 {
-  Problem *q = NULL;
+  Problem *q = nullptr;
   if (p)
   {
     // Skip the problem that was passed as argument
     q = p->nextProblem;
-    p->nextProblem = NULL;
+    p->nextProblem = nullptr;
   }
   else
   {
-    // NULL argument: delete all
+    // nullptr argument: delete all
     q = first;
-    first = NULL;
+    first = nullptr;
   }
 
   // Delete each constraint after the marked one
@@ -589,17 +602,17 @@ DECLARE_EXPORT void Problem::List::pop(Problem *p)
   {
     Problem *del = q;
     q = q->nextProblem;
-    del->owner = NULL;
+    del->owner = nullptr;
     delete del;
   }
 }
 
 
-DECLARE_EXPORT Problem* Problem::List::top() const
+Problem* Problem::List::top() const
 {
   for (Problem *p = first; p; p = p->nextProblem)
     if (!p->nextProblem) return p;
-  return NULL;
+  return nullptr;
 }
 
 

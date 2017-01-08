@@ -23,7 +23,7 @@
 # Initialization
 #
 AC_PREREQ(2.60)
-AC_INIT([frepple], [3.1.beta])
+AC_INIT([frepple], [4.0.beta])
 AC_CONFIG_SRCDIR([src/main.cpp])
 AC_CONFIG_HEADER([config.h])
 AM_INIT_AUTOMAKE([1.9 tar-ustar])
@@ -133,7 +133,7 @@ AC_CHECK_PROG(HAVE_DOT, dot, [YES], [NO])
 # Checks for header files.
 AC_HEADER_DIRENT
 AC_HEADER_STDC
-AC_CHECK_HEADERS([fcntl.h stdlib.h unistd.h perl.h python.h pthread.h])
+AC_CHECK_HEADERS([fcntl.h stdlib.h unistd.h python.h pthread.h])
 
 # Checks for library functions.
 AC_FUNC_MALLOC
@@ -175,7 +175,7 @@ AC_CHECK_LIB([xerces-c], [main], [],
   Check out http://xml.apache.org/xerces-c for more information.
 ])])
 
-AC_CHECKING([for xerces-c version >= 3.1.beta ])
+AC_CHECKING([for xerces-c version >= 3.0 ])
 AC_COMPILE_IFELSE([AC_LANG_SOURCE([
   #include "xercesc/util/XercesVersion.hpp"
   #if XERCES_VERSION_MAJOR==3
@@ -185,7 +185,7 @@ AC_COMPILE_IFELSE([AC_LANG_SOURCE([
   #endif
   ])], [],
   [AC_MSG_ERROR([
-  This package requires Xerces-C 3.1.beta or later.
+  This package requires Xerces-C 3.0 or later.
   ])])
 
 #
@@ -235,21 +235,21 @@ AC_CHECK_HEADER(windows.h,
 CPPFLAGS="-I\$(top_builddir)/include $CPPFLAGS"
 if test x$debug = xtrue ; then
   # The settings on the next line are the normal debugging parameters
-  CXXFLAGS="-ggdb -Wall $CXXFLAGS -O0"
+  CXXFLAGS="-ggdb -Wall -std=c++0x $CXXFLAGS -O0"
   AC_DEFINE([DEBUG], [], [Used for debugging builds])
 else if test x$coverage = xtrue ; then
   # The settings on the next line are suitable for creating an executable to
   # be used for code coverage measurement using gcc and gprof.
-  CXXFLAGS="-fprofile-arcs -ftest-coverage $CXXFLAGS"
+  CXXFLAGS="-fprofile-arcs -ftest-coverage -std=c++0x $CXXFLAGS"
   AC_DEFINE([NDEBUG], [], [Disables assertions])
 else if test x$profile = xtrue ; then
   # The settings on the next line are suitable for creating an executable to
   # be used for profiling using gcc.
   # CXXFLAGS="-g -Wall -pg -fno-inline $CXXFLAGS"
-  CXXFLAGS="-g -Wall $CXXFLAGS"
+  CXXFLAGS="-g -Wall -std=c++0x $CXXFLAGS "
   AC_DEFINE([NDEBUG], [], [Disables assertions])
 else
-  CXXFLAGS="-O3 -s $CXXFLAGS"
+  CXXFLAGS="-O3 -s -std=c++0x $CXXFLAGS"
   AC_DEFINE([NDEBUG], [], [Disables assertions])
 fi ; fi ; fi
 case $host_os in
@@ -269,9 +269,8 @@ AM_CONDITIONAL(CYGWIN, test x$host_os = xcygwin)
 AC_CONFIG_FILES([ Makefile bin/Makefile doc/Makefile ])
 AC_CONFIG_FILES([ include/Makefile include/frepple/Makefile ])
 AC_CONFIG_FILES([ src/Makefile src/model/Makefile src/solver/Makefile src/utils/Makefile ])
-AC_CONFIG_FILES([ modules/Makefile ])
 AC_CONFIG_FILES([ contrib/Makefile contrib/vc/Makefile contrib/django/Makefile contrib/installer/Makefile contrib/rpm/Makefile contrib/debian/Makefile contrib/odoo/Makefile ])
-AC_CONFIG_FILES([ test/Makefile test/buffer_batch/Makefile test/cluster/Makefile test/custom_fields/Makefile test/calendar/Makefile test/constraints_combined_1/Makefile test/constraints_combined_2/Makefile test/constraints_leadtime_1/Makefile test/constraints_leadtime_2/Makefile test/constraints_material_1/Makefile test/constraints_material_2/Makefile test/constraints_material_3/Makefile test/constraints_material_4/Makefile test/datetime/Makefile test/distribution_1/Makefile test/flow_alternate_1/Makefile test/flow_alternate_2/Makefile test/flow_fixed/Makefile test/scalability_1/Makefile test/scalability_2/Makefile test/scalability_3/Makefile test/jobshop/Makefile test/xml/Makefile test/xml_remote/Makefile  test/constraints_resource_1/Makefile test/constraints_resource_2/Makefile test/constraints_resource_3/Makefile test/constraints_resource_4/Makefile test/constraints_resource_5/Makefile test/constraints_resource_6/Makefile test/criticality/Makefile test/problems/Makefile test/deletion/Makefile test/demand_policy/Makefile test/operation_alternate/Makefile test/operation_available/Makefile test/operation_effective/Makefile test/operation_pre_post/Makefile test/operation_routing/Makefile test/operation_split/Makefile test/multithreading/Makefile test/name/Makefile test/python_1/Makefile test/python_2/Makefile test/python_3/Makefile test/sample_module/Makefile test/callback/Makefile test/pegging/Makefile test/safety_stock/Makefile test/buffer_procure_1/Makefile test/flow_effective/Makefile test/load_alternate/Makefile test/load_effective/Makefile test/setup_1/Makefile test/setup_2/Makefile test/setup_3/Makefile test/skills/Makefile test/supplier/Makefile test/wip/Makefile ])
+AC_CONFIG_FILES([ test/Makefile test/buffer_batch/Makefile test/cluster/Makefile test/custom_fields/Makefile test/calendar/Makefile test/constraints_combined_1/Makefile test/constraints_combined_2/Makefile test/constraints_leadtime_1/Makefile test/constraints_leadtime_2/Makefile test/constraints_material_1/Makefile test/constraints_material_2/Makefile test/constraints_material_3/Makefile test/constraints_material_4/Makefile test/datetime/Makefile test/distribution_1/Makefile test/flow_alternate_1/Makefile test/flow_alternate_2/Makefile test/flow_fixed/Makefile test/scalability_1/Makefile test/scalability_2/Makefile test/scalability_3/Makefile test/jobshop/Makefile test/xml/Makefile test/xml_remote/Makefile  test/constraints_resource_1/Makefile test/constraints_resource_2/Makefile test/constraints_resource_3/Makefile test/constraints_resource_4/Makefile test/constraints_resource_5/Makefile test/constraints_resource_6/Makefile test/criticality/Makefile test/problems/Makefile test/deletion/Makefile test/demand_policy/Makefile test/operation_alternate/Makefile test/operation_available/Makefile test/operation_effective/Makefile test/operation_pre_post/Makefile test/operation_routing/Makefile test/operation_split/Makefile test/multithreading/Makefile test/name/Makefile test/python_1/Makefile test/python_2/Makefile test/python_3/Makefile test/callback/Makefile test/pegging/Makefile test/safety_stock/Makefile test/buffer_procure_1/Makefile test/flow_effective/Makefile test/load_alternate/Makefile test/load_effective/Makefile test/setup_1/Makefile test/setup_2/Makefile test/setup_3/Makefile test/skills/Makefile test/supplier/Makefile test/wip/Makefile test/global_purchase/Makefile ])
 
 # Generate all make files
 AC_OUTPUT

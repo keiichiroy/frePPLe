@@ -20,7 +20,7 @@ from django.utils.translation import string_concat
 from django.db.models import Count
 
 from freppledb.output.models import Problem
-from freppledb.common.report import GridReport, GridFieldText, GridFieldNumber, GridFieldDateTime
+from freppledb.common.report import GridReport, GridFieldText, GridFieldNumber, GridFieldDateTime, GridFieldInteger
 
 
 def getEntities(request):
@@ -49,11 +49,14 @@ class Report(GridReport):
   frozenColumns = 0
   editable = False
   multiselect = False
+  help_url = 'user-guide/user-interface/plan-analysis/problem-report.html'
   rows = (
+    #. Translators: Translation included with Django
+    GridFieldInteger('id', title=_('id'), key=True, editable=False, hidden=True),
     GridFieldText('entity', title=_('entity'), editable=False, align='center'),  # TODO choices=getEntities
     #. Translators: Translation included with Django
     GridFieldText('name', title=_('name'), editable=False, align='center'),  # TODO choices=getNames
-    GridFieldText('owner', title=_('owner'), editable=False, extra='formatter:probfmt'),
+    GridFieldText('owner', title=_('owner'), editable=False, extra='"formatter":"probfmt"'),
     GridFieldText('description', title=_('description'), editable=False, width=350),
     GridFieldDateTime('startdate', title=_('start date'), editable=False),
     GridFieldDateTime('enddate', title=_('end date'), editable=False),

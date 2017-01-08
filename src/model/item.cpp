@@ -24,9 +24,9 @@
 namespace frepple
 {
 
-template<class Item> DECLARE_EXPORT Tree utils::HasName<Item>::st;
-DECLARE_EXPORT const MetaCategory* Item::metadata;
-DECLARE_EXPORT const MetaClass* ItemDefault::metadata;
+template<class Item> Tree utils::HasName<Item>::st;
+const MetaCategory* Item::metadata;
+const MetaClass* ItemDefault::metadata;
 
 
 int Item::initialize()
@@ -51,25 +51,67 @@ int ItemDefault::initialize()
 }
 
 
-DECLARE_EXPORT Item::~Item()
+Item::~Item()
 {
   // Remove references from the buffers
   bufferIterator bufiter(this);
   while (Buffer* buf = bufiter.next())
-    buf->setItem(NULL);
+    buf->setItem(nullptr);
 
   // Remove references from the demands
   for (Demand::iterator l = Demand::begin(); l != Demand::end(); ++l)
     if (l->getItem() == this)
-      l->setItem(NULL);
+      l->setItem(nullptr);
 
   // Remove all item distributions referencing this item
   while (firstItemDistribution)
     delete firstItemDistribution;
 
+  // Remove all item operations referencing this item
+  while (firstOperation)
+    delete firstOperation;
+
   // The ItemSupplier objects are automatically deleted by the
   // destructor of the Association list class.
 }
 
+
+void Demand::setItem(Item *i)
+{
+  // No change
+  if (it == i)
+    return;
+
+  // Unlink from previous item
+  if (it)
+  {
+    if (it->firstItemDemand == this)
+      it->firstItemDemand = nextItemDemand;
+    else
+    {
+      Demand* dmd = it->firstItemDemand;
+      while (dmd && dmd->nextItemDemand != this)
+        dmd = dmd->nextItemDemand;
+      if (!dmd)
+        throw LogicException("corrupted demand list for an item");
+      dmd->nextItemDemand = nextItemDemand;
+    }
+  }
+
+  // Link at new item
+  it = i;
+  if (it)
+  {
+    nextItemDemand = it->firstItemDemand;
+    it->firstItemDemand = this;
+  }
+
+  // Trigger recreation of the delivery operation
+  if (oper && oper->getHidden())
+    oper = uninitializedDelivery;
+
+  // Mark as changed
+  setChanged();
+}
 
 } // end namespace

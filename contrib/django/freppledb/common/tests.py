@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU Affero General Public
 # License along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
-
+import time
 import os
 import os.path
 
@@ -29,9 +29,7 @@ import freppledb.common as common
 import freppledb.input as input
 
 from rest_framework.test import APIClient, APITestCase, APIRequestFactory
-from rest_framework import status, renderers, parsers
-from django.core.urlresolvers import reverse
-from django.utils.six import BytesIO
+
 
 @override_settings(INSTALLED_APPS=settings.INSTALLED_APPS + ('django.contrib.sessions',))
 class DataLoadTest(TestCase):
@@ -45,7 +43,7 @@ class DataLoadTest(TestCase):
     if not isinstance(response, StreamingHttpResponse):
       raise Exception("expected a streaming response")
     for i in response.streaming_content:
-      if b'"records":20,' in i:
+      if b'"records":' in i:
         return
     self.fail("Didn't find expected number of parameters")
 
@@ -57,7 +55,8 @@ class ExcelTest(TransactionTestCase):
 
   def setUp(self):
     # Login
-    User.objects.create_superuser('admin', 'your@company.com', 'admin')
+    if not User.objects.filter(username="admin").count():
+      User.objects.create_superuser('admin', 'your@company.com', 'admin')
     self.client.login(username='admin', password='admin')
 
   def tearDown(self):
@@ -66,7 +65,7 @@ class ExcelTest(TransactionTestCase):
 
   def run_workbook(self, language):
     # Change the language preference
-    self.client.post('/preferences/', {'pagesize': 100, 'language': language, 'theme': 'sunny'})
+    self.client.post('/preferences/', {'pagesize': 100, 'language': language, 'theme': 'orange'})
 
     # Initial size
     countBuffer = input.models.Buffer.objects.count()
@@ -74,13 +73,15 @@ class ExcelTest(TransactionTestCase):
     countCalendar = input.models.Calendar.objects.count()
     countCustomer = input.models.Customer.objects.count()
     countDemand = input.models.Demand.objects.count()
-    countFlow = input.models.Flow.objects.count()
+    countOperationMaterial = input.models.OperationMaterial.objects.count()
     countItem = input.models.Item.objects.count()
     countItemSupplier = input.models.ItemSupplier.objects.count()
     countItemDistribution = input.models.ItemDistribution.objects.count()
-    countLoad = input.models.Load.objects.count()
+    countOperationResource = input.models.OperationResource.objects.count()
     countLocation = input.models.Location.objects.count()
-    countOperationPlan = input.models.OperationPlan.objects.count()
+    countPurchaseOrder = input.models.PurchaseOrder.objects.count()
+    countDistributionOrder = input.models.DistributionOrder.objects.count()
+    countManufacturingOrder = input.models.ManufacturingOrder.objects.count()
     countOperation = input.models.Operation.objects.count()
     countResourceSkill = input.models.ResourceSkill.objects.count()
     countResource = input.models.Resource.objects.count()
@@ -96,13 +97,13 @@ class ExcelTest(TransactionTestCase):
     # Export workbook
     response = self.client.post('/execute/launch/exportworkbook/', {
        'entities': [
-          'input.buffer', 'input.calendarbucket', 'input.calendar',
-          'input.customer', 'input.demand', 'input.flow', 'input.item',
-          'input.itemsupplier', 'input.itemdistribution',
-          'input.load', 'input.location', 'input.operationplan',
-          'input.operation', 'input.resourceskill', 'input.resource',
-          'input.skill', 'input.supplier', 'input.suboperation',
-          'common.bucket', 'common.bucketdetail', 'common.parameter',
+          'input.demand', 'input.item', 'input.customer', 'input.location', 'input.buffer',
+          'input.resource', 'input.skill', 'input.resourceskill', 'input.setupmatrix',
+          'input.purchaseorder', 'input.supplier', 'input.itemsupplier',
+          'input.distributionorder', 'input.itemdistribution', 'input.operationmaterial',
+          'input.manufacturingorder', 'input.calendar', 'input.calendarbucket',
+          'input.operation', 'input.operationplanmaterial', 'input.operationresource',
+          'input.suboperation', 'common.parameter', 'common.bucket', 'common.bucketdetail',
           ]
        })
     with open("workbook.xlsx", 'wb') as f:
@@ -115,13 +116,17 @@ class ExcelTest(TransactionTestCase):
     self.assertEqual(input.models.Calendar.objects.count(), 0)
     self.assertEqual(input.models.Customer.objects.count(), 0)
     self.assertEqual(input.models.Demand.objects.count(), 0)
-    self.assertEqual(input.models.Flow.objects.count(), 0)
+    self.assertEqual(input.models.OperationMaterial.objects.count(), 0)
     self.assertEqual(input.models.Item.objects.count(), 0)
     self.assertEqual(input.models.ItemDistribution.objects.count(), 0)
     self.assertEqual(input.models.ItemSupplier.objects.count(), 0)
-    self.assertEqual(input.models.Load.objects.count(), 0)
+    self.assertEqual(input.models.OperationResource.objects.count(), 0)
     self.assertEqual(input.models.Location.objects.count(), 0)
-    self.assertEqual(input.models.OperationPlan.objects.count(), 0)
+    self.assertEqual(input.models.PurchaseOrder.objects.count(), 0)
+    self.assertEqual(input.models.DistributionOrder.objects.count(), 0)
+    self.assertEqual(input.models.ManufacturingOrder.objects.count(), 0)
+    self.assertEqual(input.models.OperationPlanResource.objects.count(), 0)
+    self.assertEqual(input.models.OperationPlanMaterial.objects.count(), 0)
     self.assertEqual(input.models.Operation.objects.count(), 0)
     self.assertEqual(input.models.ResourceSkill.objects.count(), 0)
     self.assertEqual(input.models.Resource.objects.count(), 0)
@@ -148,13 +153,15 @@ class ExcelTest(TransactionTestCase):
     self.assertEqual(input.models.Calendar.objects.count(), countCalendar)
     self.assertEqual(input.models.Customer.objects.count(), countCustomer)
     self.assertEqual(input.models.Demand.objects.count(), countDemand)
-    self.assertEqual(input.models.Flow.objects.count(), countFlow)
+    self.assertEqual(input.models.OperationMaterial.objects.count(), countOperationMaterial)
     self.assertEqual(input.models.Item.objects.count(), countItem)
     self.assertEqual(input.models.ItemDistribution.objects.count(), countItemDistribution)
     self.assertEqual(input.models.ItemSupplier.objects.count(), countItemSupplier)
-    self.assertEqual(input.models.Load.objects.count(), countLoad)
+    self.assertEqual(input.models.OperationResource.objects.count(), countOperationResource)
     self.assertEqual(input.models.Location.objects.count(), countLocation)
-    self.assertEqual(input.models.OperationPlan.objects.count(), countOperationPlan)
+    self.assertEqual(input.models.PurchaseOrder.objects.count(), countPurchaseOrder)
+    self.assertEqual(input.models.DistributionOrder.objects.count(), countDistributionOrder)
+    self.assertEqual(input.models.ManufacturingOrder.objects.count(), countManufacturingOrder)
     self.assertEqual(input.models.Operation.objects.count(), countOperation)
     self.assertEqual(input.models.ResourceSkill.objects.count(), countResourceSkill)
     self.assertEqual(input.models.Resource.objects.count(), countResource)
@@ -207,6 +214,79 @@ class freppleREST(APITestCase):
     response = self.client.get('/api/')
     self.assertEqual(response.status_code, 200)
 
+    response = self.client.get('/api/input/demand/')
+    self.assertEqual(response.status_code, 200)
+
+    response = self.client.get('/api/input/item/')
+    self.assertEqual(response.status_code, 200)
+
+    response = self.client.get('/api/input/customer/')
+    self.assertEqual(response.status_code, 200)
+
+    response = self.client.get('/api/input/location/')
+    self.assertEqual(response.status_code, 200)
+
+    response = self.client.get('/api/input/buffer/')
+    self.assertEqual(response.status_code, 200)
+
+    response = self.client.get('/api/input/resource/')
+    self.assertEqual(response.status_code, 200)
+
+    response = self.client.get('/api/input/skill/')
+    self.assertEqual(response.status_code, 200)
+
+    response = self.client.get('/api/input/resourceskill/')
+    self.assertEqual(response.status_code, 200)
+
+    response = self.client.get('/api/input/setupmatrix/')
+    self.assertEqual(response.status_code, 200)
+
+    response = self.client.get('/api/input/purchaseorder/')
+    self.assertEqual(response.status_code, 200)
+
+    response = self.client.get('/api/input/supplier/')
+    self.assertEqual(response.status_code, 200)
+
+    response = self.client.get('/api/input/itemsupplier/')
+    self.assertEqual(response.status_code, 200)
+
+    response = self.client.get('/api/input/distributionorder/')
+    self.assertEqual(response.status_code, 200)
+
+    response = self.client.get('/api/input/itemdistribution/')
+    self.assertEqual(response.status_code, 200)
+
+    response = self.client.get('/api/input/manufacturingorder/')
+    self.assertEqual(response.status_code, 200)
+
+    response = self.client.get('/api/input/calendar/')
+    self.assertEqual(response.status_code, 200)
+
+    response = self.client.get('/api/input/calendarbucket/')
+    self.assertEqual(response.status_code, 200)
+
+    response = self.client.get('/api/input/operation/')
+    self.assertEqual(response.status_code, 200)
+
+    response = self.client.get('/api/input/operationmaterial/')
+    self.assertEqual(response.status_code, 200)
+
+    response = self.client.get('/api/input/operationresource/')
+    self.assertEqual(response.status_code, 200)
+
+    response = self.client.get('/api/input/suboperation/')
+    self.assertEqual(response.status_code, 200)
+
+    response = self.client.get('/api/common/parameter/')
+    self.assertEqual(response.status_code, 200)
+
+    response = self.client.get('/api/common/bucket/')
+    self.assertEqual(response.status_code, 200)
+
+    response = self.client.get('/api/common/bucketdetail/')
+    self.assertEqual(response.status_code, 200)
+
+
     #Demand tests
   def test_api_demand(self):
     response = self.client.get('/api/input/demand/')
@@ -215,247 +295,253 @@ class freppleREST(APITestCase):
     self.assertEqual(response.status_code, 200)
     recordsnumber = input.models.Demand.objects.count()
     data = {
-          "name": "Order UFO 25",
-           "description": None,
-           "category": None,
-           "subcategory": None,
-          "item": "product",
-
-          "due": "2013-12-01T00:00:00",
-          "status": "closed",
-          "operation": None,
-          "quantity": "110.0000",
-          "priority": 1,
-          "minshipment": None,
-          "maxlateness": None
+        "name": "Order UFO 25",
+        "description": None,
+        "category": None,
+        "subcategory": None,
+        "item": "product",
+        "customer": "Customer near factory 1",
+        "location": "factory 1",
+        "due": "2013-12-01T00:00:00",
+        "status": "closed",
+        "operation": None,
+        "quantity": "110.0000",
+        "priority": 1,
+        "minshipment": None,
+        "maxlateness": None
     }
     response = self.client.post('/api/input/demand/', data, format='json')
     self.assertEqual(response.status_code, 201)
     self.assertEqual(input.models.Demand.objects.count(), recordsnumber + 1)
-    self.assertEqual(input.models.Demand.objects.filter(name = 'Order UFO 25').count(), 1)
+    self.assertEqual(input.models.Demand.objects.filter(name='Order UFO 25').count(), 1)
     data = {
-          "name": "Order UFO 26",
-          "description": None,
-          "category": None,
-          "subcategory": None,
-          "item": "product",
-          "location": None,
-          "due": "2013-12-01T00:00:00",
-          "status": "closed",
-          "operation": None,
-          "quantity": "220.0000",
-          "priority": 1,
-          "minshipment": None,
-          "maxlateness": None
+        "name": "Order UFO 26",
+        "description": None,
+        "category": None,
+        "subcategory": None,
+        "item": "product",
+        "customer": "Customer near factory 1",
+        "location": "factory 1",
+        "due": "2013-12-01T00:00:00",
+        "status": "closed",
+        "operation": None,
+        "quantity": "220.0000",
+        "priority": 1,
+        "minshipment": None,
+        "maxlateness": None
     }
     response = self.client.post('/api/input/demand/', data, format='json')
     self.assertEqual(response.status_code, 201)
     self.assertEqual(input.models.Demand.objects.count(), recordsnumber + 2)
-    self.assertEqual(input.models.Demand.objects.filter(name = 'Order UFO 26').count(), 1)
+    self.assertEqual(input.models.Demand.objects.filter(name='Order UFO 26').count(), 1)
 
     data = [{
-          "name": "Order UFO 27",
-          "description": None,
-          "category": "TEST DELETE",
-          "subcategory": None,
-          "item": "product",
-          "location": None,
-          "due": "2013-12-01T00:00:00",
-          "status": "closed",
-          "operation": None,
-          "quantity": "220.0000",
-          "priority": 1,
-          "minshipment": None,
-          "maxlateness": None
-    },
-    {
-          "name": "Order UFO 28",
-          "description": None,
-          "category": "TEST DELETE",
-          "subcategory": None,
-          "item": "product",
-          "location": None,
-          "due": "2013-12-01T00:00:00",
-          "status": "closed",
-          "operation": None,
-          "quantity": "220.0000",
-          "priority": 1,
-          "minshipment": None,
-          "maxlateness": None
+        "name": "Order UFO 27",
+        "description": None,
+        "category": "TEST DELETE",
+        "subcategory": None,
+        "item": "product",
+        "location": "factory 1",
+        "customer": "Customer near factory 1",
+        "due": "2013-12-01T00:00:00",
+        "status": "closed",
+        "operation": None,
+        "quantity": "220.0000",
+        "priority": 1,
+        "minshipment": None,
+        "maxlateness": None
+    }, {
+        "name": "Order UFO 28",
+        "description": None,
+        "category": "TEST DELETE",
+        "subcategory": None,
+        "item": "product",
+        "customer": "Customer near factory 1",
+        "location": "factory 1",
+        "due": "2013-12-01T00:00:00",
+        "status": "closed",
+        "operation": None,
+        "quantity": "220.0000",
+        "priority": 1,
+        "minshipment": None,
+        "maxlateness": None
     }]
     response = self.client.post('/api/input/demand/', data, format='json')
     self.assertEqual(response.status_code, 201)
     self.assertEqual(input.models.Demand.objects.count(), recordsnumber + 4)
-    self.assertEqual(input.models.Demand.objects.filter(category = 'TEST DELETE').count(), 2)
-    
-    #Demand GET MULTIPART
+    self.assertEqual(input.models.Demand.objects.filter(category='TEST DELETE').count(), 2)
+
+    # Demand GET MULTIPART
     response = self.client.get('/api/input/demand/Order UFO 25/')
     self.assertEqual(response.status_code, 200)
-    self.assertEqual(input.models.Demand.objects.filter(name = 'Order UFO 25').count(), 1)
-    #Demand OPTIONS
+    self.assertEqual(input.models.Demand.objects.filter(name='Order UFO 25').count(), 1)
+    # Demand OPTIONS
     response = self.client.options('/api/input/demand/Order UFO 25/')
     self.assertEqual(response.status_code, 200)
-    #Demand GET JSON tests
+    # Demand GET JSON tests
     response = self.client.get('/api/input/demand/Order UFO 26/', format='json')
     self.assertEqual(response.status_code, 200)
-    self.assertEqual(input.models.Demand.objects.filter(name = 'Order UFO 26').count(), 1)
-    #Demand PUT MULTIPART tests
+    self.assertEqual(input.models.Demand.objects.filter(name='Order UFO 26').count(), 1)
+    # Demand PUT MULTIPART tests
     data = {
-          "name": "Order UFO 25",
-          "description": "Put multipart",
-          "category": None,
-          "subcategory": None,
-          "item": "product",
-          "location": None,
-          "due": "2013-12-01T00:00:00",
-          "status": "closed",
-          "operation": None,
-          "quantity": "110.0000",
-          "priority": 1,
-          "minshipment": None,
-          "maxlateness": None
+        "name": "Order UFO 25",
+        "description": "Put multipart",
+        "category": None,
+        "subcategory": None,
+        "item": "product",
+        "customer": "Customer near factory 1",
+        "location": "factory 1",
+        "due": "2013-12-01T00:00:00",
+        "status": "closed",
+        "operation": None,
+        "quantity": "110.0000",
+        "priority": 1,
+        "minshipment": None,
+        "maxlateness": None
     }
     response = self.client.put('/api/input/demand/Order UFO 25/', data, format='json')
     self.assertEqual(response.status_code, 200)
     self.assertEqual(input.models.Demand.objects.count(), 18)
-    self.assertEqual(input.models.Demand.objects.filter(description = 'Put multipart').count(), 1)
-    #Demand PUT JSON tests
+    self.assertEqual(input.models.Demand.objects.filter(description='Put multipart').count(), 1)
+    # Demand PUT JSON tests
     data = {
-          "name": "Order UFO 26",
-          "description": "Put json",
-          "category": None,
-          "subcategory": None,
-          "item": "product",
-          "location": None,
-          "due": "2013-12-01T00:00:00",
-          "status": "closed",
-          "operation": None,
-          "quantity": "110.0000",
-          "priority": 1,
-          "minshipment": None,
-          "maxlateness": None
+        "name": "Order UFO 26",
+        "description": "Put json",
+        "category": None,
+        "subcategory": None,
+        "item": "product",
+        "customer": "Customer near factory 1",
+        "location": "factory 1",
+        "due": "2013-12-01T00:00:00",
+        "status": "closed",
+        "operation": None,
+        "quantity": "110.0000",
+        "priority": 1,
+        "minshipment": None,
+        "maxlateness": None
     }
     response = self.client.put('/api/input/demand/Order UFO 26/', data, format='json')
     self.assertEqual(response.status_code, 200)
-    self.assertEqual(input.models.Demand.objects.count(), 18)
-    self.assertEqual(input.models.Demand.objects.filter(description = 'Put json').count(), 1)
-    #Demand PUT FORM tests
+    self.assertEqual(input.models.Demand.objects.count(), recordsnumber + 4)
+    self.assertEqual(input.models.Demand.objects.filter(description='Put json').count(), 1)
+    # Demand PUT FORM tests
     data = {
-          "name": "Order UFO 26",
-          "description": "Put form",
-          "category": None,
-          "subcategory": None,
-          "item": "product",
-          "location": None,
-          "due": "2013-12-01T00:00:00",
-          "status": "closed",
-          "operation": None,
-          "quantity": "110.0000",
-          "priority": 1,
-          "minshipment": None,
-          "maxlateness": None
+        "name": "Order UFO 26",
+        "description": "Put form",
+        "category": None,
+        "subcategory": None,
+        "item": "product",
+        "customer": "Customer near factory 1",
+        "location": "factory 1",
+        "due": "2013-12-01T00:00:00",
+        "status": "closed",
+        "operation": None,
+        "quantity": "110.0000",
+        "priority": 1,
+        "minshipment": None,
+        "maxlateness": None
     }
     response = self.client.put('/api/input/demand/Order UFO 26/', data, format='json')
     self.assertEqual(response.status_code, 200)
-    self.assertEqual(input.models.Demand.objects.count(), 18)
-    self.assertEqual(input.models.Demand.objects.filter(description = 'Put form').count(), 1)
+    self.assertEqual(input.models.Demand.objects.count(), recordsnumber + 4)
+    self.assertEqual(input.models.Demand.objects.filter(description='Put form').count(), 1)
 
-    #Demand DELETE tests
+    # Demand DELETE tests
     response = self.client.delete('/api/input/demand/Order UFO 26/', format='form')
     self.assertEqual(response.status_code, 204)
     response = self.client.delete('/api/input/demand/Order UFO 25/', format='json')
     self.assertEqual(response.status_code, 204)
-    response = self.client.delete('/api/input/demand/Demand 1/', format='api')
+    response = self.client.delete('/api/input/demand/Demand 01/', format='api')
     self.assertEqual(response.status_code, 204)
     response = self.client.delete('/api/input/demand/?category=TEST DELETE', format='api')
     self.assertEqual(response.status_code, 204)
-    self.assertEqual(input.models.Customer.objects.filter(category = 'TEST DELETE').count(), 0)
+    self.assertEqual(input.models.Customer.objects.filter(category='TEST DELETE').count(), 0)
 
   def test_api_customer(self):
     response = self.client.get('/api/input/customer/')
     self.assertEqual(response.status_code, 200)
-    self.assertEqual(input.models.Customer.objects.count(), 2)
+    recordsnumber = input.models.Customer.objects.count()
+    self.assertEqual(input.models.Customer.objects.count(), 3)
     response = self.client.options('/api/input/customer/')
     self.assertEqual(response.status_code, 200)
     data = {
-	  "name": "Customer near Area 51"
+        "name": "Customer near Area 51"
     }
     response = self.client.post('/api/input/customer/', data)
     self.assertEqual(response.status_code, 201)
-    self.assertEqual(input.models.Customer.objects.count(), 3)
-    self.assertEqual(input.models.Customer.objects.filter(name = 'Customer near Area 51').count(), 1)
+    self.assertEqual(input.models.Customer.objects.count(), recordsnumber + 1)
+    self.assertEqual(input.models.Customer.objects.filter(name='Customer near Area 51').count(), 1)
     data = {
-    "name": "Customer near Area 52"
+        "name": "Customer near Area 52"
     }
     response = self.client.post('/api/input/customer/', data, format='json')
     self.assertEqual(response.status_code, 201)
-    self.assertEqual(input.models.Customer.objects.count(), 4)
-    self.assertEqual(input.models.Customer.objects.filter(name = 'Customer near Area 52').count(), 1)
+    self.assertEqual(input.models.Customer.objects.count(), recordsnumber + 2)
+    self.assertEqual(input.models.Customer.objects.filter(name='Customer near Area 52').count(), 1)
     data = [{
-    "name": "Customer near Area 99",
-    "source": "TEST DELETE"
-    },{
-    "name": "Customer near Area 100",
-    "source": "TEST DELETE"
+      "name": "Customer near Area 99",
+      "source": "TEST DELETE"
+      }, {
+      "name": "Customer near Area 100",
+      "source": "TEST DELETE"
     }]
     response = self.client.post('/api/input/customer/', data, format='json')
     self.assertEqual(response.status_code, 201)
-    self.assertEqual(input.models.Customer.objects.count(), 6)
-    self.assertEqual(input.models.Customer.objects.filter(source = 'TEST DELETE').count(), 2)
+    self.assertEqual(input.models.Customer.objects.count(), recordsnumber + 4)
+    self.assertEqual(input.models.Customer.objects.filter(source='TEST DELETE').count(), 2)
 
-
-    #Customer GET MULTIPART
+    # Customer GET MULTIPART
     response = self.client.get('/api/input/customer/Customer near Area 51/')
     self.assertEqual(response.status_code, 200)
-    self.assertEqual(input.models.Customer.objects.filter(name = 'Customer near Area 51').count(), 1)
-    #Customer OPTIONS
+    self.assertEqual(input.models.Customer.objects.filter(name='Customer near Area 51').count(), 1)
+    # Customer OPTIONS
     response = self.client.options('/api/input/customer/Customer near Area 51/')
     self.assertEqual(response.status_code, 200)
-    #Customer GET JSON tests
+    # Customer GET JSON tests
     response = self.client.get('/api/input/customer/Customer near Area 52/', format='json')
     self.assertEqual(response.status_code, 200)
-    self.assertEqual(input.models.Customer.objects.filter(name = 'Customer near Area 52').count(), 1)
-    #Customer PUT MULTIPART tests
+    self.assertEqual(input.models.Customer.objects.filter(name='Customer near Area 52').count(), 1)
+    # Customer PUT MULTIPART tests
     data = {
       "name": "Customer near Area 51",
       "description": "Patch multipart"
     }
     response = self.client.patch('/api/input/customer/Customer near Area 51/', data)
     self.assertEqual(response.status_code, 200)
-    self.assertEqual(input.models.Customer.objects.count(), 6)
-    self.assertEqual(input.models.Customer.objects.filter(description = 'Patch multipart').count(), 1)
-    #Customer PUT JSON tests
+    self.assertEqual(input.models.Customer.objects.count(), recordsnumber + 4)
+    self.assertEqual(input.models.Customer.objects.filter(description='Patch multipart').count(), 1)
+    # Customer PUT JSON tests
     data = {
       "name": "Customer near Area 52",
       "description": "Patch json"
     }
     response = self.client.patch('/api/input/customer/Customer near Area 52/', data, format='json')
     self.assertEqual(response.status_code, 200)
-    self.assertEqual(input.models.Customer.objects.count(), 6)
-    self.assertEqual(input.models.Customer.objects.filter(description = 'Patch json').count(), 1)
+    self.assertEqual(input.models.Customer.objects.count(), recordsnumber + 4)
+    self.assertEqual(input.models.Customer.objects.filter(description='Patch json').count(), 1)
 
-    #Customer PUT FORM tests
+    # Customer PUT FORM tests
     data = {
-            "name":"Customer near Area 52",
-            "description":"Patch json",
-            "category":None,
-            "subcategory":None,
-            "source":"Put json",
-            "lastmodified":"2015-12-04T10:18:40.048861"
+        "name": "Customer near Area 52",
+        "description": "Patch json",
+        "category": None,
+        "subcategory": None,
+        "source": "Put json",
+        "lastmodified": "2015-12-04T10:18:40.048861"
     }
 
     response = self.client.patch('/api/input/customer/Customer near Area 52/', data, format='json')
     self.assertEqual(response.status_code, 200)
-    self.assertEqual(input.models.Customer.objects.count(), 6)
-    self.assertEqual(input.models.Customer.objects.filter(source = 'Put json').count(), 1)
+    self.assertEqual(input.models.Customer.objects.count(), recordsnumber + 4)
+    self.assertEqual(input.models.Customer.objects.filter(source='Put json').count(), 1)
 
-    #Customer DELETE tests
+    # Customer DELETE tests
     response = self.client.delete('/api/input/customer/Customer near Area 52/', format='form')
     self.assertEqual(response.status_code, 204)
-    response = self.client.delete('/api/input/customer/Customer near Area 51/',  format='json')
+    response = self.client.delete('/api/input/customer/Customer near Area 51/', format='json')
     self.assertEqual(response.status_code, 204)
     response = self.client.delete('/api/input/customer/Customer near factory 1/', format='api')
     self.assertEqual(response.status_code, 204)
     response = self.client.delete('/api/input/customer/?source=TEST DELETE', format='json')
     self.assertEqual(response.status_code, 204)
-    self.assertEqual(input.models.Customer.objects.filter(source = 'TEST DELETE').count(), 0)
+    self.assertEqual(input.models.Customer.objects.filter(source='TEST DELETE').count(), 0)

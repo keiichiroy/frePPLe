@@ -25,7 +25,7 @@ namespace frepple
 {
 
 
-DECLARE_EXPORT void Demand::updateProblems()
+void Demand::updateProblems()
 {
   // The relation between the demand and the related problem classes is such
   // that the demand object is the only active one. The problem objects are
@@ -41,30 +41,34 @@ DECLARE_EXPORT void Demand::updateProblems()
   // Problem detection disabled on this demand
   if (!getDetectProblems()) return;
 
-  // Check which problems need to be created
-  if (deli.empty())
+  // Closed demands don't have any problems
+  if (getStatus() != CLOSED)
   {
-    // Check if a new ProblemDemandNotPlanned needs to be created
-    if (getQuantity()>0.0) needsNotPlanned = true;
-  }
-  else
-  {
-    // Loop through the deliveries
-    for (OperationPlanList::iterator i = deli.begin(); i!=deli.end(); ++i)
+    // Check which problems need to be created
+    if (deli.empty())
     {
-      // Check for ProblemLate problem
-      long d(getDue() - (*i)->getDates().getEnd());
-      if (d < 0L) needsLate = true;
-      // Check for ProblemEarly problem
-      else if (d > 0L) needsEarly = true;
+      // Check if a new ProblemDemandNotPlanned needs to be created
+      if (getQuantity() > 0.0) needsNotPlanned = true;
     }
+    else
+    {
+      // Loop through the deliveries
+      for (OperationPlanList::iterator i = deli.begin(); i != deli.end(); ++i)
+      {
+        // Check for ProblemLate problem
+        long d(getDue() - (*i)->getDates().getEnd());
+        if (d < 0L) needsLate = true;
+        // Check for ProblemEarly problem
+        else if (d > 0L) needsEarly = true;
+      }
 
-    // Check for ProblemShort problem
-    double plannedqty = getPlannedQuantity();
-    if (plannedqty + ROUNDING_ERROR < qty) needsShort = true;
+      // Check for ProblemShort problem
+      double plannedqty = getPlannedQuantity();
+      if (plannedqty + ROUNDING_ERROR < qty) needsShort = true;
 
-    // Check for ProblemExcess Problem
-    if (plannedqty - ROUNDING_ERROR > qty) needsExcess = true;
+      // Check for ProblemExcess Problem
+      if (plannedqty - ROUNDING_ERROR > qty) needsExcess = true;
+    }
   }
 
   // Loop through the existing problems
@@ -119,7 +123,7 @@ DECLARE_EXPORT void Demand::updateProblems()
 }
 
 
-DECLARE_EXPORT string ProblemLate::getDescription() const
+string ProblemLate::getDescription() const
 {
   assert(getDemand() && !getDemand()->getDelivery().empty());
   Duration t(getDemand()->getLatestDelivery()->getDates().getEnd()
@@ -129,7 +133,7 @@ DECLARE_EXPORT string ProblemLate::getDescription() const
 }
 
 
-DECLARE_EXPORT string ProblemEarly::getDescription() const
+string ProblemEarly::getDescription() const
 {
   assert(getDemand() && !getDemand()->getDelivery().empty());
   Duration t(getDemand()->getDue()

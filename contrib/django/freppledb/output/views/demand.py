@@ -15,14 +15,17 @@
 # License along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 
+import json
+
+from django.conf import settings
+from django.contrib.admin.views.decorators import staff_member_required
 from django.db import connections
+from django.http import HttpResponseForbidden, HttpResponse, HttpResponseBadRequest
 from django.utils.translation import ugettext_lazy as _
 from django.utils.text import capfirst
 from django.utils.encoding import force_text
 
-from freppledb.input.models import Item
-from freppledb.output.models import Demand
-from freppledb.common.db import python_date
+from freppledb.input.models import Demand, Item, PurchaseOrder, DistributionOrder, ManufacturingOrder, DeliveryOrder
 from freppledb.common.report import GridReport, GridPivot, GridFieldText, GridFieldNumber, GridFieldDateTime, GridFieldInteger
 
 
@@ -36,13 +39,14 @@ class OverviewReport(GridPivot):
   model = Item
   permissions = (("view_demand_report", "Can view demand report"),)
   rows = (
-    GridFieldText('item', title=_('item'), key=True, editable=False, field_name='name', formatter='detail', extra="role:'input/item'"),
+    GridFieldText('item', title=_('item'), key=True, editable=False, field_name='name', formatter='detail', extra='"role":"input/item"'),
     )
   crosses = (
     ('demand', {'title': _('demand')}),
     ('supply', {'title': _('supply')}),
     ('backlog', {'title': _('backlog')}),
     )
+  help_url = 'user-guide/user-interface/plan-analysis/demand-report.html'
 
   @classmethod
   def extra_context(reportclass, request, *args, **kwargs):
@@ -66,17 +70,28 @@ class OverviewReport(GridPivot):
     # Execute a query to get the backlog at the start of the horizon
     startbacklogdict = {}
     query = '''
-      select items.name, sum(quantity)
+      select items.name, coalesce(req.qty, 0) - coalesce(pln.qty, 0)
       from (%s) items
-      inner join item
-      on item.lft between items.lft and items.rght
-      inner join out_demand
-      on item.name = out_demand.item
-        and (plandate is null or plandate >= '%s')
-        and due < '%s'
-      group by items.name
-      ''' % (basesql, request.report_startdate, request.report_startdate)
-    cursor.execute(query, baseparams)
+      left outer join (
+        select item_id, sum(quantity) qty
+        from demand
+        where status in ('open', 'quote')
+        and due < %%s
+        group by item_id
+        ) req
+      on req.item_id = items.name
+      left outer join (
+        select demand.item_id, sum(operationplan.quantity) qty
+        from operationplan
+        inner join demand
+        on operationplan.demand_id = demand.name
+        and operationplan.owner_id is null
+        and operationplan.enddate < %%s
+        group by demand.item_id
+        ) pln
+      on pln.item_id = items.name
+      ''' % basesql
+    cursor.execute(query, baseparams + (request.report_startdate, request.report_startdate))
     for row in cursor.fetchall():
       if row[0]:
         startbacklogdict[row[0]] = float(row[1])
@@ -95,24 +110,27 @@ class OverviewReport(GridPivot):
           from (
           select items.name as name, items.lft as lft, items.rght as rght,
                  d.bucket as bucket, d.startdate as startdate, d.enddate as enddate,
-                 coalesce(sum(out_demand.quantity),0) as planned
+                 coalesce(sum(operationplan.quantity),0) as planned
           from (%s) items
           -- Multiply with buckets
           cross join (
              select name as bucket, startdate, enddate
              from common_bucketdetail
-             where bucket_id = '%s' and enddate > '%s' and startdate < '%s'
+             where bucket_id = %%s and enddate > %%s and startdate < %%s
              ) d
           -- Include hierarchical children
           inner join item
           on item.lft between items.lft and items.rght
           -- Planned quantity
-          left join out_demand
-          on item.name = out_demand.item
-          and d.startdate <= out_demand.plandate
-          and d.enddate > out_demand.plandate
-          and out_demand.plandate >= '%s'
-          and out_demand.plandate < '%s'
+          left outer join demand
+          on item.name = demand.item_id
+          left outer join operationplan
+          on demand.name = operationplan.demand_id
+          and d.startdate <= operationplan.enddate
+          and d.enddate > operationplan.enddate
+          and operationplan.enddate >= %%s
+          and operationplan.enddate < %%s
+          and operationplan.owner_id is null
           -- Grouping
           group by items.name, items.lft, items.rght, d.bucket, d.startdate, d.enddate
         ) x
@@ -123,20 +141,22 @@ class OverviewReport(GridPivot):
         on item.name = demand.item_id
         and x.startdate <= demand.due
         and x.enddate > demand.due
-        and demand.due >= '%s'
-        and demand.due < '%s'
-        and demand.status = 'open'
+        and demand.due >= %%s
+        and demand.due < %%s
+        and demand.status in ('open', 'quote')
         -- Grouping
         group by x.name, x.lft, x.rght, x.bucket, x.startdate, x.enddate
         ) y
         -- Ordering and grouping
         group by y.name, y.lft, y.rght, y.bucket, y.startdate, y.enddate
         order by %s, y.startdate
-       ''' % (basesql, request.report_bucket, request.report_startdate,
-              request.report_enddate, request.report_startdate,
-              request.report_enddate, request.report_startdate,
-              request.report_enddate, sortsql)
-    cursor.execute(query, baseparams)
+       ''' % (basesql, sortsql)
+    cursor.execute(query, baseparams + (
+      request.report_bucket, request.report_startdate,
+      request.report_enddate, request.report_startdate,
+      request.report_enddate, request.report_startdate,
+      request.report_enddate
+      ))
 
     # Build the python result
     previtem = None
@@ -148,8 +168,8 @@ class OverviewReport(GridPivot):
       yield {
         'item': row[0],
         'bucket': row[1],
-        'startdate': python_date(row[2]),
-        'enddate': python_date(row[3]),
+        'startdate': row[2].date(),
+        'enddate': row[3].date(),
         'demand': round(row[4], 1),
         'supply': round(row[5], 1),
         'backlog': round(backlog, 1)
@@ -162,20 +182,25 @@ class DetailReport(GridReport):
   '''
   template = 'output/demandplan.html'
   title = _("Demand plan detail")
-  model = Demand
+  model = DeliveryOrder
+  basequeryset = DeliveryOrder.objects.all()
   permissions = (("view_demand_report", "Can view demand report"),)
   frozenColumns = 0
   editable = False
   multiselect = False
+  help_url = 'user-guide/user-interface/plan-analysis/demand-detail-report.html'
   rows = (
-    GridFieldText('demand', title=_('demand'), key=True, editable=False, formatter='detail', extra="role:'input/demand'"),
-    GridFieldText('item', title=_('item'), editable=False, formatter='detail', extra="role:'input/item'"),
-    GridFieldText('customer', title=_('customer'), editable=False, formatter='detail', extra="role:'input/customer'"),
+    #. Translators: Translation included with Django
+    GridFieldInteger('id', title=_('id'), key=True,editable=False, hidden=True),
+    GridFieldText('demand', title=_('demand'), field_name="demand__name", editable=False, formatter='detail', extra='"role":"input/demand"'),
+    GridFieldText('item', title=_('item'), field_name='demand__item', editable=False, formatter='detail', extra='"role":"input/item"'),
+    GridFieldText('customer', title=_('customer'), field_name='demand__customer', editable=False, formatter='detail', extra='"role":"input/customer"'),
+    GridFieldText('location', title=_('location'), field_name='demand__location', editable=False, formatter='detail', extra='"role":"input/location"'),
     GridFieldNumber('quantity', title=_('quantity'), editable=False),
-    GridFieldNumber('planquantity', title=_('planned quantity'), editable=False),
-    GridFieldDateTime('due', title=_('due date'), editable=False),
-    GridFieldDateTime('plandate', title=_('planned date'), editable=False),
-    GridFieldInteger('operationplan', title=_('operationplan'), editable=False),
+    GridFieldNumber('demandquantity', title=_('demand quantity'), field_name='demand__quantity', editable=False),
+    GridFieldDateTime('startdate', title=_('start date'), editable=False),
+    GridFieldDateTime('enddate', title=_('end date'), editable=False),
+    GridFieldDateTime('due', field_name='demand__due', title=_('due date'), editable=False),
     )
 
   @classmethod
@@ -183,3 +208,68 @@ class DetailReport(GridReport):
     if args and args[0]:
       request.session['lasttab'] = 'plandetail'
     return {'active_tab': 'plandetail'}
+
+
+@staff_member_required
+def OperationPlans(request):
+  # Check permissions
+  if request.method != "GET" or not request.is_ajax():
+    return HttpResponseBadRequest('Only ajax get requests allowed')
+  if not request.user.has_perm("view_demand_report"):
+    return HttpResponseForbidden('<h1>%s</h1>' % _('Permission denied'))
+
+  # Collect list of selected sales orders
+  so_list = request.GET.getlist('demand')
+
+  # Collect operationplans associated with the sales order(s)
+  id_list = []
+  for dm in Demand.objects.all().using(request.database).filter(pk__in=so_list).only('plan'):
+    for op in dm.plan['pegging']:
+      id_list.append(op['opplan'])
+
+  # Collect details on the operationplans
+  result = []
+  for o in PurchaseOrder.objects.all().using(request.database).filter(id__in=id_list, status='proposed'):
+    result.append({
+      'id': o.id,
+      'type': "PO",
+      'item': o.item.name,
+      'location': o.location.name,
+      'origin': o.supplier.name,
+      'startdate': str(o.startdate.date()),
+      'enddate': str(o.enddate.date()),
+      'quantity': float(o.quantity),
+      'value': float(o.quantity * o.item.price),
+      'criticality': float(o.criticality)
+    })
+  for o in DistributionOrder.objects.all().using(request.database).filter(id__in=id_list, status='proposed'):
+    result.append({
+      'id': o.id,
+      'type': "DO",
+      'item': o.item.name,
+      'location': o.location.name,
+      'origin': o.origin.name,
+      'startdate': str(o.startdate),
+      'enddate': str(o.enddate),
+      'quantity': float(o.quantity),
+      'value': float(o.quantity * o.item.price),
+      'criticality': float(o.criticality)
+    })
+  for o in ManufacturingOrder.objects.all().using(request.database).filter(id__in=id_list, status='proposed'):
+    result.append({
+      'id': o.id,
+      'type': "MO",
+      'item': '',
+      'location': o.operation.location.name,
+      'origin': o.operation.name,
+      'startdate': str(o.startdate.date()),
+      'enddate': str(o.enddate.date()),
+      'quantity': float(o.quantity),
+      'value': '',
+      'criticality': float(o.criticality)
+    })
+
+  return HttpResponse(
+    content=json.dumps(result),
+    content_type='application/json; charset=%s' % settings.DEFAULT_CHARSET
+    )

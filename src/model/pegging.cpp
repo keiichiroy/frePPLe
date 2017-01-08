@@ -24,7 +24,8 @@
 namespace frepple
 {
 
-DECLARE_EXPORT const MetaCategory* PeggingIterator::metadata;
+const MetaCategory* PeggingIterator::metadata;
+const MetaCategory* PeggingDemandIterator::metadata;
 
 
 int PeggingIterator::initialize()
@@ -36,7 +37,7 @@ int PeggingIterator::initialize()
   // Initialize the Python type
   PythonType& x = PythonExtension<PeggingIterator>::getPythonType();
   x.setName("peggingIterator");
-  x.setDoc("frePPLe iterator for demand pegging");
+  x.setDoc("frePPLe iterator for operationplan pegging");
   x.supportgetattro();
   x.supportiter();
   const_cast<MetaCategory*>(PeggingIterator::metadata)->pythonClass = x.type_object();
@@ -44,17 +45,36 @@ int PeggingIterator::initialize()
 }
 
 
-DECLARE_EXPORT PeggingIterator::PeggingIterator(const PeggingIterator& c)
-  : downstream(c.downstream), firstIteration(c.firstIteration), first(c.first)
+int PeggingDemandIterator::initialize()
+{
+  // Initialize the pegging metadata
+  PeggingDemandIterator::metadata = MetaCategory::registerCategory<PeggingDemandIterator>("demandpegging", "demandpeggings");
+  registerFields<PeggingDemandIterator>(const_cast<MetaCategory*>(metadata));
+
+  // Initialize the Python type
+  PythonType& x = PythonExtension<PeggingDemandIterator>::getPythonType();
+  x.setName("peggingDemandIterator");
+  x.setDoc("frePPLe iterator for demand pegging");
+  x.supportgetattro();
+  x.supportiter();
+  const_cast<MetaCategory*>(PeggingDemandIterator::metadata)->pythonClass = x.type_object();
+  return x.typeReady();
+}
+
+
+PeggingIterator::PeggingIterator(const PeggingIterator& c)
+: downstream(c.downstream), firstIteration(c.firstIteration), first(c.first), second_pass(c.second_pass)
 {
   initType(metadata);
   for (statestack::const_iterator i = c.states.begin(); i != c.states.end(); ++i)
     states.push_back( state(i->opplan, i->quantity, i->offset, i->level) );
+  for (deque<state>::const_iterator i = c.states_sorted.begin(); i != c.states_sorted.end(); ++i)
+    states_sorted.push_back(state(i->opplan, i->quantity, i->offset, i->level));
 }
 
 
-DECLARE_EXPORT PeggingIterator::PeggingIterator(const Demand* d)
-  : downstream(false), firstIteration(true), first(false)
+PeggingIterator::PeggingIterator(const Demand* d)
+  : downstream(false), firstIteration(true), first(false), second_pass(false)
 {
   initType(metadata);
   const Demand::OperationPlanList &deli = d->getDelivery();
@@ -64,11 +84,41 @@ DECLARE_EXPORT PeggingIterator::PeggingIterator(const Demand* d)
     OperationPlan *t = (*opplaniter)->getTopOwner();
     updateStack(t, t->getQuantity(), 0.0, 0);
   }
+
+  // Bring all pegging information to a second stack.
+  // Only in this way can we avoid that the same operationplan is returned
+  // multiple times
+  while (operator bool())
+  {
+    /** Check if already found in the vector. */
+    bool found = false;
+    state& curtop = states.back();
+    for (deque<state>::iterator it = states_sorted.begin(); it != states_sorted.end() && !found; ++it)
+      if (it->opplan == curtop.opplan)
+      {
+        // Update existing element in sorted stack
+        it->quantity += curtop.quantity;
+        if (it->level > curtop.level)
+          it->level = curtop.level;
+        found = true;
+      }
+    if (!found)
+      // New element in sorted stack
+      states_sorted.push_back( state(curtop.opplan, curtop.quantity, curtop.offset, curtop.level) );
+
+    if (downstream)
+      ++*this;
+    else
+      --*this;
+  }
+
+  // The normal iteration will use the sorted results
+  second_pass = true;
 }
 
 
-DECLARE_EXPORT PeggingIterator::PeggingIterator(const OperationPlan* opplan, bool b)
-  : downstream(b), firstIteration(true), first(false)
+PeggingIterator::PeggingIterator(const OperationPlan* opplan, bool b)
+  : downstream(b), firstIteration(true), first(false), second_pass(false)
 {
   initType(metadata);
   if (!opplan) return;
@@ -89,8 +139,8 @@ DECLARE_EXPORT PeggingIterator::PeggingIterator(const OperationPlan* opplan, boo
 }
 
 
-DECLARE_EXPORT PeggingIterator::PeggingIterator(FlowPlan* fp, bool b)
-  : downstream(b), firstIteration(true), first(false)
+PeggingIterator::PeggingIterator(FlowPlan* fp, bool b)
+  : downstream(b), firstIteration(true), first(false), second_pass(false)
 {
   initType(metadata);
   if (!fp) return;
@@ -103,8 +153,8 @@ DECLARE_EXPORT PeggingIterator::PeggingIterator(FlowPlan* fp, bool b)
 }
 
 
-DECLARE_EXPORT PeggingIterator::PeggingIterator(LoadPlan* lp, bool b)
-  : downstream(b), firstIteration(true), first(false)
+PeggingIterator::PeggingIterator(LoadPlan* lp, bool b)
+  : downstream(b), firstIteration(true), first(false), second_pass(false)
 {
   initType(metadata);
   if (!lp) return;
@@ -117,8 +167,15 @@ DECLARE_EXPORT PeggingIterator::PeggingIterator(LoadPlan* lp, bool b)
 }
 
 
-DECLARE_EXPORT PeggingIterator& PeggingIterator::operator--()
+PeggingIterator& PeggingIterator::operator--()
 {
+  // Second pass
+  if (second_pass)
+  {
+    states_sorted.pop_front();
+    return *this;
+  }
+
   // Validate
   if (states.empty())
     throw LogicException("Incrementing the iterator beyond it's end");
@@ -141,8 +198,15 @@ DECLARE_EXPORT PeggingIterator& PeggingIterator::operator--()
 }
 
 
-DECLARE_EXPORT PeggingIterator& PeggingIterator::operator++()
+PeggingIterator& PeggingIterator::operator++()
 {
+  // Second pass
+  if (second_pass)
+  {
+    states_sorted.pop_front();
+    return *this;
+  }
+
   // Validate
   if (states.empty())
     throw LogicException("Incrementing the iterator beyond it's end");
@@ -165,7 +229,7 @@ DECLARE_EXPORT PeggingIterator& PeggingIterator::operator++()
 }
 
 
-DECLARE_EXPORT void PeggingIterator::followPegging
+void PeggingIterator::followPegging
 (const OperationPlan* op, double qty, double offset, short lvl)
 {
   // Zero quantity operationplans don't have further pegging
@@ -200,7 +264,7 @@ DECLARE_EXPORT void PeggingIterator::followPegging
 }
 
 
-DECLARE_EXPORT PeggingIterator* PeggingIterator::next()
+PeggingIterator* PeggingIterator::next()
 {
   if (firstIteration)
     firstIteration = false;
@@ -209,13 +273,13 @@ DECLARE_EXPORT PeggingIterator* PeggingIterator::next()
   else
     --*this;
   if (!operator bool())
-    return NULL;
+    return nullptr;
   else
     return this;
 }
 
 
-DECLARE_EXPORT void PeggingIterator::updateStack
+void PeggingIterator::updateStack
 (const OperationPlan* op, double qty, double o, short lvl)
 {
   // Avoid very small pegging quantities
@@ -236,5 +300,49 @@ DECLARE_EXPORT void PeggingIterator::updateStack
     states.push_back( state(op, qty, o, lvl) );
 }
 
+
+PeggingDemandIterator::PeggingDemandIterator(const PeggingDemandIterator& c)
+{
+  initType(metadata);
+  dmds.insert(c.dmds.begin(), c.dmds.end());
+}
+
+
+PeggingDemandIterator::PeggingDemandIterator(const OperationPlan* opplan)
+{
+  initType(metadata);
+  // Walk over all downstream operationplans till demands are found
+  for (PeggingIterator p(opplan); p; ++p)
+  {
+    const OperationPlan* m = p.getOperationPlan();
+    if (!m) 
+      continue;
+    Demand* dmd = m->getTopOwner()->getDemand();
+    if (!dmd || p.getQuantity() < ROUNDING_ERROR)
+      continue;
+    map<Demand*, double>::iterator i = dmds.lower_bound(dmd);
+    if (i != dmds.end() && i->first == dmd)
+      // Pegging to the same demand multiple times
+      i->second += p.getQuantity();
+    else
+      // Adding demand 
+      dmds.insert(i, make_pair(dmd, p.getQuantity()));
+  }
+}
+
+
+PeggingDemandIterator* PeggingDemandIterator::next()
+{
+  if (first)
+  {
+    iter = dmds.begin();
+    first = false;
+  }
+  else
+    ++iter;
+  if (iter == dmds.end())
+    return nullptr;
+  return this;
+}
 
 } // End namespace

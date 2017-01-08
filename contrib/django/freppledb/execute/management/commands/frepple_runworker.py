@@ -112,6 +112,7 @@ class Command(BaseCommand):
       try:
         logger.info("starting task %d at %s" % (task.id, datetime.now()))
         background = False
+        task.started = datetime.now()
         # A
         if task.name == 'generate plan':
           kwargs = {}
@@ -168,7 +169,19 @@ class Command(BaseCommand):
           management.call_command('openbravo_import', database=database, task=task.id, verbosity=0, **args)
         # K
         elif task.name == 'Openbravo export' and 'freppledb.openbravo' in settings.INSTALLED_APPS:
-          management.call_command('openbravo_export', database=database, task=task.id, verbosity=0)
+          if '--filter' in task.arguments:
+            management.call_command('openbravo_export', database=database, task=task.id, verbosity=0, filter=True)
+          else:
+            management.call_command('openbravo_export', database=database, task=task.id, verbosity=0)
+        # L
+        elif task.name == 'Odoo import' and 'freppledb.odoo' in settings.INSTALLED_APPS:
+          management.call_command('odoo_import', database=database, task=task.id, verbosity=0)
+        # M
+        elif task.name == 'import from folder':
+          management.call_command('frepple_importfromfolder', database=database, task=task.id)
+        # N
+        elif task.name == 'export to folder':
+          management.call_command('frepple_exporttofolder', database=database, task=task.id)
         else:
           logger.error('Task %s not recognized' % task.name)
         # Read the task again from the database and update.

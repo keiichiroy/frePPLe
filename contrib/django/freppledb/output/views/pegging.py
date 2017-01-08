@@ -40,9 +40,11 @@ class ReportByDemand(GridReport):
   hasTimeBuckets = True
   multiselect = False
   heightmargin = 82
+  help_url = 'user-guide/user-interface/plan-analysis/demand-gantt-report.html'
   rows = (
     GridFieldText('depth', title=_('depth'), editable=False, sortable=False),
-    GridFieldText('operation', title=_('operation'), editable=False, sortable=False, key=True, formatter='detail', extra="role:'input/operation'"),
+    GridFieldText('operation', title=_('operation'), editable=False, sortable=False, key=True, formatter='detail', extra='"role":"input/operation"'),
+    GridFieldText('type', title=_('type'), editable=False, sortable=False, width=100),
     #GridFieldText('buffer', title=_('buffer'), formatter='buffer', editable=False, sortable=False),
     #GridFieldText('item', title=_('item'), formatter='item', editable=False, sortable=False),
     GridFieldText('resource', title=_('resource'), editable=False, sortable=False, extra='formatter:reslistfmt'),
@@ -53,6 +55,7 @@ class ReportByDemand(GridReport):
     GridFieldText('expanded', editable=False, sortable=False, hidden=True),
     GridFieldText('current', editable=False, sortable=False, hidden=True),
     GridFieldText('due', editable=False, sortable=False, hidden=True),
+    GridFieldText('showdrilldown', editable=False, sortable=False, hidden=True),
     )
 
 
@@ -66,20 +69,28 @@ class ReportByDemand(GridReport):
     # Get the earliest and latest operationplan, and the demand due date
     cursor = connections[request.database].cursor()
     cursor.execute('''
-      select demand.due, min(startdate), max(enddate)
-      from demand
-        left outer join out_demandpegging
-          on out_demandpegging.demand = demand.name
-        left outer join out_operationplan
-          on out_demandpegging.operationplan = out_operationplan.id
-      where demand.name = %s
-        and out_operationplan.operation not like 'Inventory %%'
-      group by due
+      with dmd as (
+        select
+          due,
+          cast(json_array_elements(plan->'pegging')->>'opplan' as integer) opplan
+        from demand
+        where name = %s
+        )
+      select min(dmd.due), min(startdate), max(enddate)
+      from dmd
+      inner join operationplan
+      on dmd.opplan = operationplan.id
+      and type <> 'STCK'
       ''', (args[0]))
     x = cursor.fetchone()
-    if not x:
-      raise Http404("Demand not found")
     (due, start, end) = x
+    if not due:
+      # This demand is unplanned
+      request.report_startdate = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+      request.report_enddate = request.report_startdate + timedelta(days=1)
+      request.report_bucket = None
+      request.report_bucketlist = []
+      return
     if not start:
       start = due
     if not end:
@@ -117,37 +128,47 @@ class ReportByDemand(GridReport):
 
     # Collect demand due date, all operationplans and loaded resources
     query = '''
-      select
-        demand.due, ops.operation, ops.level, ops.pegged,
-        op2.id, op2.startdate, op2.enddate, op2.quantity,
-        op2.locked, out_loadplan.theresource
-      from (
+      with pegging as (
         select
-          out_operationplan.operation as operation,
-          min(out_demandpegging.level) as level,
-          min(out_demandpegging.id) as id,
-          sum(out_demandpegging.quantity) as pegged
-        from out_demandpegging
-        inner join out_operationplan
-          on out_operationplan.id = out_demandpegging.operationplan
-        where demand = %s
-        group by out_operationplan.operation
+          min(rownum) as rownum, min(due) as due, opplan, min(lvl) as lvl, sum(quantity) as quantity
+        from (select
+          row_number() over () as rownum, opplan, due, lvl, quantity
+        from (select
+          due,
+          cast(json_array_elements(plan->'pegging')->>'opplan' as integer) as opplan,
+          cast(json_array_elements(plan->'pegging')->>'level' as integer) as lvl,
+          cast(json_array_elements(plan->'pegging')->>'quantity' as numeric) as quantity
+          from demand
+          where name = %s
+          ) d1
+          )d2
+        group by opplan
+        )
+      select
+        pegging.due, operationplan.name, pegging.lvl, ops.pegged,
+        pegging.rownum, operationplan.startdate, operationplan.enddate, operationplan.quantity,
+        operationplan.status, operationplanresource.resource, operationplan.type,
+        case when operationplan.operation_id is not null then 1 else 0 end as show
+      from pegging
+      inner join operationplan
+        on operationplan.id = pegging.opplan
+      inner join (
+        select name,
+          min(rownum) as rownum,
+          sum(pegging.quantity) as pegged
+        from pegging
+        inner join operationplan
+          on pegging.opplan = operationplan.id
+        group by operationplan.name
         ) ops
-      inner join out_demandpegging peg2
-        on peg2.demand = %s
-      inner join out_operationplan op2
-        on op2.id = peg2.operationplan
-        and op2.operation = ops.operation
-      inner join demand
-        on name = %s
-      left outer join out_loadplan
-        on op2.id = out_loadplan.operationplan_id
-      order by ops.id, op2.id
+      on operationplan.name = ops.name
+      left outer join operationplanresource
+        on pegging.opplan = operationplanresource.operationplan_id
+      order by ops.rownum, pegging.rownum
       '''
-    cursor.execute(query, baseparams + baseparams + baseparams)
+    cursor.execute(query, baseparams)
 
     # Build the Python result
-    # due, oper, level, pegged, op_id, op_start, op_end, op_qty, op_res
     prevrec = None
     parents = {}
     for rec in cursor.fetchall():
@@ -161,6 +182,8 @@ class ReportByDemand(GridReport):
         prevrec = {
           'current': str(current),
           'operation': rec[1],
+          'type': rec[10],
+          'showdrilldown': rec[11],
           'depth': rec[2],
           'quantity': str(rec[3]),
           'due': round((rec[0] - request.report_startdate).total_seconds() / horizon, 3),
@@ -176,7 +199,7 @@ class ReportByDemand(GridReport):
              'w': round((rec[6] - rec[5]).total_seconds() / horizon, 3),
              'startdate': str(rec[5]),
              'enddate': str(rec[6]),
-             'locked': rec[8],
+             'status': rec[8],
              'id': rec[4]
              }]
           }

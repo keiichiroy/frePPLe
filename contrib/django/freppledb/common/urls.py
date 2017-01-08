@@ -32,6 +32,12 @@ urlpatterns = patterns(
   # Prefix
   '',
 
+  # Cockpit screen
+  url(r'^$', freppledb.common.views.cockpit, name='cockpit'),
+  
+  # Wizard screen
+  url(r'^wizard/$', freppledb.common.views.wizard, name='wizard'),
+
   # User preferences
   url(r'^preferences/$', freppledb.common.views.preferences, name="preferences"),
 
@@ -67,4 +73,6 @@ urlpatterns = patterns(
   (r'^api/common/parameter/(?P<pk>(.+))/$', freppledb.common.serializers.ParameterdetailAPI.as_view()),
   (r'^api/common/comment/(?P<pk>(.+))/$', freppledb.common.serializers.CommentdetailAPI.as_view()),
   (r'^api/$', APIIndexView),
+
+  url(r'^about/$', freppledb.common.views.AboutView, name="about"),
 )

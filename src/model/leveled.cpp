@@ -32,18 +32,18 @@ namespace frepple
 {
 
 
-DECLARE_EXPORT bool HasLevel::recomputeLevels = false;
-DECLARE_EXPORT bool HasLevel::computationBusy = false;
-DECLARE_EXPORT int HasLevel::numberOfClusters = 0;
-DECLARE_EXPORT short HasLevel::numberOfLevels = 0;
+bool HasLevel::recomputeLevels = false;
+bool HasLevel::computationBusy = false;
+int HasLevel::numberOfClusters = 0;
+short HasLevel::numberOfLevels = 0;
 
 
-DECLARE_EXPORT void HasLevel::computeLevels()
+void HasLevel::computeLevels()
 {
   computationBusy = true;
   // Get exclusive access to this function in a multi-threaded environment.
-  static Mutex levelcomputationbusy;
-  ScopeMutexLock l(levelcomputationbusy);
+  static mutex levelcomputationbusy;
+  lock_guard<mutex> l(levelcomputationbusy);
 
   // Another thread may already have computed the levels while this thread was
   // waiting for the lock. In that case the while loop will be skipped.
@@ -315,6 +315,22 @@ DECLARE_EXPORT void HasLevel::computeLevels()
               }
             }
           }  // End of needs-procssing if statement
+
+          // Add all buffers for this item to the same cluster
+          Item::bufferIterator buf_iter(cur_Flow->getBuffer()->getItem());
+          while (Buffer* tmpbuf = buf_iter.next())
+            if (!tmpbuf->cluster)
+            {
+              tmpbuf->cluster = cur_cluster;
+              for (Buffer::flowlist::const_iterator
+                buffl = tmpbuf->getFlows().begin();
+                buffl != tmpbuf->getFlows().end();
+                ++buffl)
+              {
+                if (!buffl->getOperation()->cluster)
+                  buffl->getOperation()->cluster = cur_cluster;
+              }
+            }
         } // End of flow loop
 
       }     // End while stack not empty

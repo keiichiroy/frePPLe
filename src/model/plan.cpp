@@ -25,24 +25,26 @@ namespace frepple
 {
 
 
-DECLARE_EXPORT Plan* Plan::thePlan;
-DECLARE_EXPORT const MetaCategory* Plan::metadata;
+Plan* Plan::thePlan;
+const MetaClass* Plan::metadata;
+const MetaCategory* Plan::metacategory;
 
 
 int Plan::initialize()
 {
   // Initialize the plan metadata.
-  metadata = MetaCategory::registerCategory<Plan>("plan","");
-  registerFields<Plan>(const_cast<MetaCategory*>(metadata));
+  metacategory = MetaCategory::registerCategory<Plan>("plan", "");
+  Plan::metadata = MetaClass::registerClass<OperationPlan>("plan", "plan", true);
+  registerFields<Plan>(const_cast<MetaCategory*>(metacategory));
 
   // Initialize the Python type
-  PythonType& x = PythonExtension<Plan>::getPythonType();
+  PythonType& x = FreppleCategory<Plan>::getPythonType();
   x.setName("parameters");
   x.setDoc("frePPLe global settings");
   x.supportgetattro();
   x.supportsetattro();
   int tmp = x.typeReady();
-  const_cast<MetaCategory*>(metadata)->pythonClass = x.type_object();
+  const_cast<MetaClass*>(metadata)->pythonClass = x.type_object();
 
   // Create a singleton plan object
   // Since we can count on the initialization being executed only once, also
@@ -56,17 +58,17 @@ int Plan::initialize()
 }
 
 
-DECLARE_EXPORT Plan::~Plan()
+Plan::~Plan()
 {
   // Closing the logfile
   Environment::setLogFile("");
 
   // Clear the pointer to this singleton object
-  thePlan = NULL;
+  thePlan = nullptr;
 }
 
 
-DECLARE_EXPORT void Plan::setCurrent (Date l)
+void Plan::setCurrent (Date l)
 {
   // Update the time
   cur_Date = l;

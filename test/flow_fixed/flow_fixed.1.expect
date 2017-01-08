@@ -131,7 +131,7 @@ OPERATION	1. deliver end item	2013-03-02T00:00:00	2013-03-03T00:00:00	50
 OPERATION	1. make end item	2013-01-18T00:00:00	2013-01-19T00:00:00	100
 OPERATION	1. make end item	2013-02-05T00:00:00	2013-02-06T00:00:00	10
 OPERATION	1. make end item	2013-03-01T00:00:00	2013-03-02T00:00:00	50
-OPERATION	1. supply fixed item	2013-02-28T00:00:00	2013-03-01T00:00:00	10	locked
+OPERATION	1. supply fixed item	2013-03-01T00:00:00	2013-03-01T00:00:00	10	locked
 OPERATION	2. deliver co-product	2013-01-26T00:00:00	2013-01-27T00:00:00	10
 OPERATION	2. deliver co-product	2013-02-06T00:00:00	2013-02-07T00:00:00	5
 OPERATION	2. deliver co-product	2013-02-19T00:00:00	2013-02-20T00:00:00	7
@@ -243,9 +243,11 @@ OPERATION	6. make end item - alternate 1	2013-02-17T00:00:00	2013-02-19T00:00:00
 OPERATION	6. make end item - alternate 1	2013-02-17T00:00:00	2013-02-19T00:00:00	1
 PROBLEM	material excess	Buffer '1. fixed consumption item' has material excess of 3	1971-01-01T00:00:00 / 2013-02-05T00:00:00
 PROBLEM	material excess	Buffer '1. fixed consumption item' has material excess of 8	2013-03-01T00:00:00 / 2030-12-31T00:00:00
+PROBLEM	invalid data	No replenishment defined for '1. fixed consumption item'	1971-01-01T00:00:00 / 2030-12-31T00:00:00
 PROBLEM	material excess	Buffer '2. fixed production co-product' has material excess of 4	1971-01-01T00:00:00 / 2013-01-26T00:00:00
 PROBLEM	material excess	Buffer '2. fixed production co-product' has material excess of 1	2013-02-06T00:00:00 / 2013-02-19T00:00:00
 PROBLEM	material excess	Buffer '2. main product' has material excess of 1200	2013-01-26T00:00:00 / 2030-12-31T00:00:00
+PROBLEM	invalid data	No replenishment defined for '2. main product'	1971-01-01T00:00:00 / 2030-12-31T00:00:00
 PROBLEM	material excess	Buffer '3. end item' has material excess of 3	1971-01-01T00:00:00 / 2013-02-06T00:00:00
 PROBLEM	material excess	Buffer '3. end item' has material excess of 2	2013-02-19T00:00:00 / 2030-12-31T00:00:00
 PROBLEM	material excess	Buffer '4. end item' has material excess of 7	1971-01-01T00:00:00 / 2013-02-06T00:00:00

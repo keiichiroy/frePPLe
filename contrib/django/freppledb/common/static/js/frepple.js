@@ -1,6 +1,6 @@
-
 // Django sets this variable in the admin/base.html template.
 window.__admin_media_prefix__ = "/static/admin/";
+
 
 
 // Adjust the breadcrumbs such that it fits on a single line.
@@ -8,12 +8,15 @@ window.__admin_media_prefix__ = "/static/admin/";
 function breadcrumbs_reflow()
 {
   var crumbs = $("#breadcrumbs");
-  var height_one_line = Math.ceil($("#cockpitcrumb").height()) + 1;
+  var height_one_line = Math.ceil($("#cockpitcrumb").height()) + 16;
+
   // Show all elements previously hidden
-  crumbs.children("span:hidden").show();
+  crumbs.children("li:hidden").show();
   // Hide the first crumbs till it all fits on a single line.
-  crumbs.children("span").each(function() {
-    if (crumbs.height() > height_one_line) $(this).hide();
+  var first = true;
+  crumbs.children("li").each(function() {
+    if (crumbs.height() > height_one_line && !first) $(this).hide();
+    first = false;
   });
 }
 
@@ -31,6 +34,133 @@ function admin_escape(n)
 }
 
 
+/// <reference path="jquery.js" />
+/*
+jquery-resizable
+Version 0.14 - 1/4/2015
+© 2015 Rick Strahl, West Wind Technologies
+www.west-wind.com
+Licensed under MIT License
+*/
+
+    $.fn.resizable = function fnResizable(options) {
+        var opt = {
+            // selector for handle that starts dragging
+            handleSelector: null,
+            // resize the width
+            resizeWidth: true,
+            // resize the height
+            resizeHeight: true,
+            // hook into start drag operation (event passed)
+            onDragStart: null,
+            // hook into stop drag operation (event passed)
+            onDragEnd: null,
+            // hook into each drag operation (event passed)
+            onDrag: null,
+            // disable touch-action on $handle
+            // prevents browser level actions like forward back gestures
+            touchActionNone: true
+        };
+        if (typeof options == "object") opt = $.extend(opt, options);
+
+        return this.each(function () {
+            var startPos, startTransition;
+
+            var $el = $(this);
+            if ($(this).hasClass("ui-jqgrid")) return; //fix for Firefox bug that adds resize to the grid, we want only to resize the grid parent div ex: "content-main"
+
+            var $handle = opt.handleSelector ? $(opt.handleSelector) : $el;
+
+            if (opt.touchActionNone)
+                $handle.css("touch-action", "none");
+
+            $el.addClass("resizable");
+            $handle.bind('mousedown.rsz touchstart.rsz', startDragging);
+
+            function noop(e) {
+                e.stopPropagation();
+                e.preventDefault();
+            };
+
+            function startDragging(e) {
+                startPos = getMousePos(e);
+                startPos.width = parseInt($el.width(), 10);
+                startPos.height = parseInt($el.height(), 10);
+
+                startTransition = $el.css("transition");
+                $el.css("transition", "none");
+
+                if (opt.onDragStart) {
+                    if (opt.onDragStart(e, $el, opt) === false)
+                        return;
+                }
+                opt.dragFunc = doDrag;
+
+                $(document).bind('mousemove.rsz', opt.dragFunc);
+                $(document).bind('mouseup.rsz', stopDragging);
+                if (window.Touch || navigator.maxTouchPoints) {
+                    $(document).bind('touchmove.rsz', opt.dragFunc);
+                    $(document).bind('touchend.rsz', stopDragging);
+                }
+                $(document).bind('selectstart.rsz', noop); // disable selection
+            }
+
+            function doDrag(e) {
+                var pos = getMousePos(e);
+
+                if (opt.resizeWidth) {
+                    var newWidth = startPos.width + pos.x - startPos.x;
+                    $el.width(newWidth);
+                }
+
+                if (opt.resizeHeight) {
+                    var newHeight = startPos.height + pos.y - startPos.y;
+                    $el.height(newHeight);
+                }
+
+                if (opt.onDrag)
+                    opt.onDrag(e, $el, opt);
+            }
+
+            function stopDragging(e) {
+                e.stopPropagation();
+                e.preventDefault();
+
+                $(document).unbind('mousemove.rsz', opt.dragFunc);
+                $(document).unbind('mouseup.rsz', stopDragging);
+
+                if (window.Touch || navigator.maxTouchPoints) {
+                    $(document).unbind('touchmove.rsz', opt.dragFunc);
+                    $(document).unbind('touchend.rsz', stopDragging);
+                }
+                $(document).unbind('selectstart.rsz', noop);
+
+                // reset changed values
+                $el.css("transition", startTransition);
+
+                if (opt.onDragEnd)
+                    opt.onDragEnd(e, $el, opt);
+
+                return false;
+            }
+
+            function getMousePos(e) {
+                var pos = { x: 0, y: 0, width: 0, height: 0 };
+                if (typeof e.clientX === "number") {
+                    pos.x = e.clientX;
+                    pos.y = e.clientY;
+                } else if (e.originalEvent.touches) {
+                    pos.x = e.originalEvent.touches[0].clientX;
+                    pos.y = e.originalEvent.touches[0].clientY;
+                } else
+                    return null;
+
+                return pos;
+            }
+        });
+    }
+// end of jquery-resizable copy
+
 //----------------------------------------------------------------------------
 // A class to handle changes to a grid.
 //----------------------------------------------------------------------------
@@ -43,32 +173,28 @@ var upload = {
 
   undo : function ()
   {
-    if ($('#undo').hasClass("save_undo_button_inactive")) return;
+    if ($('#undo').hasClass("btn-primary")) return;
     $("#grid").trigger("reloadGrid");
     $("#grid").closest(".ui-jqgrid-bdiv").scrollTop(0);
-    $('#save').addClass("save_undo_button_inactive").removeClass("save_undo_button_active");
-    $('#undo').addClass("save_undo_button_inactive").removeClass("save_undo_button_active");
-    $('#actions').addClass("ui-selectmenu-disabled ui-state-disabled change_status_selectmenu_inactive")
-    .removeClass("change_status_selectmenu_active ui-state-enabled ui-selectmenu-enabled")
-    .prop('disabled', 'disabled');
+    $('#save, #undo').addClass("btn-primary").removeClass("btn-danger").prop('disabled', true);
+    $('#actions1').prop('disabled', true);
 
-    $('#filter').removeClass("ui-state-disabled");
+    $('#filter').prop('disabled', false);
     $(window).off('beforeunload', upload.warnUnsavedChanges);
   },
 
   select : function ()
   {
-    $('#filter').addClass("ui-state-disabled");
+    $('#filter').prop('disabled', true);
     $.jgrid.hideModal("#searchmodfbox_grid");
-    $('#save').removeClass("save_undo_button_inactive").addClass("save_undo_button_active");
-    $('#undo').removeClass("save_undo_button_inactive").addClass("save_undo_button_active");
+    $('#save, #undo').removeClass("btn-primary").addClass("btn-danger").prop('disabled', false);
     $(window).off('beforeunload', upload.warnUnsavedChanges);
     $(window).on('beforeunload', upload.warnUnsavedChanges);
   },
 
   save : function()
   {
-    if ($('#save').hasClass("save_undo_button_inactive")) return;
+    if ($('#save').hasClass("btn-primary")) return;
 
     // Pick up all changed cells. If a function "getData" is defined on the
     // page we use that, otherwise we use the standard functionality of jqgrid.
@@ -88,16 +214,23 @@ var upload = {
             upload.undo();
             },
           error: function (result, stat, errorThrown) {
-            $('#popup').html(result.responseText)
-              .dialog({
-                title: gettext("Error saving data"),
-                autoOpen: true,
-                resizable: false,
-                width: 'auto',
-                height: 'auto'
-              });
-            $('#timebuckets').dialog('close');
+              $('#timebuckets').modal('hide');
             $.jgrid.hideModal("#searchmodfbox_grid");
+              $('#popup').html('<div class="modal-dialog">'+
+                      '<div class="modal-content">'+
+                        '<div class="modal-header">'+
+                          '<button type="button" class="close" data-dismiss="modal"><span aria-hidden="true" class="fa fa-times"></span></button>'+
+                          '<h4 class="modal-title alert alert-danger">'+ gettext("Error saving data")+'</h4>'+
+                        '</div>'+
+                        '<div class="modal-body">'+
+                          '<p>'+result.responseText+'</p>'+
+                        '</div>'+
+                        '<div class="modal-footer">'+
+                          '<input type="submit" id="cancelbutton" role="button" class="btn btn-primary pull-right" data-dismiss="modal" value="'+gettext('Close')+'">'+
+                        '</div>'+
+                      '</div>'+
+                  '</div>' )
+                  .modal('show');
             }
         });
   },
@@ -105,54 +238,53 @@ var upload = {
   validateSort: function(event)
   {
     if ($(this).attr('id') == 'grid_cb') return;
-    if ($('#save').hasClass("save_undo_button_inactive"))
+    if ($("body").hasClass("popup"))  return;
+    if ($('#save').hasClass("btn-primary"))
       jQuery("#grid").jqGrid('resetSelection');
     else
     {
-      $('#popup').html("")
-        .dialog({
-          title: gettext("Save or cancel your changes first"),
-          autoOpen: true,
-          resizable: false,
-          width: 'auto',
-          height: 'auto',
-          buttons: [
-            {
-              text: gettext("Save"),
-              click: function() {
+      $('#timebuckets').modal('hide');
+      $.jgrid.hideModal("#searchmodfbox_grid");
+      $('#popup').html('<div class="modal-dialog">'+
+          '<div class="modal-content">'+
+          '<div class="modal-header">'+
+            '<h4 class="modal-title alert-warning">'+ gettext("Save or cancel your changes first") +'</h4>'+
+          '</div>'+
+          '<div class="modal-body">'+
+            '<p>'+""+'</p>'+
+          '</div>'+
+          '<div class="modal-footer">'+
+            '<input type="submit" id="savebutton" role="button" class="btn btn-primary pull-right" value="'+gettext('Save')+'">'+
+            '<input type="submit" id="cancelbutton" role="button" class="btn btn-primary pull-right" value="'+gettext('Cancel')+'">'+
+          '</div>'+
+        '</div>'+
+      '</div>' )
+      .modal('show');
+      $('#savebutton').on('click', function() {
                 upload.save();
-                $('#popup').dialog('close');
-                }
-            },
-            {
-              text: gettext("Cancel"),
-              click: function() {
+        $('#popup').modal('hide');
+      });
+      $('#cancelbutton').on('click', function() {
                 upload.undo();
-                $('#popup').dialog('close');
-                }
-            }
-            ]
+        $('#popup').modal('hide');
         });
       event.stopPropagation();
     }
   }
 }
 
-
 //----------------------------------------------------------------------------
 // Custom formatter functions for the grid cells.
 //----------------------------------------------------------------------------
 
 function opendetail(event) {
-  var database = $('#database').val();
-  database = (database===undefined || database==='default') ? '' : '/' + database;
   var curlink = $(event.target).parent().attr('href');
   var objectid = $(event.target).parent().parent().text();
   objectid = admin_escape(objectid);
 
   event.preventDefault();
   event.stopImmediatePropagation();
-  window.location.href = database + curlink.replace('key', objectid);
+  window.location.href = url_prefix + curlink.replace('key', objectid);
 }
 
 jQuery.extend($.fn.fmatter, {
@@ -162,31 +294,35 @@ jQuery.extend($.fn.fmatter, {
   },
   duration : function(cellvalue, options, rowdata) {
     if (cellvalue === undefined || cellvalue === '' || cellvalue === null) return '';
-    var d = cellvalue.split(" ");
-    if (d.length == 1)
-    {
-      var t = cellvalue.split(":");
-      var days = 0;
-    }
-    else
-    {
-      var t = d[1].split(":");
-      var days = (d[0]!='' ? parseFloat(d[0]) : 0);
-    }
-    switch (t.length)
-    {
-      case 0: // Days only
-        var seconds = days * 86400;
-        break;
-      case 1: // Days, seconds
-        var seconds = days * 86400 + (t[0]!='' ? parseFloat(t[0]) : 0);
-        break;
-      case 2: // Days, hours and seconds
-        var seconds = days * 86400 + (t[0]!='' ? parseFloat(t[0]) : 0) * 60 + (t[1]!='' ? parseFloat(t[1]) : 0);
-        break;
-      default:
-        // Days, hours, minutes, seconds
-        var seconds = days * 86400 + (t[0]!='' ? parseFloat(t[0]) : 0) * 3600 + (t[1]!='' ? parseFloat(t[1]) : 0) * 60 + (t[2]!='' ? parseFloat(t[2]) : 0);
+    if (typeof cellvalue === "number")
+      var seconds = cellvalue;
+    else {
+      var d = cellvalue.split(" ");
+      if (d.length == 1)
+      {
+        var t = cellvalue.split(":");
+        var days = 0;
+      }
+      else
+      {
+        var t = d[1].split(":");
+        var days = (d[0]!='' ? parseFloat(d[0]) : 0);
+      }
+      switch (t.length)
+      {
+        case 0: // Days only
+          var seconds = days * 86400;
+          break;
+        case 1: // Days, seconds
+          var seconds = days * 86400 + (t[0]!='' ? parseFloat(t[0]) : 0);
+          break;
+        case 2: // Days, hours and seconds
+          var seconds = days * 86400 + (t[0]!='' ? parseFloat(t[0]) : 0) * 60 + (t[1]!='' ? parseFloat(t[1]) : 0);
+          break;
+        default:
+          // Days, hours, minutes, seconds
+          var seconds = days * 86400 + (t[0]!='' ? parseFloat(t[0]) : 0) * 3600 + (t[1]!='' ? parseFloat(t[1]) : 0) * 60 + (t[2]!='' ? parseFloat(t[2]) : 0);
+      }
     }
     var days   = Math.floor(seconds / 86400);
     var hours   = Math.floor((seconds - (days * 86400)) / 3600);
@@ -203,11 +339,12 @@ jQuery.extend($.fn.fmatter, {
 
   detail : function(cellvalue, options, rowdata) {
     if (cellvalue === undefined || cellvalue === '' || cellvalue === null) return '';
-    if (options['colModel']['popup']) return cellvalue;
+    if (options['colModel']['popup'] || rowdata.showdrilldown == '0') return cellvalue;
     return cellvalue + "<a href='/detail/" + options.colModel.role + "/key/' onclick='opendetail(event)'><span class='leftpadding fa fa-caret-right' role='" + options.colModel.role + "'></span></a>";
   },
 
   demanddetail : function(cellvalue, options, rowdata) {
+    // TODO This function is not very generic.
     if (cellvalue === undefined || cellvalue === '') return '';
     if (options['colModel']['popup']) return cellvalue;
     var result = '';
@@ -216,7 +353,7 @@ jQuery.extend($.fn.fmatter, {
     {
       var detail = dmds[i].split(" : ");
       if (result != '') result += ', ';
-      result += detail[0] + " : <span>" + detail[1] + "<span class='context fa fa-caret-right' role='demand'></span></span>"
+      result += detail[0] + " : <span>" + detail[1] + "<a href='/detail/input/demand/key/' onclick='opendetail(event)'><span class='leftpadding fa fa-caret-right' role='" + options.colModel.role + "'></span></a></span>"
     }
     return result;
   },
@@ -249,7 +386,7 @@ var grid = {
      if (grid.selected != undefined)
        $(this).jqGrid('setCell', grid.selected, 'select', null);
      grid.selected = id;
-     $(this).jqGrid('setCell', id, 'select', '<button onClick="opener.dismissRelatedLookupPopup(window, grid.selected);" class="ui-button ui-button-text-only ui-widget ui-state-default ui-corner-all"><span class="ui-button-text" style="font-size:66%">'+gettext('Select')+'</span></button>');
+     $(this).jqGrid('setCell', id, 'select', '<input type="checkbox" onClick="opener.dismissRelatedLookupPopup(window, grid.selected);" class="btn btn-primary" style="width: 18px; height: 18px;" data-toggle="tooltip" title="'+gettext('Click to select record')+'"></input>');
    },
 
    runAction: function(next_action) {
@@ -264,10 +401,9 @@ var grid = {
       jQuery("#grid").jqGrid("setCell", sel[i], "status", newstatus, "dirty-cell");
       jQuery("#grid").jqGrid("setRowData", sel[i], false, "edited");
     };
-
-    $("#actions").prop("selectedIndex",0);
-    $('#save').removeClass("save_undo_button_inactive").addClass("save_undo_button_active");
-    $('#undo').removeClass("save_undo_button_inactive").addClass("save_undo_button_active");
+    $("#actions1").html($("#actionsul").children().first().text() + '  <span class="caret"></span>');
+    $('#save').removeClass("btn-primary").addClass("btn-danger").prop("disabled",false);
+    $('#undo').removeClass("btn-primary").addClass("btn-danger").prop("disabled",false);
    },
 
   // Renders the cross list in a pivot grid
@@ -292,20 +428,30 @@ var grid = {
   afterEditCell: function (rowid, cellname, value, iRow, iCol)
   {
   var colmodel = $(this).jqGrid('getGridParam', 'colModel')[iCol];
+  iconslist = {
+      time: 'fa fa-clock-o',
+      date: 'fa fa-calendar',
+      up: 'fa fa-chevron-up',
+      down: 'fa fa-chevron-down',
+      previous: 'fa fa-chevron-left',
+      next: 'fa fa-chevron-right',
+      today: 'fa fa-bullseye',
+      clear: 'fa fa-trash',
+      close: 'fa fa-remove'
+    };
+
   if (colmodel.formatter == 'date')
   {
     if (colmodel.formatoptions['srcformat'] == "Y-m-d")
-      $("#" + iRow + '_' + cellname).datepicker({
-        showOtherMonths: true, selectOtherMonths: true,
-        dateFormat: "yy-mm-dd", changeMonth:true,
-        changeYear:true, yearRange: "c-1:c+5"
-        });
+      $("#" + iRow + '_' + cellname).on('focusin', function() {
+        $(this).parent().css({'position': 'relative', 'overflow': 'visible'});
+        $(this).datetimepicker({format: 'YYYY-MM-DD', useCurrent: false, calendarWeeks: true, icons: iconslist, locale: document.documentElement.lang, widgetPositioning: {horizontal: 'auto', vertical: (iRow < 11 ?'bottom':'auto')}});
+      });
     else
-      $("#" + iRow + '_' + cellname).datepicker({
-        showOtherMonths: true, selectOtherMonths: true,
-        dateFormat: "yy-mm-dd 00:00:00", changeMonth:true,
-        changeYear:true, yearRange: "c-1:c+5"
-        });
+      $("#" + iRow + '_' + cellname).on('focusin', function() {
+        $(this).parent().css({'position': 'relative', 'overflow': 'visible'});
+        $(this).datetimepicker({format: 'YYYY-MM-DD HH:mm:ss', useCurrent: false, calendarWeeks: true, icons: iconslist, locale: document.documentElement.lang, widgetPositioning: {horizontal: 'auto', vertical: (iRow < 11 ?'bottom':'auto')}});
+      });
   }
   else
 	$("#" + iRow + '_' + cellname).select();
@@ -313,78 +459,100 @@ var grid = {
 
   showExport: function(only_list)
   {
+    $('#timebuckets').modal('hide');
+    $.jgrid.hideModal("#searchmodfbox_grid");
     // The argument is true when we show a "list" report.
     // It is false for "table" reports.
     if (only_list)
-      $('#popup').html(
-        gettext("Export format") + '&nbsp;&nbsp;:&nbsp;&nbsp;<select name="csvformat" id="csvformat">' +
-        '<option value="spreadsheetlist" selected="selected">' + gettext("Spreadsheet list") + '</option>' +
-        '<option value="csvlist">' + gettext("CSV list") +'</option></select>'
-        );
+      $('#popup').html('<div class="modal-dialog" style="width: 350px;">'+
+          '<div class="modal-content">'+
+            '<div class="modal-header">'+
+              '<button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>'+
+              '<h4 class="modal-title">'+gettext("Export CSV or Excel file")+'</h4>'+
+            '</div>'+
+            '<div class="modal-body">'+
+              '<label class="control-label">' + gettext("Export format") +
+                '<div class="radio" name="csvformat" id="csvformat" value="spreadsheetlist">' +
+                  '&nbsp;&nbsp;&nbsp;&nbsp;<label><input type="radio" name="csvformat" value="spreadsheetlist" checked="">' + gettext("Spreadsheet list") + '</label></br>' +
+                  '&nbsp;&nbsp;&nbsp;&nbsp;<label><input type="radio" name="csvformat" value="csvlist">' + gettext("CSV list") + '</label></br>' +
+                '</div>' +
+              '</label>' +
+            '</div>'+
+            '<div class="modal-footer">'+
+              '<input type="submit" id="exportbutton" role="button" class="btn btn-danger pull-left" value="'+gettext('Export')+'">'+
+              '<input type="submit" id="cancelbutton" role="button" class="btn btn-primary pull-right" data-dismiss="modal" value="'+gettext('Cancel')+'">'+
+            '</div>'+
+          '</div>'+
+      '</div>' )
+      .modal('show');
     else
-        $('#popup').html(
-        gettext("Export format") + '&nbsp;&nbsp;:&nbsp;&nbsp;<select name="csvformat" id="csvformat">' +
-        '<option value="spreadsheettable" selected="selected">' + gettext("Spreadsheet table") + '</option>' +
-        '<option value="spreadsheetlist">' + gettext("Spreadsheet list") + '</option>' +
-        '<option value="csvtable">' + gettext("CSV table") +'</option>'+
-        '<option value="csvlist">' + gettext("CSV list") +'</option></select>'
-        );
-    $('#popup').dialog({
-        title: gettext("Export CSV or Excel file"),
-        autoOpen: true, resizable: false, width: 390, height: 'auto',
-        buttons: [
-          {
-            text: gettext("Export"),
-            click: function() {
-              // Fetch the report data
-              var url = (location.href.indexOf("#") != -1 ? location.href.substr(0,location.href.indexOf("#")) : location.href);
-              if (location.search.length > 0)
-                // URL already has arguments
-                url += "&format=" + $('#csvformat').val();
-              else if (url.charAt(url.length - 1) == '?')
-                // This is the first argument for the URL, but we already have a question mark at the end
-                url += "format=" + $('#csvformat').val();
-              else
-                // This is the first argument for the URL
-                url += "?format=" + $('#csvformat').val();
-              // Append current filter and sort settings to the URL
-              var postdata = $("#grid").jqGrid('getGridParam', 'postData');
-              url +=  "&" + jQuery.param(postdata);
-              // Open the window
-              window.open(url,'_blank');
-              $('#popup').dialog().dialog('close');
-            }
-          },
-          {
-            text: gettext("Cancel"),
-            click: function() { $(this).dialog("close"); }
-          }
-          ]
-        });
-    $('#timebuckets').dialog().dialog('close');
-    $.jgrid.hideModal("#searchmodfbox_grid");
+      $('#popup').html('<div class="modal-dialog" style="width: 350px;">'+
+          '<div class="modal-content">'+
+            '<div class="modal-header">'+
+              '<h4 class="modal-title">'+gettext("Export CSV or Excel file")+'</h4>'+
+            '</div>'+
+            '<div class="modal-body">'+
+              '<label class="control-label">' + gettext("Export format") +
+                '<div class="radio" name="csvformat" id="csvformat" value="spreadsheettable">' +
+                  '&nbsp;&nbsp;&nbsp;&nbsp;<label><input type="radio" name="csvformat" value="spreadsheettable" checked="">' + gettext("Spreadsheet table") + '</label></br>' +
+                  '&nbsp;&nbsp;&nbsp;&nbsp;<label><input type="radio" name="csvformat" value="spreadsheetlist">' + gettext("Spreadsheet list") + '</label></br>' +
+                  '&nbsp;&nbsp;&nbsp;&nbsp;<label><input type="radio" name="csvformat" value="csvtable">' + gettext("CSV table") + '</label></br>' +
+                  '&nbsp;&nbsp;&nbsp;&nbsp;<label><input type="radio" name="csvformat" value="csvlist">' + gettext("CSV list") + '</label></br>' +
+                '</div>' +
+              '</label>' +
+            '</div>'+
+            '<div class="modal-footer">'+
+              '<input type="submit" id="exportbutton" role="button" class="btn btn-danger pull-left" value="'+gettext('Export')+'">'+
+              '<input type="submit" id="cancelbutton" role="button" class="btn btn-primary pull-right" data-dismiss="modal" value="'+gettext('Cancel')+'">'+
+            '</div>'+
+          '</div>'+
+      '</div>' )
+      .modal('show');
+    $('#exportbutton').on('click', function() {
+      // Fetch the report data
+      var url = (location.href.indexOf("#") != -1 ? location.href.substr(0,location.href.indexOf("#")) : location.href);
+      if (location.search.length > 0)
+        // URL already has arguments
+        url += "&format=" + $('#csvformat input:radio:checked').val();
+      else if (url.charAt(url.length - 1) == '?')
+        // This is the first argument for the URL, but we already have a question mark at the end
+        url += "format=" + $('#csvformat input:radio:checked').val();
+      else
+        // This is the first argument for the URL
+        url += "?format=" + $('#csvformat input:radio:checked').val();
+      // Append current filter and sort settings to the URL
+      var postdata = $("#grid").jqGrid('getGridParam', 'postData');
+      url +=  "&" + jQuery.param(postdata);
+      // Open the window
+      window.open(url,'_blank');
+      $('#popup').modal('hide');
+    })
   },
+
 
   // Display time bucket selection dialog
   showBucket: function()
   {
     // Show popup
-    $('#popup').dialog().dialog('close');
+    $('#popup').modal('hide');
     $.jgrid.hideModal("#searchmodfbox_grid");
-    $( "#horizonstart" ).datepicker({
-        showOtherMonths: true, selectOtherMonths: true,
-        changeMonth:true, changeYear:true, yearRange: "c-1:c+5", dateFormat: 'yy-mm-dd'
+    iconslist = {
+      time: 'fa fa-clock-o',
+      date: 'fa fa-calendar',
+      up: 'fa fa-clock-o',
+      down: 'fa fa-chevron-down',
+      previous: 'fa fa-chevron-left',
+      next: 'fa fa-chevron-right',
+      today: 'fa fa-bullseye',
+      clear: 'fa fa-trash',
+      close: 'fa fa-remove'
+    };
+    $( "#horizonstart" ).datetimepicker({format: 'YYYY-MM-DD', calendarWeeks: true, icons: iconslist, locale: document.documentElement.lang});
+    $( "#horizonend" ).datetimepicker({format: 'YYYY-MM-DD', calendarWeeks: true, icons: iconslist, locale: document.documentElement.lang});
+    $("#horizonstart").on("dp.change", function (selected) {
+      $("#horizonend").data("DateTimePicker").minDate(selected.date);
       });
-    $( "#horizonend" ).datepicker({
-        showOtherMonths: true, selectOtherMonths: true,
-        changeMonth:true, changeYear:true, yearRange: "c-1:c+5", dateFormat: 'yy-mm-dd'
-      });
-    $('#timebuckets').dialog({
-       autoOpen: true, resizable: false, width: 390,
-       buttons: [
-         {
-           text: gettext("OK"),
-           click: function() {
+    $( "#okbutton" ).on('click', function() {
             // Compare old and new parameters
             var params = $('#horizonbuckets').val() + '|' +
               $('#horizonstart').val() + '|' +
@@ -392,16 +560,19 @@ var grid = {
               ($('#horizontype').is(':checked') ? "True" : "False") + '|' +
               $('#horizonlength').val() + '|' +
               $('#horizonunit').val();
+
             if (params == $('#horizonoriginal').val())
               // No changes to the settings. Close the popup.
-              $(this).dialog('close');
+              $("#timebuckets").modal('hide');
             else {
               // Ajax request to update the horizon preferences
               $.ajax({
                   type: 'POST',
                   url: '/horizon/',
                   data: {
-                    horizonbuckets: $('#horizonbuckets').val(),
+                    horizonbuckets: $('#horizonbuckets').val() ?
+                      $('#horizonbuckets').val() :
+                      $("#horizonbucketsul li a").first().text(),
                     horizonstart: $('#horizonstart').val(),
                     horizonend: $('#horizonend').val(),
                     horizontype: ($('#horizontype').is(':checked') ? '1' : '0'),
@@ -413,21 +584,14 @@ var grid = {
                 });
             // Reload the report
             window.location.href = window.location.href;
-            }
-           }
+            }});
+    $('#timebuckets').modal('show');
          },
-         {
-           text: gettext("Cancel"),
-           click: function() { $(this).dialog("close"); }
-         }
-         ]
-      });
-  },
 
   //Display dialog for copying or deleting records
   showDelete : function()
   {
-    if ($('#delete_selected').hasClass("ui-state-disabled")) return;
+    if ($('#delete_selected').hasClass("disabled")) return;
     var sel = jQuery("#grid").jqGrid('getGridParam','selarrrow');
     if (sel.length == 1)
     {
@@ -436,119 +600,182 @@ var grid = {
     }
     else if (sel.length > 0)
     {
-     $('#popup').html(
-       interpolate(gettext('You are about to delete %s objects AND ALL RELATED RECORDS!'), [sel.length], false)
-       ).dialog({
-         title: gettext("Delete data"),
-         autoOpen: true,
-         resizable: false,
-         width: 'auto',
-         height: 'auto',
-         buttons: [
-           {
-             text: gettext("Confirm"),
-             click: function() {
+     $('#timebuckets').modal('hide');
+     $.jgrid.hideModal("#searchmodfbox_grid");
+     $('#popup').html('<div class="modal-dialog">'+
+             '<div class="modal-content">'+
+               '<div class="modal-header">'+
+                 '<button type="button" class="close" data-dismiss="modal"><span aria-hidden="true" class="fa fa-times"></span></button>'+
+                 '<h4 class="modal-title">'+gettext('Delete data')+'</h4>'+
+               '</div>'+
+               '<div class="modal-body">'+
+                 '<p>'+interpolate(gettext('You are about to delete %s objects AND ALL RELATED RECORDS!'), [sel.length], false)+'</p>'+
+               '</div>'+
+               '<div class="modal-footer">'+
+                 '<input type="submit" id="delbutton" role="button" class="btn btn-danger pull-left" value="'+gettext('Confirm')+'">'+
+                 '<input type="submit" id="cancelbutton" role="button" class="btn btn-primary pull-right" data-dismiss="modal" value="'+gettext('Cancel')+'">'+
+               '</div>'+
+             '</div>'+
+         '</div>' )
+         .modal('show');
+     $('#delbutton').on('click', function() {
                $.ajax({
                  url: location.pathname,
                  data: JSON.stringify([{'delete': sel}]),
                  type: "POST",
                  contentType: "application/json",
                  success: function () {
-                   $("#delete_selected").addClass("ui-state-disabled").removeClass("bold");
-                   $("#copy_selected").addClass("ui-state-disabled").removeClass("bold");
+               $("#delete_selected").prop("disabled", true).removeClass("bold");
+               $("#copy_selected").prop("disabled", true).removeClass("bold");
                    $('.cbox').prop("checked", false);
                    $('#cb_grid.cbox').prop("checked", false);
                    $("#grid").trigger("reloadGrid");
-                   $('#popup').dialog('close');
+               $('#popup').modal('hide');
                    },
                  error: function (result, stat, errorThrown) {
-                   $('#popup').html(result.responseText)
-                     .dialog({
-                       title: gettext("Error deleting data"),
-                       autoOpen: true,
-                       resizable: true,
-                       width: 'auto',
-                       height: 'auto'
-                     });
-                   $('#timebuckets').dialog('close');
-                   $.jgrid.hideModal("#searchmodfbox_grid");
+               $('#popup .modal-body p').html(result.responseText);
+               $('#popup .modal-title').addClass("alert alert-danger").html(gettext("Error deleting data"));
+               $('#delbutton').prop("disabled", true).hide();
                    }
-               });
+           })
+         })
              }
            },
-           {
-             text: gettext("Cancel"),
-             click: function() { $(this).dialog("close"); }
-           }
-           ]
-       });
-     $('#timebuckets').dialog().dialog('close');
-     $.jgrid.hideModal("#searchmodfbox_grid");
-   }
-  },
 
   showCopy: function()
   {
-   if ($('#copy_selected').hasClass("ui-state-disabled")) return;
+   if ($('#copy_selected').hasClass("disabled")) return;
    var sel = jQuery("#grid").jqGrid('getGridParam','selarrrow');
    if (sel.length > 0)
    {
-     $('#popup').html(
-       interpolate(gettext('You are about to duplicate %s objects'), [sel.length], false)
-       ).dialog({
-         title: gettext("Copy data"),
-         autoOpen: true,
-         resizable: false,
-         width: 'auto',
-         height: 'auto',
-         buttons: [
-           {
-             text: gettext("Confirm"),
-             click: function() {
+     $('#timebuckets').modal('hide');
+     $.jgrid.hideModal("#searchmodfbox_grid");
+     $('#popup').html('<div class="modal-dialog">'+
+             '<div class="modal-content">'+
+               '<div class="modal-header">'+
+                 '<button type="button" class="close" data-dismiss="modal"><span aria-hidden="true" class="fa fa-times"></span></button>'+
+                 '<h4 class="modal-title">'+gettext("Copy data")+'</h4>'+
+                 '</div>'+
+                 '<div class="modal-body">'+
+                   '<p>'+interpolate(gettext('You are about to duplicate %s objects'), [sel.length], false)+'</p>'+
+                   '</div>'+
+                   '<div class="modal-footer">'+
+                     '<input type="submit" id="copybutton" role="button" class="btn btn-danger pull-left" value="'+gettext('Confirm')+'">'+
+                     '<input type="submit" id="cancelbutton" role="button" class="btn btn-primary pull-right" data-dismiss="modal" value="'+gettext('Cancel')+'">'+
+                   '</div>'+
+                 '</div>'+
+             '</div>' )
+     .modal('show');
+     $('#copybutton').on('click', function() {
                $.ajax({
                  url: location.pathname,
                  data: JSON.stringify([{'copy': sel}]),
                  type: "POST",
                  contentType: "application/json",
                  success: function () {
-                   $("#delete_selected").addClass("ui-state-disabled").removeClass("bold");
-                   $("#copy_selected").addClass("ui-state-disabled").removeClass("bold");
+           $("#delete_selected").prop("disabled", true).removeClass("bold");
+           $("#copy_selected").prop("disabled", true).removeClass("bold");
                    $('.cbox').prop("checked", false);
                    $('#cb_grid.cbox').prop("checked", false);
                    $("#grid").trigger("reloadGrid");
-                   $('#popup').dialog().dialog('close');
+           $('#popup').modal('hide');
                    },
                  error: function (result, stat, errorThrown) {
-                   $('#popup').html(result.responseText)
-                     .dialog({
-                       title: gettext("Error copying data"),
-                       autoOpen: true,
-                       resizable: true,
-                       width: 'auto',
-                       height: 'auto'
-                     });
-                   $('#timebuckets').dialog().dialog('close');
-                   $.jgrid.hideModal("#searchmodfbox_grid");
+           $('#popup .modal-body p').html(result.responseText);
+           $('#popup .modal-title').addClass("alert alert-danger").html(gettext("Error copying data"));
+           $('#copybutton').prop("disabled", true).hide();
                    }
-               });
-             }
-           },
-           {
-             text: gettext("Cancel"),
-             click: function() { $(this).dialog("close"); }
-           }
-           ]
-       });
-     $('#timebuckets').dialog().dialog('close');
-     $.jgrid.hideModal("#searchmodfbox_grid");
+       })
+     })
    }
+  },
+
+  showPlanExportModal: function ()
+  {
+      //test purposes
+      var data = {
+	  'labels': ['name', 'type', 'quantity', 'value', 'startdate', 'enddate', 'criticality'],
+	  'values': [['somename0', 'atype', '1000', '1000000', '2015-02-31', '2016-04-31', '1'],['some very long name that almost has no end', 'atype', '1000', '1000000', '2015-02-31', '2016-04-31', '1']]
+        };
+      //end test
+
+      $('#timebuckets').modal('hide');
+      $.jgrid.hideModal("#searchmodfbox_grid");
+      var tableheadercontent = '';
+      var tablebodycontent = '';
+      for (i = 0; i<data.labels.length; i++) {
+	    tableheadercontent += '<th>'+gettext(data.labels[i])+'</th>';
+          };
+      for (i = 0; i<data.values.length; i++) {
+	  tablebodycontent += '<tr><td><input id="cb_modaltable-'+i+'" class="cbox" type="checkbox" aria-checked="false"></td>';
+	  for (j = 0; j<data.values[i].length; j++) {
+	        tablebodycontent += '<td>'+gettext(data.values[i][j])+'</td>';
+	      };
+          tablebodycontent += '</tr>';
+          };
+
+      $('#popup').html('<div class="modal-dialog">'+
+        '<div class="modal-content">'+
+          '<div class="modal-header">'+
+            '<button type="button" class="close" data-dismiss="modal"><span aria-hidden="true" class="fa fa-times"></span></button>'+
+            '<h4 class="modal-title">'+gettext("Export Plan")+'</h4>'+
+          '</div>'+
+          '<div class="modal-body">'+
+            '<div class="table-responsive">'+
+              '<table class="table-condensed table-hover" id="forecastexporttable">'+
+                '<thead class="thead-default">'+
+                  '<tr>'+
+                    '<th>'+
+                      '<input id="cb_modaltableall" class="cbox" type="checkbox" aria-checked="false">'+
+                    '</th>'+
+                    tableheadercontent+
+                  '</tr>'+
+                '</thead>'+
+                '<tbody>'+
+                  '<tr>'+
+                    tablebodycontent+
+                  '</tr>'+
+                '</tbody>'+
+              '</table>'+
+            '</div>'+
+          '</div>'+
+          '<div class="modal-footer">'+
+            '<input type="submit" id="exportbutton" role="button" class="btn btn-danger pull-left" value="'+gettext('Export')+'">'+
+            '<input type="submit" id="cancelbutton" role="button" class="btn btn-primary pull-right" data-dismiss="modal" value="'+gettext('Cancel')+'">'+
+          '</div>'+
+          '</div>'+
+          '</div>' ).modal('show');
+    $('#exportbutton').on('click', function() {
+      $('#popup').modal('hide');
+    });
+    $('#cancelbutton').on('click', function() {
+      $('#popup').modal('hide');
+    });
+    $('#cb_modaltableall').on('click', function() {
+      if ($("#cb_modaltableall").is(':checked')) {
+          $("#forecastexporttable input[type=checkbox]").each(function () {
+              $(this).prop("checked", true);
+          });
+          $("#forecastexporttable tr").each(function () {
+              $(this).addClass("selected");
+          });
+      } else {
+	  $("#forecastexporttable input[type=checkbox]").each(function () {
+              $(this).prop("checked", false);
+          });
+	  $("#forecastexporttable tr.selected").each(function () {
+              $(this).removeClass("selected");
+          });
+      };
+
+    });
   },
 
   // Display filter dialog
   showFilter: function()
   {
-    if ($('#filter').hasClass("ui-state-disabled")) return;
-    $('#timebuckets,#popup').dialog().dialog('close');
+    if ($('#filter').hasClass("disabled")) return;
+    $('.modal').modal('hide');
     jQuery("#grid").jqGrid('searchGrid', {
       closeOnEscape: true,
       multipleSearch:true,
@@ -556,17 +783,32 @@ var grid = {
       overlay: 0,
       sopt: ['eq','ne','lt','le','gt','ge','bw','bn','in','ni','ew','en','cn','nc'],
       onSearch : function() {
+
         var s = grid.getFilterGroup(jQuery("#fbox_grid").jqFilter('filterData'), true);
-        $('#curfilter').html( s ? gettext("Filtered where") + " " + s : "" );
+        if (s)
+        {
+          $('#curfilter').html(gettext("Filtered where") + " " + s);
+          $('#filter').addClass("btn-danger").removeClass("btn-primary");
+        }
+        else
+        {
+          $('#filter').removeClass("btn-danger").addClass("btn-primary");
+          $('#curfilter').html("");
+        }
         },
       onReset : function() {
         if (typeof initialfilter !== 'undefined' )
         {
           $("#grid").jqGrid('getGridParam','postData').filters = JSON.stringify(initialfilter);
           $('#curfilter').html(gettext("Filtered where") + " " + grid.getFilterGroup(initialfilter, true) );
+          $('#filter').addClass("btn-danger").removeClass("btn-primary");
         }
         else
+        {
           $('#curfilter').html("");
+          $('#filter').removeClass("btn-danger").addClass("btn-primary");
+        }
+
         return true;
         }
       });
@@ -650,20 +892,15 @@ var grid = {
     var sel = jQuery("#grid").jqGrid('getGridParam','selarrrow').length;
     if (sel > 0)
     {
-      $("#copy_selected").removeClass("ui-state-disabled").addClass("bold");
-      $("#delete_selected").removeClass("ui-state-disabled").addClass("bold");
-      $("#actions").removeClass("ui-selectmenu-disabled ui-state-disabled change_status_selectmenu_inactive")
-      .addClass("change_status_selectmenu_active ui-state-enabled ui-selectmenu-enabled")
-      .prop('disabled', false);
+      $("#copy_selected").prop('disabled', false).addClass("bold");
+      $("#delete_selected").prop('disabled', false).addClass("bold");
+      $("#actions1").prop('disabled', false);
     }
     else
     {
-      $("#copy_selected").addClass("ui-state-disabled").removeClass("bold");
-      $("#delete_selected").removeClass("ui-state-disabled").addClass("bold");
-      $("#actions")
-      .addClass("ui-selectmenu-disabled ui-state-disabled change_status_selectmenu_inactive")
-      .removeClass("change_status_selectmenu_active ui-state-enabled ui-selectmenu-enabled")
-      .prop('disabled', 'disabled');
+      $("#copy_selected").prop('disabled', true).removeClass("bold");
+      $("#delete_selected").prop('disabled', true).removeClass("bold");
+      $("#actions1").prop('disabled', true);
     }
   },
 
@@ -671,22 +908,16 @@ var grid = {
   {
     if ($(this).is(':checked'))
     {
-      $("#copy_selected").removeClass("ui-state-disabled").addClass("bold");
-      $("#delete_selected").removeClass("ui-state-disabled").addClass("bold");
-      $("#actions").removeClass("ui-selectmenu-disabled ui-state-disabled change_status_selectmenu_inactive")
-      .removeClass("ui-selectmenu-disabled ui-state-disabled change_status_selectmenu_inactive")
-      .addClass("change_status_selectmenu_active ui-state-enabled ui-selectmenu-enabled")
-      .prop('disabled', false);
+      $("#copy_selected").prop('disabled', false).addClass("bold");
+      $("#delete_selected").prop('disabled', false).addClass("bold");
+      $("#actions1").prop('disabled', false);
       $('.cbox').prop("checked", true);
     }
     else
     {
-      $("#copy_selected").addClass("ui-state-disabled").removeClass("bold");
-      $("#delete_selected").addClass("ui-state-disabled").removeClass("bold");
-      $("#actions")
-      .addClass("ui-selectmenu-disabled ui-state-disabled change_status_selectmenu_inactive")
-      .removeClass("change_status_selectmenu_active ui-state-enabled ui-selectmenu-enabled")
-      .prop('disabled', 'disabled');
+      $("#copy_selected").prop('disabled', true).removeClass("bold");
+      $("#delete_selected").prop('disabled', true).removeClass("bold");
+      $("#actions1").prop('disabled', true);
       $('.cbox').prop("checked", false);
     }
   },
@@ -708,107 +939,262 @@ var grid = {
 }
 
 //----------------------------------------------------------------------------
-// Code for Openbravo integration
+// Code for ERP integration
 //----------------------------------------------------------------------------
 
-var openbravo = {
-  IncrementalExport: function(grid, transactiontype) {
-	// Collect all selected rows in the status 'proposed'
-	  var sel = grid.jqGrid('getGridParam','selarrrow');
-	  if (sel === null || sel.length == 0)
-	    return;
-	  var data = [];
-	  for (var i in sel)
-	  {
-		  var r = grid.jqGrid('getRowData', sel[i]);
-		  if (r.type === undefined)
-			  r.type = transactiontype;
-		  if (r.status == 'proposed')
-		    data.push(r);
-	  }
-	  if (data == [])
-		  return;
+var ERPconnection = {
+    IncrementalExport: function(grid, transactiontype, ERPsystem) {
+      // Collect all selected rows in the status 'proposed'
+      var sel = grid.jqGrid('getGridParam','selarrrow');
+      if (sel === null || sel.length == 0)
+        return;
+      var data = [];
 
-	  // Send to the server for upload into openbravo
-	  $('#popup')
-	  .html(gettext("export selected records to openbravo"))
-	  .dialog({
-	    title: gettext("export"),
-	    autoOpen: true, resizable: false, width: 390, height: 'auto', modal: true,
-	    buttons: [
-	      {
-	        text: gettext("export"),
-	        id: 'button_export',
-	        click: function() {
+      for (var i in sel)
+      {
+        var r = grid.jqGrid('getRowData', sel[i]);
+        if (r.type === undefined)
+          r.type = transactiontype;
+        if (r.status == 'proposed')
+          data.push(r);
+      }
+      if (data == [])
+        return;
 
-	          $('#popup').html(gettext("connecting to openbravo..."));
-	          // Send the update to the server
-	          var database = $('#database').val();
-	          database = (database===undefined || database==='default') ? '' : '/' + database;
-	          $.ajax({
-	               url: database + "/openbravo/upload/",
-	               data: JSON.stringify(data),
-	               type: "POST",
-	               contentType: "application/json",
-	               success: function () {
-	                 $('#popup').html(gettext("Export successful"))
-	                   .dialog({
-	                     autoOpen: true,
-	                     resizable: false,
-	                     width: 'auto',
-	                     height: 'auto',
-	                     model: false
-	                   });
-	                 $('#button_close').find('.ui-button-text').text(gettext('close'));
-	                 $('#button_export').removeClass("ui-state-default").addClass("ui-state-disabled").prop('disabled', 'disabled');
-	                 // Mark selected rows as "approved" if the original status was "proposed".
-	                 for (var i in sel)
-	                 {
-	                   var cur = grid.jqGrid('getCell', sel[i], 'status');
-	                   if (cur == 'proposed')
-	                     grid.jqGrid('setCell', sel[i], 'status', 'approved');
-	                 }
-	               },
-	               error: function (result, stat, errorThrown) {
-                     fmts = ngettext("Error during export")
-	                 $('#popup').html(gettext("Error during export") + ':' + result.responseText);
-	                 $('#button_export').find('.ui-button-text').text(gettext('retry'));
-	               }
-	           });
-	        }
-	      },
-	      {
-	        text: gettext("cancel"),
-	        id: 'button_close',
-	        click: function() { $(this).dialog("close"); }
-	      }
-	      ]
-	  });
-	  $("#actions").prop("selectedIndex",0);
-  }
-};
+      // Send to the server for upload into openbravo
+      $('#timebuckets').modal('hide');
+      $.jgrid.hideModal("#searchmodfbox_grid");
+      $('#popup').html(''+
+          '<div class="modal-dialog">'+
+          '<div class="modal-content">'+
+          '<div class="modal-header">'+
+          '<button type="button" class="close" data-dismiss="modal"><span aria-hidden="true" class="fa fa-times"></span></button>'+
+          '<h4 class="modal-title text-capitalize">'+gettext("export")+'</h4>'+
+          '</div>'+
+          '<div class="modal-body">'+
+          '<p class="text-capitalize">'+gettext("export selected records to ")+ ERPsystem + '</p>'+
+          '</div>'+
+          '<div class="modal-footer">'+
+          '<input type="submit" id="button_export" role="button" class="btn btn-danger pull-left" value="'+gettext('Confirm')+'">'+
+          '<input type="submit" id="cancelbutton" role="button" class="btn btn-primary pull-right" data-dismiss="modal" value="'+gettext('Cancel')+'">'+
+          '</div>'+
+          '</div>'+
+      '</div>' ).modal('show');
 
-//----------------------------------------------------------------------------
-// Code for customized autocomplete widget.
-// The customization creates unselectable categories and selectable list
-// items.
-//----------------------------------------------------------------------------
-
-$.widget( "custom.catcomplete", $.ui.autocomplete, {
-  _renderItem: function( ul, item) {
-    if (item.value == undefined)
-      return $( "<li class='ui-autocomplete-category' style='border-top: 1px; border-top-style: solid; border-top-color: #222; text-align:center;'>" + item.label + "</li>" ).appendTo( ul );
-    else
-      return $( "<li></li>" )
-      .data( "item.autocomplete", item )
-      .append( $( "<a></a>" ).text( item.value ) )
-      .appendTo( ul );
-  },
+      $('#button_export').on('click', function() {
+        $('#popup .modal-body p').html(gettext('connecting to ')+ERPsystem+'...');
+        $.ajax({
+          url: url_prefix + "/" + ERPsystem + "/upload/",
+          data: JSON.stringify(data),
+          type: "POST",
+          contentType: "application/json",
+          success: function () {
+            $('#popup .modal-body p').html(gettext("Export successful"));
+            $('#cancelbutton').val(gettext('Close'));
+            $('#button_export').removeClass("btn-primary").prop('disabled', true);
+            // Mark selected rows as "approved" if the original status was "proposed".
+            for (var i in sel) {
+              var cur = grid.jqGrid('getCell', sel[i], 'status');
+              if (cur == 'proposed')
+                grid.jqGrid('setCell', sel[i], 'status', 'approved');
+            };
+          },
+          error: function (result, stat, errorThrown) {
+            fmts = ngettext("Error during export");
+            $('#popup .modal-title').addClass('alert alert-danger').html(gettext("Error during export"));
+            $('#popup .modal-body p').html(gettext("Error during export") + ':' + result.responseText);
+            $('#button_export').text(gettext('retry'));
+          }
+        });
+      });
+      $("#actions1").html($("#actionsul").children().first().text() + '  <span class="caret"></span>');
+    },
 
 
+//  ----------------------------------------------------------------------------
+//  Sales Orders dependencies export
+//  ----------------------------------------------------------------------------
 
-});
 
+    SODepExport: function(grid, transactiontype, ERPsystem) {
+      // Collect all selected rows in the status 'proposed'
+      var sel = grid.jqGrid('getGridParam','selarrrow');
+      if (sel === null || sel.length == 0)
+        return;
+      var data = [];
+
+      for (var i in sel)
+      {
+        var r = grid.jqGrid('getRowData', sel[i]);
+        if (r.type === undefined)
+          r.type = transactiontype;
+          data.push(r);
+      }
+      if (data == [])
+        return;
+
+      $('#timebuckets').modal('hide');
+      $.jgrid.hideModal("#searchmodfbox_grid");
+      $('#popup').html(''+
+          '<div class="modal-dialog" style="max-height: 80%; width: 90%; visibility: hidden">'+
+          '<div class="modal-content">'+
+          '<div class="modal-header">'+
+          '<button type="button" class="close" data-dismiss="modal"><span aria-hidden="true" class="fa fa-times"></span></button>'+
+          '<h4 class="modal-title text-capitalize">'+gettext("export")+'</h4>'+
+          '</div>'+
+          '<div class="modal-body">'+
+
+          '</div>'+
+          '<div class="modal-footer">'+
+          '<input type="submit" id="button_export" role="button" class="btn btn-danger pull-left" disabled value="'+gettext('Confirm')+'">'+
+          '<input type="submit" id="cancelbutton" role="button" class="btn btn-primary pull-right" data-dismiss="modal" value="'+gettext('Cancel')+'">'+
+          '</div>'+
+          '</div>'+
+      '</div>' );
+
+      // compose url
+      var components='?demand=';
+      for (i=0; i<sel.length; i++) {
+        var r = grid.jqGrid('getRowData', sel[i]);
+        if (r.type === undefined)
+          r.type = transactiontype;
+        if (r.status == 'open' || r.status == 'proposed') {
+          if (i==0) components+=encodeURIComponent(sel[i]);
+          else components+='&demand='+encodeURIComponent(sel[i]);
+        };
+      };
+
+      //get demandplans
+      $.ajax({
+        url: url_prefix + "/demand/operationplans/" + components,
+        type: "GET",
+        contentType: "application/json",
+        success: function (data) {
+          $('#popup .modal-body').html('<div class="table-responsive">'+
+              '<table class="table-condensed table-hover" id="forecastexporttable">'+
+              '<thead class="thead-default">'+
+              '</thead>'+
+              '</table>'+
+          '</div>');
+
+          labels = ["id","type","item","value","quantity","location","origin","startdate","enddate","criticality"];
+
+          var bodycontent='';
+          if (transactiontype == 'SO') {
+            var tableheadercontent = $('<tr/>');
+
+            tableheadercontent.append($('<th/>').html('<input id="cb_modaltableall" class="cbox" type="checkbox" aria-checked="false">'));
+            for (i = 0; i<labels.length; i++) {
+              tableheadercontent.append( $('<th/>').addClass('text-capitalize').text(gettext(labels[i])) );
+            };
+
+            var tablebodycontent = $('<tbody/>');
+            for (i = 0; i<data.length; i++) {
+              var row = $('<tr/>');
+              var td = $('<td/>');
+
+              td.append( $('<input/>').attr({'id':"cb_modaltable-"+i, 'class':"cbox", 'type':"checkbox", 'aria-checked':"false"}));
+              row.append(td);
+              for (j = 0; j<labels.length; j++) {
+                row.append( $('<td/>').text(data[i][labels[j]]) );
+              };
+              tablebodycontent.append( row );
+            };
+
+          };
+
+          $('#popup table').append(tablebodycontent);
+          $('#popup thead').append(tableheadercontent);
+
+          $('#popup').modal({backdrop: 'static', keyboard: false}).on('shown.bs.modal', function () {
+            $(this).find('.modal-dialog').css({
+              'max-width': 50+$('#forecastexporttable').width()+'px',
+              'visibility': 'visible'
+            });
+          }).modal('show');
+
+          $('#button_export').on('click', function() {
+            //get selected row data
+            data=[];
+            var row1 = [];
+            var row1data = {};
+            var rows=$('#forecastexporttable tr.selected');
+
+            $.each(rows, function( key, value ) {
+              row1=value.children;
+              row1data['id'] = row1[1].textContent;
+              row1data['type'] = row1[2].textContent;
+              row1data['item'] = row1[3].textContent;
+              row1data['value'] = row1[4].textContent;
+              row1data['quantity'] = row1[5].textContent;
+              row1data['location'] = row1[6].textContent;
+              row1data['origin'] = row1[7].textContent;
+              row1data['startdate'] = row1[8].textContent;
+              row1data['enddate'] = row1[9].textContent;
+              row1data['criticality'] = row1[10].textContent;
+              data.push(row1data);
+            });
+
+            $('#popup .modal-body').html(gettext('connecting to ')+ERPsystem+'...');
+            $.ajax({
+              url: url_prefix + "/" + ERPsystem + "/upload/",
+              data: JSON.stringify(data),
+              type: "POST",
+              contentType: "application/json",
+              success: function () {
+                $('#popup .modal-body').html(gettext("Export successful"));
+                $('#cancelbutton').val(gettext('Close'));
+                $('#button_export').toggleClass("btn-primary").prop('disabled', true );
+                // Mark selected rows as "approved" if the original status was "proposed".
+                for (var i in sel) {
+                  var cur = grid.jqGrid('getCell', sel[i], 'status');
+                  if (cur == 'proposed')
+                    grid.jqGrid('setCell', sel[i], 'status', 'approved');
+                };
+              },
+              error: function (result, stat, errorThrown) {
+                fmts = ngettext("Error during export");
+                $('#popup .modal-title').addClass('alert alert-danger').html(gettext("Error during export"));
+                $('#popup .modal-body').css({'overflow-y':'auto'}).html('<div style="overflow-y:auto; height: 300px; resize: vertical">' + result.responseText + '</div>');
+                $('#button_export').val(gettext('Retry'));
+                $('#popup .modal-dialog').css({'visibility':'visible'})
+                $('#popup').modal('show');
+              }
+            });
+          });
+
+          $("#cb_modaltableall").click( function() {
+            $("#forecastexporttable input[type=checkbox]").prop("checked", $(this).prop("checked"));
+            $("#forecastexporttable tbody tr").toggleClass('selected');
+            if ( $("#forecastexporttable tbody input[type=checkbox]:checked").length > 0 ) {
+              $('#button_export').removeClass("active").addClass("active").prop('disabled', false );;
+            } else {
+              $('#button_export').removeClass("active").prop('disabled', true );
+            };
+          });
+          $("#forecastexporttable tbody input[type=checkbox]").click( function() {
+            $(this).parent().parent().toggleClass('selected');
+            $("#cb_modaltableall").prop("checked",$("#forecastexporttable tbody input[type=checkbox]:not(:checked)").length == 0);
+            if ( $("#forecastexporttable tbody input[type=checkbox]:checked").length > 0 ) {
+              $('#button_export').removeClass("active").addClass("active").prop('disabled', false );;
+            } else {
+              $('#button_export').removeClass("active").prop('disabled', true );
+            };
+          });
+          $("#actions1").html($("#actionsul").children().first().text() + '  <span class="caret"></span>');
+        },
+        error: function (result, stat, errorThrown) {
+          fmts = gettext("Error getting data");
+          $('#popup .modal-title').addClass('alert alert-danger').html(fmts);
+          $('#popup .modal-body').css({'overflow-y':'auto'}).html('<div style="overflow-y:auto; height: 300px; resize: vertical">' + result.responseText + '</div>');
+          $('#button_export').val(gettext('Retry'));
+          $('#popup .modal-dialog').css({'visibility':'visible'})
+          $('#popup').modal('show');
+        }
+      });
+
+    }
+} //end Code for ERP integration
 
 //----------------------------------------------------------------------------
 // Code for handling the menu bar, context menu and active button.
@@ -870,13 +1256,28 @@ $(function() {
   $.ajaxSetup({ cache: false });
 
   // Autocomplete search functionality
-  var database = $('#database').val();
-  database = (database===undefined || database==='default') ? '' : '/' + database;
-  $("#search").catcomplete({
-    source: database + "/search/",
-    minLength: 2,
-    select: function( event, ui ) {
-      window.location.href = database + ui.item.url + admin_escape(ui.item.value) + "/";
+  var searchsource = new Bloodhound({
+    datumTokenizer: Bloodhound.tokenizers.obj.whitespace('value'),
+    queryTokenizer: Bloodhound.tokenizers.whitespace,
+    //prefetch: '/search/',
+    remote: {
+      url: url_prefix + '/search/?term=%QUERY',
+      wildcard: '%QUERY'
+    }
+  });
+  $('#search').typeahead({minLength: 2}, {
+    limit:1000,
+    highlight: true,
+    name: 'search',
+    display: 'value',
+    source: searchsource,
+    templates: {
+      suggestion: function(data){
+        if (data.value === null)
+          return '<span><p style="margin-top: 5px; margin-bottom: 1px;">'+data.label+'</p><li  role="separator" class="divider"></li></span>';
+        else
+          return '<li><a href="'+ url_prefix + data.url + admin_escape(data.value) + '/" >' + data.value + '</a></li>';
+      },
     }
   });
 
@@ -977,60 +1378,128 @@ function sameOrigin(url) {
         !(/^(\/\/|http:|https:).*/.test(url));
 }
 
+//----------------------------------------------------------------------------
+//Display About dialog
+//----------------------------------------------------------------------------
 
+function about_show()
+{
+
+  $.ajax({
+    url: "/about/",
+    type: "GET",
+    contentType: "application/json",
+    success: function (data) {
+      $('#timebuckets').modal('hide');
+      $.jgrid.hideModal("#searchmodfbox_grid");
+      $('#popup').modal({keyboard: false, backdrop:'static'});
+      var content = '<div class="modal-dialog" style="width: 450px;">'+
+         '<div class="modal-content">'+
+           '<div class="modal-header">'+
+             '<button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true" class="fa fa-times"></span></button>'+
+             '<h4 class="modal-title">About frePPLe ' + data.version + ' Community Edition</h4>'+
+           '</div>'+
+           '<div class="modal-body">'+
+             '<div class="row">';
+      content += '<div class="col-sm-5"><br/><br/>' +
+         '<p><a target="_blank" href="https://frepple.com/"><strong>frePPLe website &nbsp;<span class="fa fa-caret-right"></span></strong></a></p><br/>' +
+         '<p><a target="_blank" href="https://frepple.com/docs/' + data.version.replace(".beta","") + '/license.html"><strong>License information &nbsp;<span class="fa fa-caret-right"></span></strong></a></p><br/>' +
+         '<p><a target="_blank" href="https://frepple.com/docs/' + data.version.replace(".beta","") + '/index.html"><strong>Documentation &nbsp;<span class="fa fa-caret-right"></span></strong></a></p>' +
+         '</div>' +
+         '<div class="col-sm-7"><strong>' + gettext("Installed apps") + ":</strong>";
+      for (var i in data.apps)
+          content += '<br>&nbsp;&nbsp;' + data.apps[i];
+      content += '</div>' +
+             '</div>'+
+           '</div>'+
+         '</div>'+
+       '</div>';
+       $('#popup').html(content).modal('show');
+      },
+    error: function (result, stat, errorThrown) {
+        $('#timebuckets').modal('hide');
+        $.jgrid.hideModal("#searchmodfbox_grid");
+        $('#popup').html('<div class="modal-dialog style="width: 400px;">'+
+                '<div class="modal-content">'+
+                  '<div class="modal-header">'+
+                    '<button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true" class="fa fa-times"></span></button>'+
+                    '<h4 class="modal-title">About frePPLe ' + data.version + '</h4>'+
+                  '</div>'+
+                  '<div class="modal-body">'+
+                    '<p>'+'<h4 class="modal-title alert alert-danger">'+ gettext("Error reading version information")+'</h4>'+'</p>'+
+                  '</div>'+
+                '</div>'+
+            '</div>' )
+            .modal('show');
+      }
+  });
+}
 //----------------------------------------------------------------------------
 // Display import dialog for CSV-files
 //----------------------------------------------------------------------------
 
 function import_show(url)
 {
-  $('#popup').html(
-    '<form id="uploadform">' +
-    gettext('Load an Excel file or a CSV-formatted text file.') + '<br/>' +
-    gettext('The first row should contain the field names.') + '<br/><br/>' +
-    '<input type="checkbox" name="erase" value="yes"/>&nbsp;&nbsp;' + gettext('First delete all existing records AND ALL RELATED TABLES') + '<br/><br/>' +
-    gettext('Data file') + ':<input type="file" id="csv_file" name="csv_file"/></form>' +
-    '<br/><div style="margin: 5px 0"><textarea id="uploadResponse" rows="10" style="display: none; width:100%; background-color: inherit; border: none" readonly="readonly"></textarea></div>'
-    ).dialog({
-      title: gettext("Import CSV or Excel file"),
-      autoOpen: true, resizable: false, width: 450, height: 'auto',
-      buttons: [
-        {
-          text: gettext("Import"),
-          click: function() {
-            if ($("#csv_file").val() == "") return;
-            $('#uploadResponse').css('display','block');
-            $.ajax({
-              type: 'post',
-              url: typeof(url) != 'undefined' ? url : '',
-              cache: false,
-              data: new FormData($("#uploadform")[0]),
-              success: function (data) {
-                var el = $('#uploadResponse');
-                el.val(data);
-                el.scrollTop(el[0].scrollHeight - el.height());
-              },
-              xhrFields: {
-                onprogress: function (e) {
-                  var el = $('#uploadResponse');
-                  el.val(e.currentTarget.response);
-                  el.scrollTop(el[0].scrollHeight - el.height());
-                }
-              },
-              processData: false,
-              contentType: false
-              });
-          }
-        },
-        {
-          text: gettext("Cancel"),
-          click: function() { $(this).dialog("close"); }
-        }
-        ]
-    });
-  $('#timebuckets').dialog().dialog('close');
+  $('#timebuckets').modal('hide');
   $.jgrid.hideModal("#searchmodfbox_grid");
+  $('#popup').modal({keyboard: false, backdrop:'static'});
+  $('#popup').html('<div class="modal-dialog">'+
+      '<div class="modal-content">'+
+        '<div class="modal-header">'+
+          '<button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>'+
+          '<h4 class="modal-title">'+ gettext("Import CSV or Excel file") +'</h4>'+
+        '</div>'+
+        '<div class="modal-body">'+
+    '<form id="uploadform">' +
+            '<p>'+gettext('Load an Excel file or a CSV-formatted text file.') + '<br/>' +
+    gettext('The first row should contain the field names.') + '<br/><br/>' +
+            '</p>'+
+            '<input type="checkbox"  autocomplete="off" name="erase" value="yes"/>&nbsp;&nbsp;' + gettext('First delete all existing records AND ALL RELATED TABLES') + '<br/><br/>' +
+            gettext('Data file') + ':<input type="file" id="csv_file" name="csv_file"/>'+
+          '</form>' +
+          '<br/><div style="margin: 5px 0"><textarea id="uploadResponse" class="form-control" rows="10" style="resize: vertical; display: none; background-color: inherit; border: none;" readonly="readonly"></textarea></div>'  +
+        '</div>'+
+        '<div class="modal-footer">'+
+            '<input type="submit" id="importbutton" role="button" class="btn btn-danger pull-left" value="'+gettext('Import')+'">'+
+            '<input type="submit" id="cancelbutton" role="button" class="btn btn-primary pull-right" data-dismiss="modal" value="'+gettext('Close')+'">'+
+        '</div>'+
+      '</div>'+
+    '</div>' )
+  .modal('show');
+
+  $('#importbutton').on('click', function() {
+    if ($("#csv_file").val() == "") return;
+    $('#uploadResponse').css('display','block');
+    $('#uploadResponse').text(gettext('Importing... pressing Close button will not stop the process.'));
+    $('#importbutton').css('display','none');
+    $('#uploadform').css('display','none');
+    $.ajax({
+      type: 'post',
+      url: typeof(url) != 'undefined' ? url : '',
+      cache: false,
+      data: new FormData($("#uploadform")[0]),
+      success: function (data) {
+        var el = $('#uploadResponse');
+        el.val(data);
+        el.scrollTop(el[0].scrollHeight - el.height());
+        $('#cancelbutton').val(gettext('Close'));
+        $('#importbutton').hide();
+        $("#grid").trigger("reloadGrid");
+      },
+      xhrFields: {
+        onprogress: function (e) {
+          var el = $('#uploadResponse');
+          el.val(e.currentTarget.response);
+          el.scrollTop(el[0].scrollHeight - el.height());
+        }
+      },
+      processData: false,
+      contentType: false
+    });
+   }
+  )
 }
+
 
 //----------------------------------------------------------------------------
 // This function returns all arguments in the current URL as a dictionary.
@@ -1057,18 +1526,22 @@ function getURLparameters()
 function selectDatabase()
 {
   // Find new database and current database
-  var el = $('#database');
-  var db = el.val();
-  var cur = el.attr('name');
+  var db = $(this).attr("data-database");
+
   // Change the location
-  if (cur == db)
+  if (database == db)
     return;
-  else if (cur == 'default')
-    window.location.href = window.location.href.replace(window.location.pathname, "/"+db+window.location.pathname);
+  else if (database == 'default')
+  {
+    if (window.location.pathname == '/')
+      window.location.href = "/" + db + "/";
+    else
+      window.location.href = window.location.href.replace(window.location.pathname, "/" + db + window.location.pathname);
+  }
   else if (db == 'default')
-    window.location.href = window.location.href.replace("/"+cur+"/", "/");
+    window.location.href = window.location.href.replace("/"+database+"/", "/");
   else
-    window.location.href = window.location.href.replace("/"+cur+"/", "/"+db+"/");
+    window.location.href = window.location.href.replace("/"+database+"/", "/" + db + "/");
 }
 
 
@@ -1134,11 +1607,11 @@ var graph = {
         .append("div")
         .attr("id", "tooltip")
         .attr("role", "tooltip")
-        .attr("class", "ui-tooltip ui-widget ui-corner-all ui-widget-content")
+        .attr("class", "popover fade right in")
         .style("position", "absolute");
 
     // Update content and display
-    tt.html('<div class="ui-tooltip-content">' + txt + '</div>')
+    tt.html('' + txt)
       .style('display', 'block');
     graph.moveTooltip();
   },
@@ -1226,7 +1699,7 @@ var gantt = {
         var x1 = (bucketstart.getTime() - viewstart.getTime()) / 86400000 * scaling;
         var bucketend = new Date(bucketstart.getFullYear(), bucketstart.getMonth()+1, 1);
         var x2 = (bucketend.getTime() - viewstart.getTime()) / 86400000 * scaling;
-        result.push('<text class="svgheadertext" x="' + Math.floor((x1+x2)/2) + '" y="31">' + $.datepicker.formatDate("M", bucketstart) + '</text>');
+        result.push('<text class="svgheadertext" x="' + Math.floor((x1+x2)/2) + '" y="31">' + moment(bucketstart).format("MMM") + '</text>');
         if (bucketstart.getMonth() % 3 == 0)
         {
           var quarterend = new Date(bucketstart.getFullYear(), bucketstart.getMonth()+3, 1);
@@ -1248,7 +1721,7 @@ var gantt = {
       while (bucketstart < viewend)
       {
         result.push('<line class="time" x1="' + Math.floor(x) + '" y1="17" x2="' + Math.floor(x) + '" y2="34"/>');
-        result.push('<text class="svgheadertext" x="' + Math.floor(x + scaling*3.5) + '" y="31">' + $.datepicker.formatDate("mm-dd", bucketstart) + '</text>');
+        result.push('<text class="svgheadertext" x="' + Math.floor(x + scaling*3.5) + '" y="31">' + moment(bucketstart).format("MM-DD") + '</text>');
         x = x + scaling*7;
         bucketstart.setTime(bucketstart.getTime() + 86400000 * 7);
       }
@@ -1259,7 +1732,7 @@ var gantt = {
         bucketend = new Date(bucketstart.getFullYear(), bucketstart.getMonth()+1, 1);
         x2 = (bucketend.getTime() - viewstart.getTime()) / 86400000 * scaling;
         result.push('<line class="time" x1="' + Math.floor(x1) + '" y1="0" x2="' + Math.floor(x1) + '" y2="17"/>');
-        result.push('<text class="svgheadertext" x="' + Math.floor((x1+x2)/2) + '" y="13">' + $.datepicker.formatDate("M yy", bucketstart) + '</text>');
+        result.push('<text class="svgheadertext" x="' + Math.floor((x1+x2)/2) + '" y="13">' + moment(bucketstart).format("MMM YY") + '</text>');
         bucketstart = bucketend;
       }
     }
@@ -1271,7 +1744,7 @@ var gantt = {
       while (bucketstart < viewend)
       {
         result.push('<line class="time" x1="' + Math.floor(x) + '" y1="17" x2="' + Math.floor(x) + '" y2="34"/>');
-        result.push('<text class="svgheadertext" x="' + (x + scaling*7.0/2.0) + '" y="31">' + $.datepicker.formatDate("yy-mm-dd", bucketstart) + '</text>');
+        result.push('<text class="svgheadertext" x="' + (x + scaling*7.0/2.0) + '" y="31">' + moment(bucketstart).format("YY-MM-DD") + '</text>');
         x = x + scaling*7.0;
         bucketstart.setTime(bucketstart.getTime() + 86400000 * 7);
       }
@@ -1282,7 +1755,7 @@ var gantt = {
         bucketend = new Date(bucketstart.getFullYear(), bucketstart.getMonth()+1, 1);
         x2 = (bucketend.getTime() - viewstart.getTime()) / 86400000 * scaling;
         result.push('<line class="time" x1="' + Math.floor(x1) + '" y1="0" x2="' + Math.floor(x1) + '" y2="17"/>');
-        result.push('<text class="svgheadertext" x="' + Math.floor((x1+x2)/2) + '" y="13">' + $.datepicker.formatDate("M yy", bucketstart) + '</text>');
+        result.push('<text class="svgheadertext" x="' + Math.floor((x1+x2)/2) + '" y="13">' + moment(bucketstart).format("MMM YY") + '</text>');
         bucketstart = bucketend;
       }
     }
@@ -1295,13 +1768,13 @@ var gantt = {
         if (bucketstart.getDay() == 0)
         {
           result.push('<line class="time" x1="' + Math.floor(x) + '" y1="0" x2="' + Math.floor(x) + '" y2="34"/>');
-          result.push('<text class="svgheadertext" x="' + Math.floor(x + scaling*7/2) + '" y="13">' + $.datepicker.formatDate("yy-mm-dd", bucketstart) + '</text>');
+          result.push('<text class="svgheadertext" x="' + Math.floor(x + scaling*7/2) + '" y="13">' + moment(bucketstart).format("YY-MM-DD") + '</text>');
         }
         else
         {
           result.push('<line class="time" x1="' + Math.floor(x) + '" y1="17" x2="' + Math.floor(x) + '" y2="34"/>');
         }
-        result.push('<text class="svgheadertext" x="' + Math.floor(x + scaling/2) + '" y="31">' + $.datepicker.formatDate("d", bucketstart) + '</text>');
+        result.push('<text class="svgheadertext" x="' + Math.floor(x + scaling/2) + '" y="31">' + moment(bucketstart).format("DD") + '</text>');
         x = x + scaling;
         bucketstart.setDate(bucketstart.getDate()+1);
       }
@@ -1315,13 +1788,13 @@ var gantt = {
         if (bucketstart.getDay() == 0)
         {
           result.push('<line class="time" x1="' + Math.floor(x) + '" y1="0" x2="' + Math.floor(x) + '" y2="34"/>');
-          result.push('<text class="svgheadertext" x="' + Math.floor(x + scaling*7/2) + '" y="13">' + $.datepicker.formatDate("yy-mm-dd", bucketstart) + '</text>');
+          result.push('<text class="svgheadertext" x="' + Math.floor(x + scaling*7/2) + '" y="13">' + moment(bucketstart).format("YY-MM-DD") + '</text>');
         }
         else
         {
           result.push('<line class="time" x1="' + Math.floor(x) + '" y1="17" x2="' + Math.floor(x) + '" y2="34"/>');
         }
-        result.push('<text class="svgheadertext" x="' + Math.floor(x + scaling/2) + '" y="31">' + $.datepicker.formatDate("dd M", bucketstart) + '</text>');
+        result.push('<text class="svgheadertext" x="' + Math.floor(x + scaling/2) + '" y="31">' + moment(bucketstart).format("DD MM") + '</text>');
         x = x + scaling;
         bucketstart.setDate(bucketstart.getDate()+1);
       }
@@ -1335,11 +1808,11 @@ var gantt = {
         if (bucketstart.getDay() == 0)
         {
           result.push('<line class="time" x1="' + Math.floor(x) + '" y1="0" x2="' + Math.floor(x) + '" y2="34"/>');
-          result.push('<text class="svgheadertext" x="' + Math.floor(x + scaling*3.5) + '" y="13">' + $.datepicker.formatDate("yy-mm-dd", bucketstart) + '</text>');
+          result.push('<text class="svgheadertext" x="' + Math.floor(x + scaling*3.5) + '" y="13">' + moment(bucketstart).format("YY-MM-DD") + '</text>');
         }
         else
           result.push('<line class="time" x1="' + Math.floor(x) + '" y1="17" x2="' + Math.floor(x) + '" y2="34"/>');
-        result.push('<text class="svgheadertext" x="' + Math.floor(x + scaling/2) + '" y="31">' + $.datepicker.formatDate("D dd M", bucketstart) + '</text>');
+        result.push('<text class="svgheadertext" x="' + Math.floor(x + scaling/2) + '" y="31">' + moment(bucketstart).format("ddd DD MMM") + '</text>');
         x = x + scaling;
         bucketstart.setDate(bucketstart.getDate()+1);
       }
@@ -1353,7 +1826,7 @@ var gantt = {
         if (bucketstart.getHours() == 0)
         {
           result.push('<line class="time" x1="' + Math.floor(x) + '" y1="0" x2="' + Math.floor(x) + '" y2="34"/>');
-          result.push('<text class="svgheadertext" x="' + Math.floor(x + scaling/2) + '" y="13">' + $.datepicker.formatDate("D yy-mm-dd", bucketstart) + '</text>');
+          result.push('<text class="svgheadertext" x="' + Math.floor(x + scaling/2) + '" y="13">' + moment(bucketstart).format("ddd YY-MM-DD") + '</text>');
         }
         else
           result.push('<line class="time" x1="' + Math.floor(x) + '" y1="17" x2="' + Math.floor(x) + '" y2="34"/>');
@@ -1438,8 +1911,80 @@ var tour = {
   tooltip: null,
   chapter: 0,
   step: 0,
+  intro: null,
   timeout: null,
 
+  tooltip: '<div class="popover tourpopover" role="tooltip">' +
+    '<div class="arrow"></div>' +
+    '<div class="popover-content"></div>' +
+    '</div>',
+
+  introtip: '<div class="popover tourpopover" role="tooltip">' +
+    '<div class="arrow"></div>' +
+    '<div class="popover-content" style="padding-bottom: 0"></div>' +
+    '<div class="popover-footer small"><label>' +
+    '<input style="vertical-align: bottom" type="checkbox" checked onclick="tour.displayHints(this.checked, true)">&nbsp;' +
+    gettext('Show hints') +
+    '</label></div></div>',
+
+  displayHints: function(show, warn) {
+    if (show) {
+      // Reinitialize the intro hints
+      localStorage.removeItem("intro");
+      $("#showHints").addClass("toggle-on").removeClass("toggle-off");
+      tour.showIntroPage(null);
+    }
+    else {
+      // Marks the complete tour as seen
+      localStorage.setItem("intro", "{}");
+      $("#showHints").addClass("toggle-off").removeClass("toggle-on");
+      //if (warn): TODO not working yet
+      //  $('.tourpopover-content').html("You can activate the hints again from the Help menu");
+      $('.tourpopover').popover('destroy');
+    }
+  },
+
+  showIntroPage: function(pagestxt) {
+    // Get the intro data
+    if (pagestxt == null)
+    {
+      // First time visitor without intro list
+      var pages = {};
+      for (var key in introdata)
+        pages[key] = 0;
+      localStorage.setItem("intro", JSON.stringify(pages));
+    }
+    else
+    {
+      // Intro list already exists
+      if (pagestxt == '')
+        pagestxt = localStorage.getItem("intro");
+      var pages = JSON.parse(pagestxt);
+    }
+
+    // Check if the page has an intro
+    if (location.pathname in pages) {
+      // Display the page
+      tour.intro = introdata[location.pathname][pages[location.pathname]];
+      tour.showStep();
+      tour.intro = null;
+
+      // Add an event handler to move to the next intro hint
+      $('html').on('click', function (event) {
+        if (!$(event.target).is("a"))
+          tour.showIntroPage('');
+        });
+
+      // Remove the page from the to-see list
+      pages[location.pathname] += 1;
+      if (pages[location.pathname] >= introdata[location.pathname].length)
+        delete pages[location.pathname];
+      localStorage.setItem("intro", JSON.stringify(pages));
+    }
+    else
+      // No hints for this page
+      $('.tourpopover').popover('destroy');
+  },
 
   start: function (args)
   {
@@ -1463,89 +2008,70 @@ var tour = {
   init: function()
   {
      // Display the main dialog of the tour
-     $("body").append( '<div id="tour" style="padding-bottom:20px; display:none">' +
+    $('#timebuckets').modal('hide');
+    $.jgrid.hideModal("#searchmodfbox_grid");
+
+    $('#popup').removeClass("in").addClass("tourguide").html('<div class="modal-dialog" id="tourModal" role="dialog" style="width: 390px; position: absolute; bottom: 10px; left: auto; right: 15px;">'+
+        '<div class="modal-content">'+
+        '<div class="modal-header">'+
+          '<h4 id="modalTitle" class="modal-title"><strong>'+ gettext("Guided tour") +
+          '</strong><button type="button" id="tourcancelbutton" class="close" data-dismiss="modal" aria-hidden="true"><span class="fa fa-times"</button>'+'</h4>'+
+        '</div>'+
+        '<div class="modal-body" id="tourmodalbody" style="padding-bottom:20px;">'+
+            tourdata[tour.chapter]['description']+
+        '</div>'+
+        '<div class="modal-footer"><div class="btn-group control-form" role="group" aria-label="tour buttons">'+
+          '<button type="submit" id="tourprevious" role="button" class="btn btn-primary">'+'<span class="fa fa-step-backward"></span>&nbsp;'+gettext('Previous')+'</button>'+
+          '<button type="submit" id="playbutton" role="button" class="btn btn-primary">'+ gettext(tour.autoplay === 0 ? 'Play' : 'Pause')+ '&nbsp;<span class= ' + ((tour.autoplay === 0) ? '"fa fa-play"' : '"fa fa-pause"') + '></span></button>'+
+          '<button type="submit" id="tournext" role="button" class="btn btn-primary">'+gettext('Next')+'&nbsp;<span class="fa fa-step-forward"></span></button>'+
+        '</div></div>'+
+      '</div>'+
+    '</div>' )
+    .modal({ //these 2 lines disable close when clicking outside the modal
+      //backdrop: 'static',
+      //keyboard: false
+    }).on('hidden.bs.modal', function () {
+      $('.tourpopover').popover('destroy');
+    })
+    .on('shown.bs.modal', function () {
+      tour.showStep();
+    })
+    .modal('show');
+    $('#tourmodalbody').append( '<div id="tour" style="padding-bottom:20px; display:none">' +
          tourdata[tour.chapter]['description']  + '<br/><br/><br/></div>');
-     $("#tour").dialog({
-      title: gettext("Guided tour"),
-      autoOpen: true,
-      resizable: false,
-      width: 390,
-      height: 'auto',
-      position: "right bottom",
-      modal: false,
-      dialogClass: "tourguide",
-      close: function() {
-          $('#tour').remove();
-          $('#tourtooltip').remove();
-          tour.tooltip.css({ 'display' : 'none' }).html('');
-          tour.chapter = 0;
-          tour.step = 0;
-          tour.autoplay = false;
-          if (tour.timeout)
-          {
-            clearTimeout(tour.timeout);
-            tour.timeout = null;
-          }
-        },
-      buttons: [
-        {
-          id: "tourprevious",
-          text: gettext("Previous"),
-          icons: { primary: "ui-icon-seek-prev" },
-          click: tour.prev
-        },
-        {
-          text: (tour.autoplay != 0) ? gettext("Stop") : gettext("Play"),
-          icons: { primary: (tour.autoplay != 0) ? "ui-icon-pause" : "ui-icon-play" },
-          click: tour.toggleAutoplay
-        },
-        {
-          id: "tournext",
-          text: gettext("Next"),
-          icons: { primary: "ui-icon-seek-next" },
-          click: tour.next
-        }
-        ]
-      });
-
-     // Create the tooltip
-     tour.tooltip = $('<div>',{id:'tourtooltip', class:'tourtooltip ui-dialog ui-widget ui-widget-content ui-corner-all ui-front', html:''}).css({
-       'display': 'none', 'overflow': 'visible'
-     });
-     $("body").append(tour.tooltip);
-
-     // Show the first step
-     tour.showStep();
+    $('#tourprevious').on('click', function() {
+      tour.prev();
+    });
+    $('#playbutton').on('click', function() {
+      tour.toggleAutoplay();
+    });
+    $('#tournext').on('click', function() {
+      tour.next();
+    });
+    $('#tourcancelbutton').on('click', function() {
+      $('.tourpopover').popover('destroy');
+      $('#tourModal').modal('hide');
+    });
   },
 
   next: function()
   {
+    $(tourdata[tour.chapter]['steps'][tour.step]['element']).popover('destroy');
     tour.step++;
     if (tour.step >= tourdata[tour.chapter]['steps'].length)
     {
       tour.chapter++;
-      if (tour.chapter < tourdata.length)
-        tour.step = 0;
-      else if (tour.autoplay == 2)
-      {
+      tour.step = 0;
+      if (tour.chapter >= tourdata.length)
         // Restart from the beginning
-        tour.step = 0;
         tour.chapter = 0;
-      }
-      else
-      {
-        // Stop at the last step
-        if (tour.autoplay == 1) tour.toggleAutoplay();
-        tour.chapter--;
-        tour.step--;
-        return;
-      }
     }
     tour.showStep();
   },
 
   prev: function()
   {
+    $(tourdata[tour.chapter]['steps'][tour.step]['element']).popover('destroy');
     tour.step--;
     if (tour.step < 0)
     {
@@ -1565,49 +2091,69 @@ var tour = {
 
   showStep: function()
   {
-    var stepData = tourdata[tour.chapter]['steps'][tour.step];
-    // Switch url if required
-    var prefix = $('#database').attr('name');
-    if (prefix && prefix != "default")
-    {
-      if (location.pathname != "/" + prefix + stepData['url'])
-      {
-        window.location.href = "/" + prefix + stepData['url'] + "?tour=" + tour.chapter + "," + tour.step + "," + tour.autoplay;
+    $('.tourpopover').popover('destroy');
+    if (tour.intro)
+      // Intro popup
+      var stepData = tour.intro;
+    else {
+      // Guided tour
+      var stepData = tourdata[tour.chapter]['steps'][tour.step];
+      // Switch url if required
+      var nexthref = '';
+      var currsearch = '';
+      if ( location.search.lastIndexOf('&')>-1 )
+        currsearch = location.search.replace(location.search.slice(location.search.lastIndexOf('&')),''); //delete &tour=x,y,z
+      else
+        currsearch = ''; //delete ?tour=x,y,z
+      if (location.pathname+currsearch != url_prefix+stepData['url']) {
+        nexthref = url_prefix + stepData['url'] + "?tour=" + tour.chapter + "," + tour.step + "," + tour.autoplay;
+        if (nexthref.match(/\?/g || []).length == 2)
+          nexthref = url_prefix + stepData['url'] + "&tour=" + tour.chapter + "," + tour.step + "," + tour.autoplay;
+        window.location.href = nexthref;
         return;
-      }
+      };
     }
-    else
-    {
-      if (location.pathname != stepData['url'])
-      {
-        window.location.href = stepData['url'] + "?tour=" + tour.chapter + "," + tour.step + "," + tour.autoplay;
-        return;
-      }
-    }
+
     // Callback
     if ('beforestep' in stepData)
       eval(stepData['beforestep']);
     // Display the tooltip
-    tour.tooltip.html(stepData['description']);
     var tooltipPos = (typeof stepData.position == 'undefined') ? 'BL' : stepData['position'];
-    var pos = tour.getTooltipPosition(tooltipPos, stepData['element']);
-    tour.tooltip.css({ 'top': pos.top+'px', 'left': pos.left+'px' });
-    tour.tooltip.show('fast');
+    $(stepData['element']).attr('role', 'button').attr('tabindex', '0');
+    $(stepData['element']).popover({
+      'html': true,
+      'container': 'body',
+      'template': tour.intro ? tour.introtip : tour.tooltip,
+      'title':'',
+      'content': stepData['description'],
+      'placement': stepData['position'],
+      'trigger': 'manual'
+      });
+    $(stepData['element'])
+    .popover('show')
+    .on('shown.bs.popover', function () {
+      var postop = $('.tourpopover').css('top').replace('px','');
+      if (postop < window.pageYOffset || postop > window.pageYOffset+window.innerHeight/2) window.scrollTo(0,postop-window.innerHeight/2);
+    })
+
     // Update tour dialog
-    $('#tour').html(tourdata[tour.chapter]['description'] + '<br/><br/>' + (tour.step+1) + " " + gettext("out of") + " " + tourdata[tour.chapter]['steps'].length);
-    // Previous button
-    if (tour.chapter == 0 && tour.step == 0)
-      $("#tourprevious").button("disable");
-    else
-      $("#tourprevious").button("enable");
-    // Next button
-    if ((tour.chapter >= tourdata.length-1) && (tour.step >= tourdata[tour.chapter]['steps'].length-1))
-      $("#tournext").button("disable");
-    else
-      $("#tournext").button("enable");
-    // Autoplay
-    if (tour.autoplay)
-      tour.timeout = setTimeout(tour.next, tourdata[tour.chapter]['delay'] * 1000);
+    if (tour.intro == null) {
+      $('#tourmodalbody').html(tourdata[tour.chapter]['description']);
+      // Previous button
+      if (tour.chapter == 0 && tour.step == 0)
+        $("#tourprevious").prop('disabled', true);
+      else
+        $("#tourprevious").prop('disabled', false);
+      // Next button
+      if ((tour.chapter >= tourdata.length-1) && (tour.step >= tourdata[tour.chapter]['steps'].length-1))
+        $("#tournext").prop('disabled', true);
+      else
+        $("#tournext").prop('disabled', false);
+      // Autoplay
+      if (tour.autoplay)
+        tour.timeout = setTimeout(tour.next, tourdata[tour.chapter]['delay'] * 1000);
+    }
+
     // Callback
     if ('afterstep' in stepData)
       eval(stepData['afterstep']);
@@ -1617,124 +2163,18 @@ var tour = {
   {
     if (tour.autoplay > 0)
     {
-      var icn = $(".ui-icon-pause");
-      icn.toggleClass("ui-icon-pause ui-icon-play");
-      icn.next().html(gettext("Play"));
+      $("#playbutton").html(gettext('Play')+'&nbsp;<span class="fa fa-play"></span>');
       tour.autoplay = 0;
       clearTimeout(tour.timeout);
       tour.timeout = null;
     }
     else
     {
-      var icn = $(".ui-icon-play");
-      icn.toggleClass("ui-icon-play ui-icon-pause");
-      icn.next().html(gettext("Stop"));
+      $("#playbutton").html(gettext('Pause')+'&nbsp;<span class="fa fa-pause"></span>');
       tour.autoplay = 1;
       tour.next();
     }
-  },
-
-  getTooltipPosition: function(pos, elementselector)
-  {
-    var element = $(elementselector);
-    if (element.length == 0)
-    {
-      console.log("Warning: Tour refers to nonexisting element '" + elementselector + "'");
-      return { 'left'  : 100, 'top' : 100 };
-    }
-    var position;
-    var ew = element.outerWidth();
-    var eh = element.outerHeight();
-    var offset = element.offset();
-    var el = offset.left;
-    var et = offset.top;
-    var tw = tour.tooltip.width() + parseInt(tour.tooltip.css('padding-left')) + parseInt(tour.tooltip.css('padding-right'));
-    var th = tour.tooltip.height() + parseInt(tour.tooltip.css('padding-top')) +  + parseInt(tour.tooltip.css('padding-bottom'));
-
-    $('.tourArrow').remove();
-    var upArrow = $('<div class="tourArrow"></div>').css({ 'position' : 'absolute', 'display' : 'block', 'width' : '0', 'height' : '0', 'border-left' : '9px solid transparent', 'border-right' : '9px solid transparent', 'border-bottom' : '9px solid red'});
-    var downArrow = $('<div class="tourArrow"></div>').css({ 'position' : 'absolute', 'display' : 'block', 'width' : '0', 'height' : '0', 'border-left' : '9px solid transparent', 'border-right' : '9px solid transparent', 'border-top' : '9px solid red'});
-    var rightArrow = $('<div class="tourArrow"></div>').css({ 'position' : 'absolute', 'display' : 'block', 'width' : '0', 'height' : '0', 'border-top' : '9px solid transparent', 'border-bottom' : '9px solid transparent', 'border-left' : '9px solid red'});
-    var leftArrow = $('<div class="tourArrow"></div>').css({ 'position' : 'absolute', 'display' : 'block', 'width' : '0', 'height' : '0', 'border-top' : '9px solid transparent', 'border-bottom' : '9px solid transparent', 'border-right' : '9px solid red'});
-    switch (pos) {
-      case 'BL' :
-        position = { 'left'  : el, 'top' : et + eh + 10 };
-        upArrow.css({ top: '-9px', left: '48%' });
-        tour.tooltip.prepend(upArrow);
-        break;
-
-      case 'BR' :
-        position = { 'left'  : el + ew - tw, 'top' : et + eh + 10 };
-        upArrow.css({ top: '-9px', left: '48%' });
-        tour.tooltip.prepend(upArrow);
-        break;
-
-      case 'TL' :
-        position = { 'left'  : el, 'top' : (et - th) -10 };
-        downArrow.css({ top: th, left: '48%' });
-        tour.tooltip.append(downArrow);
-        break;
-
-      case 'TR' :
-        position = { 'left'  : (el + ew) - tw, 'top' : et - th -10 };
-        downArrow.css({ top: th, left: '48%' });
-        tour.tooltip.append(downArrow);
-        break;
-
-      case 'RT' :
-        position = { 'left'  : el + ew + 10, 'top' : et };
-        leftArrow.css({ left: '-9px' });
-        tour.tooltip.prepend(leftArrow);
-        break;
-
-      case 'RB' :
-        position = { 'left'  : el + ew + 10, 'top' : et + eh - th };
-        leftArrow.css({ left: '-9px' });
-        tour.tooltip.prepend(leftArrow);
-        break;
-
-      case 'LT' :
-        position = { 'left'  : (el - tw) - 10, 'top' : et };
-        rightArrow.css({ right: '-9px' });
-        tour.tooltip.prepend(rightArrow);
-        break;
-
-      case 'LB' :
-        position = { 'left'  : (el - tw) - 10, 'top' : et + eh - th};
-        rightArrow.css({ right: '-9px' });
-        tour.tooltip.prepend(rightArrow);
-        break;
-
-      case 'B'  :
-        position = { 'left'  : el + ew/2 - tw/2, 'top' : (et + eh) + 10 };
-        upArrow.css({ top: '-9px', left: '48%' });
-        tour.tooltip.prepend(upArrow);
-        break;
-
-      case 'L'  :
-        position = { 'left'  : (el - tw) - 10, 'top' : et + eh/2 - th/2 };
-        rightArrow.css({ right: '-9px' });
-        tour.tooltip.prepend(rightArrow);
-        break;
-
-      case 'T'  :
-        position = { 'left'  : el + ew/2 - tw/2, 'top' : (et - th) - 10 };
-        downArrow.css({ top: th, left: '48%' });
-        tour.tooltip.append(downArrow);
-        break;
-
-      case 'R'  :
-        position = { 'left'  : (el + ew) + 10, 'top' : et + eh/2 - th/2 };
-        leftArrow.css({ left: '-9px' });
-        tour.tooltip.prepend(leftArrow);
-        break;
-
-      case 'C'  :
-        position = { 'left'  : el + ew/2 - tw/2, 'top' : et + eh/2 - th/2 };
-    }
-    return position;
   }
-
 }
 
 

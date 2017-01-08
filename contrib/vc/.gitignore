@@ -4,3 +4,5 @@
 /*.opensdf
 /*/Release*
 /*/Debug*
+/*.db
+/*.opendb

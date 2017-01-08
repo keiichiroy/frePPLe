@@ -129,6 +129,9 @@ class Command(BaseCommand):
       # Some tables need to be handled a bit special
       if "setupmatrix" in tables:
         tables.add("setuprule")
+      if 'operationplan' in tables:
+        tables.add('operationplanmaterial')
+        tables.add('operationplanresource')
       tables.discard('auth_group_permissions')
       tables.discard('auth_permission')
       tables.discard('auth_group')
@@ -147,6 +150,55 @@ class Command(BaseCommand):
           cursor.execute('update common_user set horizonbuckets = null')
         for stmt in connections[database].ops.sql_flush(no_style(), tables, []):
           cursor.execute(stmt)
+        if models:
+          if 'input.purchaseorder' in models:
+            cursor.execute('''
+              delete from operationplanresource
+              where operationplan_id in (
+                select operationplan.id from operationplan
+                where type = 'PO'
+                )
+              ''')
+            cursor.execute('''
+              delete from operationplanmaterial
+              where operationplan_id in (
+                select operationplan.id from operationplan
+                where type = 'PO'
+                )
+              ''')
+            cursor.execute("delete from operationplan where type = 'PO'")
+          if 'input.distributionorder' in models:
+            cursor.execute('''
+              delete from operationplanresource
+              where operationplan_id in (
+                select operationplan.id from operationplan
+                where type = 'DO'
+                )
+              ''')
+            cursor.execute('''
+              delete from operationplanmaterial
+              where operationplan_id in (
+                select operationplan.id from operationplan
+                where type = 'DO'
+                )
+              ''')
+            cursor.execute("delete from operationplan where type = 'DO'")
+          if 'input.manufacturingorder' in models:
+            cursor.execute('''
+              delete from operationplanmaterial
+              where operationplan_id in (
+                select operationplan.id from operationplan
+                where type = 'MO'
+                )
+              ''')
+            cursor.execute('''
+              delete from operationplanresource
+              where operationplan_id in (
+                select operationplan.id from operationplan
+                where type = 'MO'
+                )
+              ''')
+            cursor.execute("delete from operationplan where type = 'MO'")
 
       # Task update
       task.status = 'Done'

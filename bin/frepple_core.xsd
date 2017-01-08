@@ -16,7 +16,7 @@
  License along with this program.  If not, see <http://www.gnu.org/licenses/>.
 -->
 <xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema"
-  elementFormDefault="unqualified" attributeFormDefault="unqualified" version="3.1.beta">
+  elementFormDefault="unqualified" attributeFormDefault="unqualified" version="4.0.beta">
   <!--
     This schema has no target namespace defined. It will adopt the namespace
     of the schema that is using it with an "include" statement.
@@ -231,6 +231,10 @@
     </xsd:annotation>
     <xsd:choice minOccurs="0" maxOccurs="unbounded">
       <xsd:group ref="common_fields" />
+      <xsd:element name="item" type="item" />
+      <xsd:element name="priority" type="xsd:integer" />
+      <xsd:element name="effective_start" type="xsd:dateTime" />
+      <xsd:element name="effective_end" type="xsd:dateTime" /> 
       <xsd:element name="duration" type="xsd:duration" />
       <xsd:element name="owner" type="operation" />
       <xsd:element name="detectproblems" type="xsd:boolean" />
@@ -255,6 +259,9 @@
     <xsd:attribute name="size_multiple" type="positiveDouble" />
     <xsd:attribute name="size_maximum" type="positiveDouble" />
     <xsd:attribute name="cost" type="positiveDouble" />
+    <xsd:attribute name="priority" type="xsd:integer" />
+    <xsd:attribute name="effective_start" type="xsd:dateTime" />
+    <xsd:attribute name="effective_end" type="xsd:dateTime" />
   </xsd:complexType>
 
   <xsd:complexType name="operationlist">
@@ -330,7 +337,7 @@
       </xsd:extension>
     </xsd:complexContent>
   </xsd:complexType>
-  
+
   <xsd:complexType name="suboperation">
     <xsd:annotation>
       <xsd:documentation>
@@ -364,7 +371,6 @@
           </xsd:sequence>
         </xsd:complexType>
       </xsd:element>
-      <xsd:element name="operation" type="operation" />
       <xsd:element name="price" type="positiveDouble" />
       <xsd:element name="itemsuppliers" type="itemsupplierlist" />
       <xsd:element name="itemdistributions" type="itemdistributionlist" />
@@ -397,6 +403,9 @@
       <xsd:element name="priority" type="xsd:integer" />
       <xsd:element name="effective_start" type="xsd:dateTime" />
       <xsd:element name="effective_end" type="xsd:dateTime" />
+      <xsd:element name="resource" type="resource" />
+      <xsd:element name="resource_qty" type="positiveDouble" />
+      <xsd:element name="fence" type="xsd:duration" />
       <xsd:element name="booleanproperty" type="booleanproperty" />
       <xsd:element name="stringproperty" type="stringproperty" />
       <xsd:element name="doubleproperty" type="doubleproperty" />
@@ -409,6 +418,8 @@
     <xsd:attribute name="priority" type="xsd:integer" />
     <xsd:attribute name="effective_start" type="xsd:dateTime" />
     <xsd:attribute name="effective_end" type="xsd:dateTime" />
+    <xsd:attribute name="resource_qty" type="positiveDouble" />
+    <xsd:attribute name="fence" type="xsd:duration" />
     <xsd:attribute name="action" type="action" />
   </xsd:complexType>
 
@@ -437,6 +448,9 @@
       <xsd:element name="priority" type="xsd:integer" />
       <xsd:element name="effective_start" type="xsd:dateTime" />
       <xsd:element name="effective_end" type="xsd:dateTime" />
+      <xsd:element name="resource" type="resource" />
+      <xsd:element name="resource_qty" type="positiveDouble" />
+      <xsd:element name="fence" type="xsd:duration" />
       <xsd:element name="booleanproperty" type="booleanproperty" />
       <xsd:element name="stringproperty" type="stringproperty" />
       <xsd:element name="doubleproperty" type="doubleproperty" />
@@ -449,6 +463,8 @@
     <xsd:attribute name="priority" type="xsd:integer" />
     <xsd:attribute name="effective_start" type="xsd:dateTime" />
     <xsd:attribute name="effective_end" type="xsd:dateTime" />
+    <xsd:attribute name="resource_qty" type="positiveDouble" />
+    <xsd:attribute name="fence" type="xsd:duration" />
     <xsd:attribute name="action" type="action" />
   </xsd:complexType>
 
@@ -706,6 +722,7 @@
     <xsd:choice minOccurs="0" maxOccurs="unbounded">
       <xsd:element name="operation" type="operation" />
       <xsd:element name="buffer" type="buffer" />
+      <xsd:element name="item" type="item" />
       <xsd:element name="quantity" type="xsd:double" />
       <xsd:element name="priority" type="xsd:integer" />
       <xsd:element name="effective_start" type="xsd:dateTime" />
@@ -844,6 +861,7 @@
     <xsd:choice minOccurs="0" maxOccurs="unbounded">
       <xsd:group ref="common_fields" />
       <xsd:element name="quantity" type="positiveDouble" />
+      <xsd:element name="planned_quantity" type="positiveDouble" />
       <xsd:element name="item" type="item" />
       <xsd:element name="location" type="location" />
       <xsd:element name="due" type="xsd:dateTime" />
@@ -866,6 +884,7 @@
     </xsd:choice>
     <xsd:attributeGroup ref="common_attributes" />
     <xsd:attribute name="quantity" type="positiveDouble" />
+    <xsd:attribute name="planned_quantity" type="positiveDouble" />
     <xsd:attribute name="due" type="xsd:dateTime" />
     <xsd:attribute name="priority" type="xsd:integer" />
     <xsd:attribute name="detectproblems" type="xsd:boolean" />
@@ -948,6 +967,15 @@
   </xsd:complexType>
 
   <!-- OPERATIONPLAN -->
+  <xsd:simpleType name="ordertype">
+    <xsd:restriction base="xsd:string">
+      <xsd:enumeration value="MO" />
+      <xsd:enumeration value="PO" />
+      <xsd:enumeration value="DO" />
+      <xsd:enumeration value="DLVR" />
+      <xsd:enumeration value="STCK" />
+    </xsd:restriction>
+  </xsd:simpleType>  
   <xsd:complexType name="operationplan">
     <xsd:annotation>
       <xsd:documentation>
@@ -955,7 +983,8 @@
         operation planned at a certain quantity and time.
       </xsd:documentation>
     </xsd:annotation>
-    <xsd:choice minOccurs="0" maxOccurs="unbounded">
+    <xsd:choice minOccurs="0" maxOccurs="unbounded"> 
+      <xsd:element name="ordertype" type="ordertype" />    
       <xsd:element name="id" type="xsd:unsignedLong" />
       <xsd:element name="operation" type="operation" />
       <xsd:element name="demand" type="demand" />
@@ -970,11 +999,16 @@
       <xsd:element name="consume_capacity" type="xsd:boolean" />
       <xsd:element name="produce_material" type="xsd:boolean" />
       <xsd:element name="source" type="xsd:normalizedString" />
+      <xsd:element name="item" type="item" />
+      <xsd:element name="location" type="location" />
+      <xsd:element name="origin" type="location" />
+      <xsd:element name="supplier" type="supplier" />
       <xsd:element name="booleanproperty" type="booleanproperty" />
       <xsd:element name="stringproperty" type="stringproperty" />
       <xsd:element name="doubleproperty" type="doubleproperty" />
       <xsd:element name="dateproperty" type="dateproperty" />
     </xsd:choice>
+    <xsd:attribute name="ordertype" type="ordertype" />
     <xsd:attribute name="id" type="xsd:unsignedLong" />
     <xsd:attribute name="start" type="xsd:dateTime" />
     <xsd:attribute name="end" type="xsd:dateTime" />

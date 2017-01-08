@@ -35,15 +35,15 @@ namespace frepple
 namespace utils
 {
 
-DECLARE_EXPORT PyObject* PythonLogicException = NULL;
-DECLARE_EXPORT PyObject* PythonDataException = NULL;
-DECLARE_EXPORT PyObject* PythonRuntimeException = NULL;
+PyObject* PythonLogicException = nullptr;
+PyObject* PythonDataException = nullptr;
+PyObject* PythonRuntimeException = nullptr;
 
-DECLARE_EXPORT PyObject *PythonInterpreter::module = NULL;
-DECLARE_EXPORT PyThreadState* PythonInterpreter::mainThreadState = NULL;
+PyObject *PythonInterpreter::module = nullptr;
+PyThreadState* PythonInterpreter::mainThreadState = nullptr;
 
 
-DECLARE_EXPORT void Object::writeElement(
+void Object::writeElement(
   Serializer* o, const Keyword& tag, FieldCategory m
   ) const
 {
@@ -65,38 +65,53 @@ DECLARE_EXPORT void Object::writeElement(
   }
 
   // Write the content
-  if (m == MANDATORY)
+  switch (m)
   {
-    // Write references only
-    if (meta.category)
-      for (MetaClass::fieldlist::const_iterator i = meta.category->getFields().begin(); i != meta.category->getFields().end(); ++i)
+    case MANDATORY:
+      // Write references only
+      if (meta.category)
+        for (MetaClass::fieldlist::const_iterator i = meta.category->getFields().begin(); i != meta.category->getFields().end(); ++i)
+          if ((*i)->getFlag(MANDATORY))
+            (*i)->writeField(*o);
+      for (MetaClass::fieldlist::const_iterator i = meta.getFields().begin(); i != meta.getFields().end(); ++i)
         if ((*i)->getFlag(MANDATORY))
           (*i)->writeField(*o);
-    for (MetaClass::fieldlist::const_iterator i = meta.getFields().begin(); i != meta.getFields().end(); ++i)
-      if ((*i)->getFlag(MANDATORY))
-        (*i)->writeField(*o);
-  }
-  else if (m == BASE)
-  {
-    // Write only the fields required to successfully save&restore the object
-    if (meta.category)
-      for (MetaClass::fieldlist::const_iterator i = meta.category->getFields().begin(); i != meta.category->getFields().end(); ++i)
-        if (!(*i)->getFlag(DETAIL) && !(*i)->getFlag(PLAN))
+      break;
+    case BASE:
+      // Write only the fields required to successfully save&restore the object.
+      if (meta.category)
+        for (MetaClass::fieldlist::const_iterator i = meta.category->getFields().begin(); i != meta.category->getFields().end(); ++i)
+          if ((*i)->getFlag(BASE + MANDATORY))
+            (*i)->writeField(*o);
+      for (MetaClass::fieldlist::const_iterator i = meta.getFields().begin(); i != meta.getFields().end(); ++i)
+        if ((*i)->getFlag(BASE + MANDATORY))
           (*i)->writeField(*o);
-    for (MetaClass::fieldlist::const_iterator i = meta.getFields().begin(); i != meta.getFields().end(); ++i)
-      if (!(*i)->getFlag(DETAIL) && !(*i)->getFlag(PLAN))
-        (*i)->writeField(*o);
-    writeProperties(*o);
-  }
-  else
-  {
-    // Write the full info on the object
-    if (meta.category)
-      for (MetaClass::fieldlist::const_iterator i = meta.category->getFields().begin(); i != meta.category->getFields().end(); ++i)
-        (*i)->writeField(*o);
-    for (MetaClass::fieldlist::const_iterator i = meta.getFields().begin(); i != meta.getFields().end(); ++i)
-      (*i)->writeField(*o);
-    writeProperties(*o);
+      writeProperties(*o);
+      break;
+    case DETAIL:
+      // Write detailed info on the object.
+      if (meta.category)
+        for (MetaClass::fieldlist::const_iterator i = meta.category->getFields().begin(); i != meta.category->getFields().end(); ++i)
+          if ((*i)->getFlag(DETAIL + MANDATORY))
+            (*i)->writeField(*o);
+      for (MetaClass::fieldlist::const_iterator i = meta.getFields().begin(); i != meta.getFields().end(); ++i)
+        if ((*i)->getFlag(DETAIL + MANDATORY))
+          (*i)->writeField(*o);
+      writeProperties(*o);
+      break;
+    case PLAN:
+      // Write plan info on the object.
+      if (meta.category)
+        for (MetaClass::fieldlist::const_iterator i = meta.category->getFields().begin(); i != meta.category->getFields().end(); ++i)
+          if ((*i)->getFlag(BASE + PLAN + MANDATORY))
+            (*i)->writeField(*o);
+      for (MetaClass::fieldlist::const_iterator i = meta.getFields().begin(); i != meta.getFields().end(); ++i)
+        if ((*i)->getFlag(BASE + PLAN + MANDATORY))
+          (*i)->writeField(*o);
+      writeProperties(*o);
+      break;
+    default:
+      throw LogicException("Unknown serialization mode");
   }
 
   // Write the tail
@@ -107,7 +122,7 @@ DECLARE_EXPORT void Object::writeElement(
 }
 
 
-DECLARE_EXPORT size_t Object::getSize() const
+size_t Object::getSize() const
 {
   const MetaClass& meta = getType();
   size_t tmp = meta.size;
@@ -125,21 +140,21 @@ DECLARE_EXPORT size_t Object::getSize() const
 PyObject* PythonInterpreter::createModule()
 {
   static PyMethodDef freppleMethods[] = {
-    {NULL, NULL, 0, NULL}
+    {nullptr, nullptr, 0, nullptr}
   };
   static struct PyModuleDef frepplemodule = {
     PyModuleDef_HEAD_INIT,
     "frepple",
     "Bindings for the frePPLe production planning application",
     -1, freppleMethods,
-    NULL, NULL, NULL, NULL
+    nullptr, nullptr, nullptr, nullptr
   };
   module = PyModule_Create(&frepplemodule);
   return module;
 }
 
 
-DECLARE_EXPORT void PythonInterpreter::initialize()
+void PythonInterpreter::initialize()
 {
   int init = Py_IsInitialized();
   if (init)
@@ -185,13 +200,13 @@ DECLARE_EXPORT void PythonInterpreter::initialize()
 
   // Create python exception types
   int nok = 0;
-  PythonLogicException = PyErr_NewException((char*)"frepple.LogicException", NULL, NULL);
+  PythonLogicException = PyErr_NewException((char*)"frepple.LogicException", nullptr, nullptr);
   Py_IncRef(PythonLogicException);
   nok += PyModule_AddObject(module, "LogicException", PythonLogicException);
-  PythonDataException = PyErr_NewException((char*)"frepple.DataException", NULL, NULL);
+  PythonDataException = PyErr_NewException((char*)"frepple.DataException", nullptr, nullptr);
   Py_IncRef(PythonDataException);
   nok += PyModule_AddObject(module, "DataException", PythonDataException);
-  PythonRuntimeException = PyErr_NewException((char*)"frepple.RuntimeException", NULL, NULL);
+  PythonRuntimeException = PyErr_NewException((char*)"frepple.RuntimeException", nullptr, nullptr);
   Py_IncRef(PythonRuntimeException);
   nok += PyModule_AddObject(module, "RuntimeException", PythonRuntimeException);
 
@@ -211,7 +226,7 @@ DECLARE_EXPORT void PythonInterpreter::initialize()
 }
 
 
-DECLARE_EXPORT void PythonInterpreter::finalize()
+void PythonInterpreter::finalize()
 {
   // Only valid if this is an embedded interpreter
   if (!mainThreadState) return;
@@ -223,7 +238,7 @@ DECLARE_EXPORT void PythonInterpreter::finalize()
 }
 
 
-DECLARE_EXPORT void PythonInterpreter::addThread()
+void PythonInterpreter::addThread()
 {
   // Check whether the thread already has a Python state
   PyThreadState * myThreadState = PyGILState_GetThisThreadState();
@@ -239,7 +254,7 @@ DECLARE_EXPORT void PythonInterpreter::addThread()
 }
 
 
-DECLARE_EXPORT void PythonInterpreter::deleteThread()
+void PythonInterpreter::deleteThread()
 {
   // Check whether the thread already has a Python state
   PyThreadState * tcur = PyGILState_GetThisThreadState();
@@ -252,7 +267,7 @@ DECLARE_EXPORT void PythonInterpreter::deleteThread()
 }
 
 
-DECLARE_EXPORT void PythonInterpreter::execute(const char* cmd)
+void PythonInterpreter::execute(const char* cmd)
 {
   // Capture global lock
   PyGILState_STATE state = PyGILState_Ensure();
@@ -291,7 +306,7 @@ DECLARE_EXPORT void PythonInterpreter::execute(const char* cmd)
 }
 
 
-DECLARE_EXPORT void PythonInterpreter::executeFile(string filename)
+void PythonInterpreter::executeFile(string filename)
 {
   // Replacing ' with \' to escape the quotes in the Python command
   for (string::size_type pos = filename.find_first_of("'", 0);
@@ -310,7 +325,7 @@ DECLARE_EXPORT void PythonInterpreter::executeFile(string filename)
 }
 
 
-DECLARE_EXPORT void PythonInterpreter::registerGlobalMethod(
+void PythonInterpreter::registerGlobalMethod(
   const char* name, PyCFunction method, int flags, const char* doc, bool lock
 )
 {
@@ -326,7 +341,7 @@ DECLARE_EXPORT void PythonInterpreter::registerGlobalMethod(
   newMethod->ml_doc = leakingDoc->c_str();
 
   // Lock the interpreter
-  PyGILState_STATE state;
+  PyGILState_STATE state = PyGILState_LOCKED;
   if (lock) state = PyGILState_Ensure();
 
   // Register a new C function in Python
@@ -336,7 +351,7 @@ DECLARE_EXPORT void PythonInterpreter::registerGlobalMethod(
     if (lock) PyGILState_Release(state);;
     throw RuntimeException("Error registering a new Python method");
   }
-  PyObject* func = PyCFunction_NewEx(newMethod, NULL, mod);
+  PyObject* func = PyCFunction_NewEx(newMethod, nullptr, mod);
   Py_DECREF(mod);
   if (!func)
   {
@@ -365,14 +380,14 @@ DECLARE_EXPORT void PythonInterpreter::registerGlobalMethod(
 }
 
 
-DECLARE_EXPORT void PythonInterpreter::registerGlobalMethod
+void PythonInterpreter::registerGlobalMethod
 (const char* c, PyCFunctionWithKeywords f, int i, const char* d, bool b)
 {
   registerGlobalMethod(c, reinterpret_cast<PyCFunction>(f), i | METH_KEYWORDS, d, b);
 }
 
 
-DECLARE_EXPORT void PythonInterpreter::registerGlobalObject
+void PythonInterpreter::registerGlobalObject
 (const char* name, PyObject *obj, bool lock)
 {
   PyGILState_STATE state;
@@ -387,7 +402,7 @@ PyObject* PythonInterpreter::python_log(PyObject *self, PyObject *args)
   // Pick up arguments
   char *data;
   int ok = PyArg_ParseTuple(args, "s:log", &data);
-  if (!ok) return NULL;
+  if (!ok) return nullptr;
 
   // Print and flush the output stream
   logger << data;
@@ -401,7 +416,7 @@ PyObject* PythonInterpreter::python_log(PyObject *self, PyObject *args)
 
 const PyTypeObject PythonType::PyTypeObjectTemplate =
 {
-  PyVarObject_HEAD_INIT(NULL, 0)
+  PyVarObject_HEAD_INIT(nullptr, 0)
   "frepple.unspecified",  /* WILL BE UPDATED tp_name */
   0,  /* WILL BE UPDATED tp_basicsize */
   0,  /* tp_itemsize */
@@ -451,7 +466,7 @@ const PyTypeObject PythonType::PyTypeObjectTemplate =
 };
 
 
-DECLARE_EXPORT void PythonData::setDate(const Date d)
+void PythonData::setDate(const Date d)
 {
   if (obj) Py_DECREF(obj);
   PyDateTime_IMPORT;
@@ -474,7 +489,7 @@ DECLARE_EXPORT void PythonData::setDate(const Date d)
 }
 
 
-DECLARE_EXPORT Date PythonData::getDate() const
+Date PythonData::getDate() const
 {
   PyDateTime_IMPORT;
   if (PyDateTime_Check(obj))
@@ -509,14 +524,14 @@ DECLARE_EXPORT Date PythonData::getDate() const
 }
 
 
-DECLARE_EXPORT PythonData::PythonData(Object* p)
+PythonData::PythonData(Object* p)
 {
   obj = p ? static_cast<PyObject*>(p) : Py_None;
   Py_INCREF(obj);
 }
 
 
-DECLARE_EXPORT void PythonData::setObject(Object* val)
+void PythonData::setObject(Object* val)
 {
   if (obj) Py_DECREF(obj);
   obj = val ? static_cast<PyObject*>(val) : Py_None;
@@ -531,11 +546,11 @@ inline Object* PythonData::getObject() const
     // This objects are owned by us!
     return static_cast<Object*>(const_cast<PyObject*>(obj));
   else
-    return NULL;
+    return nullptr;
 }
 
 
-DECLARE_EXPORT PythonType::PythonType(size_t base_size, const type_info* tp)
+PythonType::PythonType(size_t base_size, const type_info* tp)
   : cppClass(tp)
 {
   // Allocate a new type object if it doesn't exist yet.
@@ -545,7 +560,7 @@ DECLARE_EXPORT PythonType::PythonType(size_t base_size, const type_info* tp)
 }
 
 
-DECLARE_EXPORT PythonType* Object::registerPythonType(int size, const type_info *t)
+PythonType* Object::registerPythonType(int size, const type_info *t)
 {
   // Scan the types already registered
   for (vector<PythonType*>::const_iterator i = table.begin(); i != table.end(); ++i)
@@ -558,13 +573,13 @@ DECLARE_EXPORT PythonType* Object::registerPythonType(int size, const type_info 
 }
 
 
-DECLARE_EXPORT void Object::writeProperties(Serializer& o) const
+void Object::writeProperties(Serializer& o) const
 {
   if (!dict) return; // No custom fields here
 
   // Create a sorted list of all keys
   PyGILState_STATE pythonstate = PyGILState_Ensure();
-  PyObject* key_iterator = PyObject_CallMethod(dict, "keys", NULL); // new ref
+  PyObject* key_iterator = PyObject_CallMethod(dict, "keys", nullptr); // new ref
   PyObject* keylist = PySequence_Fast(key_iterator, ""); // new ref
   PyList_Sort(keylist);
 
@@ -606,7 +621,137 @@ DECLARE_EXPORT void Object::writeProperties(Serializer& o) const
 }
 
 
-DECLARE_EXPORT void Object::setProperty(const string& name, const DataValue& value, short type)
+void Object::setProperty(
+  const string& name, const DataValue& value, short type, CommandManager* mgr
+  )
+{
+  // Report the change to the manager
+  if (mgr)
+    mgr->add( new CommandSetProperty(this, name, value, type));
+
+  // Adding the new key-value pair to the dictionary.
+  PyGILState_STATE pythonstate = PyGILState_Ensure();
+  try
+  {
+    if (!dict)
+    {
+      dict = PyDict_New();
+      Py_INCREF(dict);
+    }
+    switch (type)
+    {
+    case 1: // Boolean
+    {
+      PythonData val(value.getBool());
+      PyDict_SetItemString(dict, name.c_str(), static_cast<PyObject*>(val));
+      break;
+    }
+    case 2: // Date
+    {
+      PythonData val(value.getDate());
+      PyDict_SetItemString(dict, name.c_str(), static_cast<PyObject*>(val));
+      break;
+    }
+    case 3: // Double
+    {
+      PythonData val(value.getDouble());
+      PyDict_SetItemString(dict, name.c_str(), static_cast<PyObject*>(val));
+      break;
+    }
+    default: // String
+    {
+      PythonData val(value.getString());
+      PyDict_SetItemString(dict, name.c_str(), static_cast<PyObject*>(val));
+    }
+    }
+  }
+  catch (...)
+  {
+    PyGILState_Release(pythonstate);
+    throw;
+  }
+  PyGILState_Release(pythonstate);
+}
+
+
+void Object::setBoolProperty(
+  const string& name, bool value
+  )
+{
+  // Adding the new key-value pair to the dictionary.
+  PyGILState_STATE pythonstate = PyGILState_Ensure();
+  try
+  {
+    if (!dict)
+    {
+      dict = PyDict_New();
+      Py_INCREF(dict);
+    }
+    PythonData val(value);
+    PyDict_SetItemString(dict, name.c_str(), static_cast<PyObject*>(val));
+  }
+  catch (...)
+  {
+    PyGILState_Release(pythonstate);
+    throw;
+  }
+  PyGILState_Release(pythonstate);
+}
+
+
+void Object::setDateProperty(
+  const string& name, Date value
+  )
+{
+  // Adding the new key-value pair to the dictionary.
+  PyGILState_STATE pythonstate = PyGILState_Ensure();
+  try
+  {
+    if (!dict)
+    {
+      dict = PyDict_New();
+      Py_INCREF(dict);
+    }
+    PythonData val(value);
+    PyDict_SetItemString(dict, name.c_str(), static_cast<PyObject*>(val));
+  }
+  catch (...)
+  {
+    PyGILState_Release(pythonstate);
+    throw;
+  }
+  PyGILState_Release(pythonstate);
+}
+
+
+void Object::setDoubleProperty(
+  const string& name, double value
+  )
+{
+  // Adding the new key-value pair to the dictionary.
+  PyGILState_STATE pythonstate = PyGILState_Ensure();
+  try
+  {
+    if (!dict)
+    {
+      dict = PyDict_New();
+      Py_INCREF(dict);
+    }
+    PythonData val(value);
+    PyDict_SetItemString(dict, name.c_str(), static_cast<PyObject*>(val));
+  }
+  catch (...)
+  {
+    PyGILState_Release(pythonstate);
+    throw;
+  }
+  PyGILState_Release(pythonstate);
+}
+
+
+void Object::setStringProperty(
+  const string& name, string value
+  )
 {
   // Adding the new key-value pair to the dictionary.
   PyGILState_STATE pythonstate = PyGILState_Ensure();
@@ -615,94 +760,60 @@ DECLARE_EXPORT void Object::setProperty(const string& name, const DataValue& val
     dict = PyDict_New();
     Py_INCREF(dict);
   }
-  switch (type)
-  {
-    case 1: // Boolean
-      {
-      PythonData val(value.getBool());
-      PyDict_SetItemString(dict, name.c_str(), static_cast<PyObject*>(val));
-      break;
-      }
-    case 2: // Date
-      {
-      PythonData val(value.getDate());
-      PyDict_SetItemString(dict, name.c_str(), static_cast<PyObject*>(val));
-      break;
-      }
-    case 3: // Double
-      {
-      PythonData val(value.getDouble());
-      PyDict_SetItemString(dict, name.c_str(), static_cast<PyObject*>(val));
-      break;
-      }
-    default: // String
-      {
-      PythonData val(value.getString());
-      PyDict_SetItemString(dict, name.c_str(), static_cast<PyObject*>(val));
-      }
-  }
+  PythonData val(value);
+  PyDict_SetItemString(dict, name.c_str(), static_cast<PyObject*>(val));
   PyGILState_Release(pythonstate);
 }
 
 
-DECLARE_EXPORT void Object::setProperty(
+void Object::setProperty(
   const string& name, PyObject* value
   )
 {
   PyGILState_STATE pythonstate = PyGILState_Ensure();
-  if (!dict)
+  try
   {
-    dict = PyDict_New();
-    Py_INCREF(dict);
+    if (!dict)
+    {
+      dict = PyDict_New();
+      Py_INCREF(dict);
+    }
+    // Adding the new key-value pair to the dictionary.
+    // The reference count of the referenced object is increased.
+    PyDict_SetItemString(dict, name.c_str(), value);
   }
-  // Adding the new key-value pair to the dictionary.
-  // The reference count of the referenced object is increased.
-  PyDict_SetItemString(dict, name.c_str(), value);
+  catch (...)
+  {
+    PyGILState_Release(pythonstate);
+    throw;
+  }
   PyGILState_Release(pythonstate);
 }
 
 
-DECLARE_EXPORT bool Object::getBoolProperty(const string& name, bool def) const
+bool Object::hasProperty(const string& name) const
 {
   if (!dict)
-    // Not a single property has been defined
-    return def;
+    return false;
   PyGILState_STATE pythonstate = PyGILState_Ensure();
   PyObject* lkp = PyDict_GetItemString(dict, name.c_str());
-  if (!lkp)
-  {
-    // Value not found in the dictionary
-    PyGILState_Release(pythonstate);
-    return def;
-  }
-  PythonData val(lkp);
-  bool result = val.getBool();
-  PyGILState_Release(pythonstate);
-  return result;
-}
-
-
-DECLARE_EXPORT Date Object::getDateProperty(const string& name, Date def) const
-{
-  if (!dict)
-    // Not a single property has been defined
-    return def;
-  PyGILState_STATE pythonstate = PyGILState_Ensure();
-  PyObject* lkp = PyDict_GetItemString(dict, name.c_str());
-  if (!lkp)
-  {
-    // Value not found in the dictionary
-    PyGILState_Release(pythonstate);
-    return def;
-  }
-  PythonData val(lkp);
-  Date result = val.getDate();
+  bool result = lkp ? true : false;
   PyGILState_Release(pythonstate);
   return result;
 }
 
 
-DECLARE_EXPORT double Object::getDoubleProperty(const string& name, double def) const
+void Object::deleteProperty(const string& name)
+{
+  if (!dict)
+    return;
+  PyGILState_STATE pythonstate = PyGILState_Ensure();
+  PyDict_DelItemString(dict, name.c_str());
+  PyGILState_Release(pythonstate);
+}
+
+
+bool Object::getBoolProperty(const string& name, bool def) const
 {
   if (!dict)
     // Not a single property has been defined
@@ -715,45 +826,109 @@ DECLARE_EXPORT double Object::getDoubleProperty(const string& name, double def) 
     PyGILState_Release(pythonstate);
     return def;
   }
-  PythonData val(lkp);
-  double result = val.getDouble();
-  PyGILState_Release(pythonstate);
-  return result;
+  try
+  {
+    PythonData val(lkp);
+    bool result = val.getBool();
+    PyGILState_Release(pythonstate);
+    return result;
+  }
+  catch (...)
+  {
+    PyGILState_Release(pythonstate);
+    throw;
+  }
 }
 
 
-DECLARE_EXPORT PyObject* Object::getPyObjectProperty(const string& name) const
+Date Object::getDateProperty(const string& name, Date def) const
 {
   if (!dict)
     // Not a single property has been defined
-    return NULL;
+    return def;
   PyGILState_STATE pythonstate = PyGILState_Ensure();
   PyObject* lkp = PyDict_GetItemString(dict, name.c_str());
   if (!lkp)
   {
     // Value not found in the dictionary
     PyGILState_Release(pythonstate);
-    return NULL;
+    return def;
+  }
+  try
+  {
+    PythonData val(lkp);
+    Date result = val.getDate();
+    PyGILState_Release(pythonstate);
+    return result;
+  }
+  catch (...)
+  {
+    PyGILState_Release(pythonstate);
+    throw;
+  }
+}
+
+
+double Object::getDoubleProperty(const string& name, double def) const
+{
+  if (!dict)
+    // Not a single property has been defined
+    return def;
+  PyGILState_STATE pythonstate = PyGILState_Ensure();
+  PyObject* lkp = PyDict_GetItemString(dict, name.c_str());
+  if (!lkp)
+  {
+    // Value not found in the dictionary
+    PyGILState_Release(pythonstate);
+    return def;
+  }
+  try
+  {
+    PythonData val(lkp);
+    double result = val.getDouble();
+    PyGILState_Release(pythonstate);
+    return result;
+  }
+  catch (...)
+  {
+    PyGILState_Release(pythonstate);
+    throw;
+  }
+}
+
+
+PyObject* Object::getPyObjectProperty(const string& name) const
+{
+  if (!dict)
+    // Not a single property has been defined
+    return nullptr;
+  PyGILState_STATE pythonstate = PyGILState_Ensure();
+  PyObject* lkp = PyDict_GetItemString(dict, name.c_str());
+  if (!lkp)
+  {
+    // Value not found in the dictionary
+    PyGILState_Release(pythonstate);
+    return nullptr;
   }
   PyGILState_Release(pythonstate);
   return lkp;
 }
 
 
-DECLARE_EXPORT PyObject* Object::toXML(PyObject* self, PyObject* args)
+PyObject* Object::toXML(PyObject* self, PyObject* args)
 {
   try
   {
     // Parse the argument
-    PyObject *filearg = NULL;
-    char *mode = NULL;
+    PyObject *filearg = nullptr;
+    char *mode = nullptr;
     if (!PyArg_ParseTuple(args, "|sO:toXML", &mode, &filearg))
-      return NULL;
+      return nullptr;
 
     // Create the XML string.
     ostringstream ch;
     XMLSerializer x(ch);
-    x.setReferencesOnly(true);
+    x.setSaveReferences(true);
     if (!mode || mode[0] == 'S')
       x.setContentType(BASE);
     else if (mode[0] == 'P')
@@ -779,7 +954,7 @@ DECLARE_EXPORT PyObject* Object::toXML(PyObject* self, PyObject* args)
         // ... to a file
         Py_DECREF(writer);
         return PyFile_WriteString(ch.str().c_str(), filearg) ?
-            NULL : // Error writing to the file
+            nullptr : // Error writing to the file
             Py_BuildValue("");
       }
       else
@@ -793,13 +968,13 @@ DECLARE_EXPORT PyObject* Object::toXML(PyObject* self, PyObject* args)
   catch(...)
   {
     PythonType::evalException();
-    return NULL;
+    return nullptr;
   }
   throw LogicException("Unreachable code reached");
 }
 
 
-DECLARE_EXPORT void PythonType::addMethod
+void PythonType::addMethod
 (const char* method_name, PyCFunction f, int flags, const char* doc )
 {
   unsigned short i = 0;
@@ -830,21 +1005,21 @@ DECLARE_EXPORT void PythonType::addMethod
   table->tp_methods[i].ml_doc = doc;
 
   // Append an empty terminator record
-  table->tp_methods[++i].ml_name = NULL;
-  table->tp_methods[i].ml_meth = NULL;
+  table->tp_methods[++i].ml_name = nullptr;
+  table->tp_methods[i].ml_meth = nullptr;
   table->tp_methods[i].ml_flags = 0;
-  table->tp_methods[i].ml_doc = NULL;
+  table->tp_methods[i].ml_doc = nullptr;
 }
 
 
-DECLARE_EXPORT void PythonType::addMethod
+void PythonType::addMethod
 (const char* c, PyCFunctionWithKeywords f, int i, const char* d)
 {
   addMethod(c, reinterpret_cast<PyCFunction>(f), i | METH_KEYWORDS, d);
 }
 
 
-DECLARE_EXPORT int PythonType::typeReady()
+int PythonType::typeReady()
 {
   // Register the new type in the module
   PyGILState_STATE state = PyGILState_Ensure();
@@ -864,7 +1039,7 @@ DECLARE_EXPORT int PythonType::typeReady()
 }
 
 
-DECLARE_EXPORT void PythonType::evalException()
+void PythonType::evalException()
 {
   // Rethrowing the exception to catch its type better
   try {
@@ -893,12 +1068,12 @@ DECLARE_EXPORT void PythonType::evalException()
 }
 
 
-DECLARE_EXPORT PythonFunction::PythonFunction(const string& n)
+PythonFunction::PythonFunction(const string& n)
 {
   if (n.empty())
   {
-    // Resetting to NULL when the string is empty
-    func = NULL;
+    // Resetting to nullptr when the string is empty
+    func = nullptr;
     return;
   }
 
@@ -923,12 +1098,12 @@ DECLARE_EXPORT PythonFunction::PythonFunction(const string& n)
 }
 
 
-DECLARE_EXPORT PythonFunction::PythonFunction(PyObject* p)
+PythonFunction::PythonFunction(PyObject* p)
 {
   if (!p || p == Py_None)
   {
     // Resetting to null
-    func = NULL;
+    func = nullptr;
     return;
   }
 
@@ -959,7 +1134,7 @@ DECLARE_EXPORT PythonFunction::PythonFunction(PyObject* p)
 }
 
 
-DECLARE_EXPORT PythonData PythonFunction::call() const
+PythonData PythonFunction::call() const
 {
   if (!func) return PythonData();
   PyGILState_STATE pythonstate = PyGILState_Ensure();
@@ -967,7 +1142,7 @@ DECLARE_EXPORT PythonData PythonFunction::call() const
   if (!result)
   {
     logger << "Error: Exception caught when calling Python function '"
-        << (func ? PyEval_GetFuncName(func) : "NULL") << "'" << endl;
+        << (func ? PyEval_GetFuncName(func) : "nullptr") << "'" << endl;
     if (PyErr_Occurred()) PyErr_PrintEx(0);
   }
   PyGILState_Release(pythonstate);
@@ -975,7 +1150,7 @@ DECLARE_EXPORT PythonData PythonFunction::call() const
 }
 
 
-DECLARE_EXPORT PythonData PythonFunction::call(const PyObject* p) const
+PythonData PythonFunction::call(const PyObject* p) const
 {
   if (!func) return PythonData();
   PyGILState_STATE pythonstate = PyGILState_Ensure();
@@ -983,7 +1158,7 @@ DECLARE_EXPORT PythonData PythonFunction::call(const PyObject* p) const
   if (!result)
   {
     logger << "Error: Exception caught when calling Python function '"
-        << (func ? PyEval_GetFuncName(func) : "NULL") << "'" << endl;
+        << (func ? PyEval_GetFuncName(func) : "nullptr") << "'" << endl;
     if (PyErr_Occurred()) PyErr_PrintEx(0);
   }
   PyGILState_Release(pythonstate);
@@ -991,7 +1166,7 @@ DECLARE_EXPORT PythonData PythonFunction::call(const PyObject* p) const
 }
 
 
-DECLARE_EXPORT PythonData PythonFunction::call(const PyObject* p, const PyObject* q) const
+PythonData PythonFunction::call(const PyObject* p, const PyObject* q) const
 {
   if (!func) return PythonData();
   PyGILState_STATE pythonstate = PyGILState_Ensure();
@@ -999,7 +1174,7 @@ DECLARE_EXPORT PythonData PythonFunction::call(const PyObject* p, const PyObject
   if (!result)
   {
     logger << "Error: Exception caught when calling Python function '"
-        << (func ? PyEval_GetFuncName(func) : "NULL") << "'" << endl;
+        << (func ? PyEval_GetFuncName(func) : "nullptr") << "'" << endl;
     if (PyErr_Occurred()) PyErr_PrintEx(0);
   }
   PyGILState_Release(pythonstate);
@@ -1007,7 +1182,7 @@ DECLARE_EXPORT PythonData PythonFunction::call(const PyObject* p, const PyObject
 }
 
 
-extern "C" DECLARE_EXPORT PyObject* getattro_handler(PyObject *self, PyObject *name)
+extern "C" PyObject* getattro_handler(PyObject *self, PyObject *name)
 {
   try
   {
@@ -1016,7 +1191,7 @@ extern "C" DECLARE_EXPORT PyObject* getattro_handler(PyObject *self, PyObject *n
       PyErr_Format(PyExc_TypeError,
           "attribute name must be string, not '%S'",
           Py_TYPE(name)->tp_name);
-      return NULL;
+      return nullptr;
     }
 
     // Find the field
@@ -1040,7 +1215,7 @@ extern "C" DECLARE_EXPORT PyObject* getattro_handler(PyObject *self, PyObject *n
 
       // Exit 2: Exception occurred
       if (PyErr_Occurred())
-        return NULL;
+        return nullptr;
     }
 
     // Exit 3: Look up in our custom dictionary
@@ -1064,12 +1239,12 @@ extern "C" DECLARE_EXPORT PyObject* getattro_handler(PyObject *self, PyObject *n
   catch (...)
   {
     PythonType::evalException();
-    return NULL;
+    return nullptr;
   }
 }
 
 
-extern "C" DECLARE_EXPORT int setattro_handler(PyObject *self, PyObject *name, PyObject *value)
+extern "C" int setattro_handler(PyObject *self, PyObject *name, PyObject *value)
 {
   try
   {
@@ -1127,7 +1302,7 @@ extern "C" DECLARE_EXPORT int setattro_handler(PyObject *self, PyObject *name, P
 }
 
 
-extern "C" DECLARE_EXPORT PyObject* compare_handler(PyObject *self, PyObject *other, int op)
+extern "C" PyObject* compare_handler(PyObject *self, PyObject *other, int op)
 {
   try
   {
@@ -1153,12 +1328,12 @@ extern "C" DECLARE_EXPORT PyObject* compare_handler(PyObject *self, PyObject *ot
   catch (...)
   {
     PythonType::evalException();
-    return NULL;
+    return nullptr;
   }
 }
 
 
-extern "C" DECLARE_EXPORT PyObject* iternext_handler(PyObject *self)
+extern "C" PyObject* iternext_handler(PyObject *self)
 {
   try
   {
@@ -1167,12 +1342,12 @@ extern "C" DECLARE_EXPORT PyObject* iternext_handler(PyObject *self)
   catch (...)
   {
     PythonType::evalException();
-    return NULL;
+    return nullptr;
   }
 }
 
 
-extern "C" DECLARE_EXPORT PyObject* call_handler(PyObject* self, PyObject* args, PyObject* kwds)
+extern "C" PyObject* call_handler(PyObject* self, PyObject* args, PyObject* kwds)
 {
   try
   {
@@ -1181,12 +1356,12 @@ extern "C" DECLARE_EXPORT PyObject* call_handler(PyObject* self, PyObject* args,
   catch (...)
   {
     PythonType::evalException();
-    return NULL;
+    return nullptr;
   }
 }
 
 
-extern "C" DECLARE_EXPORT PyObject* str_handler(PyObject* self)
+extern "C" PyObject* str_handler(PyObject* self)
 {
   try
   {
@@ -1195,7 +1370,7 @@ extern "C" DECLARE_EXPORT PyObject* str_handler(PyObject* self)
   catch (...)
   {
     PythonType::evalException();
-    return NULL;
+    return nullptr;
   }
 }
 

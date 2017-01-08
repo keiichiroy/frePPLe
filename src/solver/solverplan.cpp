@@ -23,7 +23,7 @@
 namespace frepple
 {
 
-DECLARE_EXPORT const MetaClass* SolverMRP::metadata;
+const MetaClass* SolverMRP::metadata;
 const Keyword SolverMRP::tag_iterationthreshold("iterationthreshold");
 const Keyword SolverMRP::tag_iterationaccuracy("iterationaccuracy");
 const Keyword SolverMRP::tag_lazydelay("lazydelay");
@@ -84,23 +84,26 @@ PyObject* SolverMRP::create(PyTypeObject* pytype, PyObject* args, PyObject* kwds
     SolverMRP *s = new SolverMRP();
 
     // Iterate over extra keywords, and set attributes.   @todo move this responsibility to the readers...
-    PyObject *key, *value;
-    Py_ssize_t pos = 0;
-    while (PyDict_Next(kwds, &pos, &key, &value))
+    if (kwds)
     {
-      PythonData field(value);
-      PyObject* key_utf8 = PyUnicode_AsUTF8String(key);
-      DataKeyword attr(PyBytes_AsString(key_utf8));
-      Py_DECREF(key_utf8);
-      const MetaFieldBase* fmeta = SolverMRP::metadata->findField(attr.getHash());
-      if (!fmeta)
-        fmeta = Solver::metadata->findField(attr.getHash());
-      if (fmeta)
-        // Update the attribute
-        fmeta->setField(s, field);
-      else
-        s->setProperty(attr.getName(), value);
-    };
+      PyObject *key, *value;
+      Py_ssize_t pos = 0;
+      while (PyDict_Next(kwds, &pos, &key, &value))
+      {
+        PythonData field(value);
+        PyObject* key_utf8 = PyUnicode_AsUTF8String(key);
+        DataKeyword attr(PyBytes_AsString(key_utf8));
+        Py_DECREF(key_utf8);
+        const MetaFieldBase* fmeta = SolverMRP::metadata->findField(attr.getHash());
+        if (!fmeta)
+          fmeta = Solver::metadata->findField(attr.getHash());
+        if (fmeta)
+          // Update the attribute
+          fmeta->setField(s, field);
+        else
+          s->setProperty(attr.getName(), value);
+      };
+    }
 
     // Return the object. The reference count doesn't need to be increased
     // as we do with other objects, because we want this object to be available
@@ -110,12 +113,12 @@ PyObject* SolverMRP::create(PyTypeObject* pytype, PyObject* args, PyObject* kwds
   catch (...)
   {
     PythonType::evalException();
-    return NULL;
+    return nullptr;
   }
 }
 
 
-DECLARE_EXPORT bool SolverMRP::demand_comparison(const Demand* l1, const Demand* l2)
+bool SolverMRP::demand_comparison(const Demand* l1, const Demand* l2)
 {
   if (l1->getPriority() != l2->getPriority())
     return l1->getPriority() < l2->getPriority();
@@ -126,7 +129,7 @@ DECLARE_EXPORT bool SolverMRP::demand_comparison(const Demand* l1, const Demand*
 }
 
 
-DECLARE_EXPORT void SolverMRP::SolverMRPdata::commit()
+void SolverMRP::SolverMRPdata::commit()
 {
   // Check
   SolverMRP* solver = getSolver();
@@ -181,8 +184,41 @@ DECLARE_EXPORT void SolverMRP::SolverMRPdata::commit()
     // Clean the list of demands of this cluster
     demands->clear();
 
+    // Completely recreate all purchasing operation plans
+    for (set<const OperationItemSupplier*>::iterator o = purchase_operations.begin();
+      o != purchase_operations.end(); ++o
+      )
+    {
+      // TODO This code assumes the buffer is ONLY replenished through these purchases.
+      // When it is replenished through an alternate, it will not give the results we expect.
+
+      // Erase existing proposed purchases
+      const_cast<OperationItemSupplier*>(*o)->deleteOperationPlans(false);
+      // Create new proposed purchases
+      try
+      {
+        safety_stock_planning = true;
+        state->curBuffer = nullptr;
+        state->q_qty = -1.0;
+        state->q_date = Date::infinitePast;
+        state->a_cost = 0.0;
+        state->a_penalty = 0.0;
+        state->curDemand = nullptr;
+        state->curOwnerOpplan = nullptr;
+        state->a_qty = 0;
+        (*o)->getBuffer()->solve(*solver, this);
+        CommandManager::commit();
+      }
+      catch(...)
+      {
+        CommandManager::rollback();
+      }
+    }
+    purchase_operations.clear();
+
     // Solve for safety stock in buffers.
-    if (!solver->getPlanSafetyStockFirst()) solveSafetyStock(solver);
+    if (!solver->getPlanSafetyStockFirst())
+      solveSafetyStock(solver);
   }
   catch (...)
   {
@@ -218,7 +254,8 @@ void SolverMRP::SolverMRPdata::solveSafetyStock(SolverMRP* solver)
 {
   OperatorDelete cleanup(this);
   safety_stock_planning = true;
-  if (getLogLevel()>0) logger << "Start safety stock replenishment pass   " << solver->getConstraints() << endl;
+  if (getLogLevel() > 0)
+    logger << "Start safety stock replenishment pass   " << solver->getConstraints() << endl;
   vector< list<Buffer*> > bufs(HasLevel::getNumberOfLevels() + 1);
   for (Buffer::iterator buf = Buffer::begin(); buf != Buffer::end(); ++buf)
     if (buf->getCluster() == cluster
@@ -230,15 +267,15 @@ void SolverMRP::SolverMRPdata::solveSafetyStock(SolverMRP* solver)
     for (list<Buffer*>::iterator b = b_list->begin(); b != b_list->end(); ++b)
       try
       {
-        state->curBuffer = NULL;
+        state->curBuffer = nullptr;
         // A quantity of -1 is a flag for the buffer solver to solve safety stock.
         state->q_qty = -1.0;
         state->q_date = Date::infinitePast;
         state->a_cost = 0.0;
         state->a_penalty = 0.0;
-        planningDemand = NULL;
-        state->curDemand = NULL;
-        state->curOwnerOpplan = NULL;
+        planningDemand = nullptr;
+        state->curDemand = nullptr;
+        state->curOwnerOpplan = nullptr;
         // Call the buffer solver
         iteration_count = 0;
         (*b)->solve(*solver, this);
@@ -251,12 +288,14 @@ void SolverMRP::SolverMRPdata::solveSafetyStock(SolverMRP* solver)
       {
         CommandManager::rollback();
       }
-  if (getLogLevel()>0) logger << "Finished safety stock replenishment pass" << endl;
+
+  if (getLogLevel() > 0)
+    logger << "Finished safety stock replenishment pass" << endl;
   safety_stock_planning = false;
 }
 
 
-DECLARE_EXPORT void SolverMRP::update_user_exits()
+void SolverMRP::update_user_exits()
 {
   setUserExitBuffer(getPyObjectProperty(Tags::userexit_buffer.getName()));
   setUserExitDemand(getPyObjectProperty(Tags::userexit_demand.getName()));
@@ -266,28 +305,41 @@ DECLARE_EXPORT void SolverMRP::update_user_exits()
 }
 
 
-DECLARE_EXPORT void SolverMRP::solve(void *v)
+void SolverMRP::solve(void *v)
 {
   // Configure user exits
   update_user_exits();
 
   // Count how many clusters we have to plan
-  int cl = HasLevel::getNumberOfClusters() + 1;
+  int cl = (cluster == -1 ? HasLevel::getNumberOfClusters() + 1 : 1);
 
   // Categorize all demands in their cluster
   demands_per_cluster.resize(cl);
-  for (Demand::iterator i = Demand::begin(); i != Demand::end(); ++i)
-    demands_per_cluster[i->getCluster()].push_back(&*i);
+  if (cluster == -1)
+  {
+    for (Demand::iterator i = Demand::begin(); i != Demand::end(); ++i)
+      if (i->getQuantity() > 0
+        && (i->getStatus() == Demand::OPEN || i->getStatus() == Demand::QUOTE))
+          demands_per_cluster[i->getCluster()].push_back(&*i);
+  }
+  else
+  {
+    for (Demand::iterator i = Demand::begin(); i != Demand::end(); ++i)
+      if (i->getCluster() == cluster
+        && i->getQuantity() > 0
+        && (i->getStatus() == Demand::OPEN || i->getStatus() == Demand::QUOTE))
+          demands_per_cluster[0].push_back(&*i);
+  }
 
-  // Delete of operationplans of the affected clusters
+  // Delete of operationplans
   // This deletion is not multi-threaded... But on the other hand we need to
-  // loop through the operations only once (rather than as many times as there
-  // are clusters)
+  // loop through the operations only once
   if (getErasePreviousFirst())
   {
     if (getLogLevel()>0) logger << "Deleting previous plan" << endl;
     for (Operation::iterator e=Operation::begin(); e!=Operation::end(); ++e)
-      e->deleteOperationPlans();
+      if (cluster == -1 || e->getCluster() == cluster)
+        e->deleteOperationPlans();
   }
 
   // Solve in parallel threads.
@@ -295,34 +347,36 @@ DECLARE_EXPORT void SolverMRP::solve(void *v)
   // solver thread.
   // Otherwise we use as many worker threads as processor cores.
   ThreadGroup threads;
-  if (getLogLevel()>0 || !getAutocommit())
+  if (getLogLevel()>0 || !getAutocommit() || cluster != -1)
     threads.setMaxParallel(1);
 
   // Register all clusters to be solved
   for (int j = 0; j < cl; ++j)
     threads.add(
       SolverMRPdata::runme,
-      new SolverMRPdata(this, j, &(demands_per_cluster[j]))
+      new SolverMRPdata(this, (cluster == -1) ? j :  cluster, &(demands_per_cluster[j]))
       );
 
   // Run the planning command threads and wait for them to exit
   threads.execute();
 
   // @todo Check the resource setups that were broken - needs to be removed
-  for (Resource::iterator gres = Resource::begin(); gres != Resource::end(); ++gres)
-    if (gres->getSetupMatrix()) gres->updateSetups();
+  for (Resource::iterator res = Resource::begin(); res != Resource::end(); ++res)
+    if (res->getSetupMatrix()
+      && (cluster == -1 || res->getCluster() == cluster))
+        res->updateSetups();
 }
 
 
-DECLARE_EXPORT PyObject* SolverMRP::solve(PyObject *self, PyObject *args)
+PyObject* SolverMRP::solve(PyObject *self, PyObject *args)
 {
   // Parse the argument
-  PyObject *dem = NULL;
-  if (args && !PyArg_ParseTuple(args, "|O:solve", &dem)) return NULL;
+  PyObject *dem = nullptr;
+  if (args && !PyArg_ParseTuple(args, "|O:solve", &dem)) return nullptr;
   if (dem && !PyObject_TypeCheck(dem, Demand::metadata->pythonClass))
   {
     PyErr_SetString(PythonDataException, "solve(d) argument must be a demand");
-    return NULL;
+    return nullptr;
   }
 
   Py_BEGIN_ALLOW_THREADS   // Free Python interpreter for other threads
@@ -347,14 +401,14 @@ DECLARE_EXPORT PyObject* SolverMRP::solve(PyObject *self, PyObject *args)
   {
     Py_BLOCK_THREADS;
     PythonType::evalException();
-    return NULL;
+    return nullptr;
   }
   Py_END_ALLOW_THREADS   // Reclaim Python interpreter
   return Py_BuildValue("");
 }
 
 
-DECLARE_EXPORT PyObject* SolverMRP::commit(PyObject *self, PyObject *args)
+PyObject* SolverMRP::commit(PyObject *self, PyObject *args)
 {
   Py_BEGIN_ALLOW_THREADS   // Free Python interpreter for other threads
   try
@@ -367,14 +421,14 @@ DECLARE_EXPORT PyObject* SolverMRP::commit(PyObject *self, PyObject *args)
   {
     Py_BLOCK_THREADS;
     PythonType::evalException();
-    return NULL;
+    return nullptr;
   }
   Py_END_ALLOW_THREADS   // Reclaim Python interpreter
   return Py_BuildValue("");
 }
 
 
-DECLARE_EXPORT PyObject* SolverMRP::rollback(PyObject *self, PyObject *args)
+PyObject* SolverMRP::rollback(PyObject *self, PyObject *args)
 {
   Py_BEGIN_ALLOW_THREADS   // Free Python interpreter for other threads
   try
@@ -385,7 +439,7 @@ DECLARE_EXPORT PyObject* SolverMRP::rollback(PyObject *self, PyObject *args)
   {
     Py_BLOCK_THREADS;
     PythonType::evalException();
-    return NULL;
+    return nullptr;
   }
   Py_END_ALLOW_THREADS   // Reclaim Python interpreter
   return Py_BuildValue("");

@@ -30,7 +30,7 @@ bool sortFlow(const Flow* lhs, const Flow* rhs)
 }
 
 
-DECLARE_EXPORT void SolverMRP::solve(const Flow* fl, void* v)  // @todo implement search mode
+void SolverMRP::solve(const Flow* fl, void* v)  // @todo implement search mode
 {
   // Note: This method is only called for consuming flows and for the leading
   // flow of an alternate group. See SolverMRP::checkOperation
@@ -57,7 +57,7 @@ DECLARE_EXPORT void SolverMRP::solve(const Flow* fl, void* v)  // @todo implemen
     // 3) Control the planning mode
     bool originalPlanningMode = data->constrainedPlanning;
     data->constrainedPlanning = true;
-    Flow *firstAlternate = NULL;
+    Flow *firstAlternate = nullptr;
     double firstQuantity = 0.0;
 
     // Remember the top constraint

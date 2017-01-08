@@ -47,13 +47,33 @@ class HierarchyModel(models.Model):
                             related_name='xchildren', help_text=_('Hierarchical parent'))
 
   def save(self, *args, **kwargs):
-    # Trigger recalculation of the hieracrhy
+    # Trigger recalculation of the hieracrhy.
+    # TODO this triggers the recalculation in too many cases, including a lot
+    # of changes which don't require it. Alternative solution is to use the
+    # pre-save signal which has more information.
     self.lft = None
     self.rght = None
     self.lvl = None
 
     # Call the real save() method
     super(HierarchyModel, self).save(*args, **kwargs)
+
+  def delete(self, *args, **kwargs):
+    try:
+      # Update an arbitrary other object to trigger recalculation of the hierarchy
+      obj = self.__class__.objects.using(self._state.db).exclude(pk=self.pk)[0]
+      obj.lft = None
+      obj.rght = None
+      obj.lvl = None
+      obj.save(
+        update_fields=['lft', 'rght', 'lvl'],
+        using=self._state.db
+        )
+    except:
+      # Failure can happen when eg we delete the last record
+      pass
+    # Call the real delete() method
+    super(HierarchyModel, self).delete(*args, **kwargs)
 
   class Meta:
     abstract = True
@@ -201,9 +221,9 @@ class Parameter(AuditModel):
 
 class Scenario(models.Model):
   scenarioStatus = (
-    ('free', _('Free')),
-    ('in use', _('In use')),
-    ('busy', _('Busy')),
+    ('free', _('free')),
+    ('in use', _('in use')),
+    ('busy', _('busy')),
   )
 
   # Database fields
@@ -232,11 +252,21 @@ class Scenario(models.Model):
         for db in dbs:
           if db not in scs:
             if db == DEFAULT_DB_ALIAS:
-              Scenario(name=db, status="In use", description='Production database').save()
+              Scenario(name=db, status="In use", description='Production').save()
             else:
               Scenario(name=db, status="Free").save()
-    except Exception as e:
-      logger.error("Error synchronizing the scenario table with the settings: %s" % e)
+    except:
+      # Failures are acceptable - eg when the default database has not been intialized yet
+      pass
+
+  def __lt__ (self, other):
+    # Default database is always first in the list
+    if self.name == DEFAULT_DB_ALIAS:
+      return True
+    elif other.name == DEFAULT_DB_ALIAS:
+      return False
+    # Other databases are sorted by their description
+    return (self.description or self.name) < (other.description or other.name)
 
   class Meta:
     db_table = "common_scenario"
@@ -247,6 +277,25 @@ class Scenario(models.Model):
     verbose_name_plural = _('scenarios')
     verbose_name = _('scenario')
     ordering = ['name']
+
+
+class Wizard(models.Model):
+  # Database fields
+  # Translators: Translation included with Django
+  name = models.CharField(_('name'), max_length=300, primary_key=True)
+  sequenceorder = models.IntegerField(_('progress'), help_text=_('Model completion level'))
+  url_doc = models.URLField(_('documentation URL'), max_length=500, null=True, blank=True)
+  url_internaldoc = models.URLField(_('wizard URL'), max_length=500, null=True, blank=True)
+  owner = models.ForeignKey('self', verbose_name=_('owner'), null=True, blank=True,
+                            related_name='xchildren', help_text=_('Hierarchical parent'))
+  status = models.BooleanField(blank=True, default=True)
+
+  def __str__(self):
+    return self.name
+
+  class Meta:
+    db_table = "common_wizard"
+    ordering = ['sequenceorder']
 
 
 class User(AbstractUser):
@@ -352,7 +401,7 @@ class User(AbstractUser):
               )
             if settings.DEFAULT_USER_GROUP:
                   grp = Group.objects.all().using(db).get_or_create(name=settings.DEFAULT_USER_GROUP)[0]
-                  self.groups.add(grp.id)  
+                  self.groups.add(grp.id)
 
     # Continue with the regular save, as if nothing happened.
     self.is_active = tmp_is_active
@@ -364,8 +413,8 @@ class User(AbstractUser):
       update_fields=update_fields
       )
     if settings.DEFAULT_USER_GROUP and newuser:
-                  grp = Group.objects.all().using(using).get_or_create(name=settings.DEFAULT_USER_GROUP)[0]
-                  self.groups.add(grp.id)    
+      grp = Group.objects.all().using(using).get_or_create(name=settings.DEFAULT_USER_GROUP)[0]
+      self.groups.add(grp.id)
     return usr
 
 
@@ -392,6 +441,8 @@ class User(AbstractUser):
 @receiver(pre_delete, sender=User)
 def delete_user(sender, instance, **kwargs):
   raise PermissionDenied
+
+
 class Comment(models.Model):
   id = models.AutoField(_('identifier'), primary_key=True)
   content_type = models.ForeignKey(

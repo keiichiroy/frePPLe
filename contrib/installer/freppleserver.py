@@ -15,12 +15,14 @@
 # License along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 import argparse
+import cx_Logging
+from cherrypy.wsgiserver import CherryPyWSGIServer
 from datetime import datetime
 import os
 import socket
+from subprocess import call, DEVNULL
 import sys
 from threading import Thread
-from cherrypy.wsgiserver import CherryPyWSGIServer
 import win32api
 import win32con
 import win32gui_struct
@@ -28,6 +30,7 @@ try:
   import winxpgui as win32gui
 except ImportError:
   import win32gui
+from win32process import DETACHED_PROCESS, CREATE_NO_WINDOW
 
 
 def log(msg):
@@ -70,6 +73,11 @@ def ShowConfigDirectory(sysTrayIcon):
 def OpenBrowser(sysTrayIcon):
   import webbrowser
   webbrowser.open_new_tab("http://%s:%s" % (address=='0.0.0.0' and '127.0.0.1' or address, port))
+
+
+def OpenCommandWindow(sysTrayIcon):
+  import subprocess
+  subprocess.Popen('cmd', cwd=settings.FREPPLE_HOME)
 
 
 # Running a program in the system tray
@@ -165,6 +173,32 @@ class SysTrayIcon:
       win32gui.Shell_NotifyIcon(win32gui.NIM_DELETE, nid)
       win32gui.PostQuitMessage(0) # Terminate the app.
 
+      # Using the included postgres database?
+      if os.path.exists(os.path.join(settings.FREPPLE_HOME, '..', 'pgsql', 'bin', 'pg_ctl.exe')):
+        # Check if the database is running. If so, stop it.
+        os.environ['PATH'] = os.path.join(settings.FREPPLE_HOME, '..', 'pgsql', 'bin') + os.pathsep + os.environ['PATH']
+        from subprocess import call, DEVNULL
+        status = call([
+          os.path.join(settings.FREPPLE_HOME, '..', 'pgsql', 'bin', 'pg_ctl.exe'),
+          "--pgdata", os.path.join(settings.FREPPLE_LOGDIR, 'database'),
+          "--silent",
+          "status"
+          ],
+          stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL,
+          creationflags=CREATE_NO_WINDOW
+          )
+        if not status:
+          call([
+            os.path.join(settings.FREPPLE_HOME, '..', 'pgsql', 'bin', 'pg_ctl.exe'),
+            "--pgdata", os.path.join(settings.FREPPLE_LOGDIR, 'database'),
+            "--log", os.path.join(settings.FREPPLE_LOGDIR, 'database', 'server.log'),
+            "-w", # Wait till it's down
+            "stop"
+            ],
+            stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL,
+            creationflags=CREATE_NO_WINDOW
+            )
+
     def notify(self, hwnd, msg, wparam, lparam):
       if lparam==win32con.WM_LBUTTONDBLCLK:
         self.execute_menu_option(self.default_menu_index + self.FIRST_ID)
@@ -241,98 +275,130 @@ def non_string_iterable(obj):
         return not isinstance(obj, str)
 
 
-if __name__=='__main__':
-  # Environment settings (which are used in the Django settings file and need
-  # to be updated BEFORE importing the settings)
-  os.environ['DJANGO_SETTINGS_MODULE'] = 'freppledb.settings'
-  os.environ['FREPPLE_APP'] = os.path.join(os.path.split(sys.path[0])[0],'custom')
-  os.environ['FREPPLE_HOME'] = os.path.abspath(os.path.dirname(sys.argv[0]))
+# Environment settings (which are used in the Django settings file and need
+# to be updated BEFORE importing the settings)
+os.environ['DJANGO_SETTINGS_MODULE'] = 'freppledb.settings'
+os.environ['FREPPLE_APP'] = os.path.join(sys.path[0],'custom')
+os.environ['FREPPLE_HOME'] = os.path.abspath(os.path.dirname(sys.argv[0]))
 
-  # Add the custom directory to the Python path.
-  sys.path = [ os.environ['FREPPLE_APP'], sys.path[0] ]
+# Add the custom directory to the Python path.
+sys.path += [ os.environ['FREPPLE_APP'] ]
 
-  # Initialize django
-  import django
-  django.setup()
+# Initialize django
+import django
+django.setup()
+from django.conf import settings
 
-  # Parse command line
-  parser = argparse.ArgumentParser(
-    description='Runs a web server for frePPLe.'
+# Initialize logging
+cx_Logging.StartLogging(
+  os.path.join(settings.FREPPLE_LOGDIR, "systemtray.log"),
+  level = cx_Logging.INFO,
+  maxFiles = 1,
+  prefix = "%t"
+  )
+
+# Parse command line
+parser = argparse.ArgumentParser(
+  description='Runs a web server for frePPLe.'
+  )
+parser.add_argument('--port', type=int, help="Port number of the server.")
+parser.add_argument('--address', help="IP address to listen on.")
+options = parser.parse_args()
+
+# Using the included postgres database?
+if os.path.exists(os.path.join(settings.FREPPLE_HOME, '..', 'pgsql', 'bin', 'pg_ctl.exe')):
+  # Check if the database is running. If not, start it.
+  status = call([
+    os.path.join(settings.FREPPLE_HOME, '..', 'pgsql', 'bin', 'pg_ctl.exe'),
+    "--pgdata", os.path.join(settings.FREPPLE_LOGDIR, 'database'),
+    "--silent",
+    "status"
+    ],
+    stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL,
+    creationflags=CREATE_NO_WINDOW
     )
-  parser.add_argument('--port', type=int, help="Port number of the server.")
-  parser.add_argument('--address', help="IP address to listen on.")
-  options = parser.parse_args()
+  if status:
+    cx_Logging.Info("Starting the PostgreSQL database")
+    call([
+      os.path.join(settings.FREPPLE_HOME, '..', 'pgsql', 'bin', 'pg_ctl.exe'),
+      "--pgdata", os.path.join(settings.FREPPLE_LOGDIR, 'database'),
+      "--log", os.path.join(settings.FREPPLE_LOGDIR, 'database', 'server.log'),
+      "-w", # Wait till it's up
+      "start"
+      ],
+      stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL,
+      creationflags=DETACHED_PROCESS
+      )
 
-  # Import modules
-  from django.conf import settings
-  from django.core.handlers.wsgi import WSGIHandler
-  from django.contrib.staticfiles.handlers import StaticFilesHandler
-  from django.db import DEFAULT_DB_ALIAS
+cx_Logging.Info("Starting the web server")
 
-  from freppledb.execute.management.commands.frepple_runserver import CheckUpdates
+# Synchronize the scenario table with the settings
+from freppledb.common.models import Scenario
+Scenario.syncWithSettings()
 
-  # Determine the port number
-  port = options.port or settings.PORT
+# Import modules
+from django.conf import settings
+from django.core.handlers.wsgi import WSGIHandler
+from django.contrib.staticfiles.handlers import StaticFilesHandler
+from django.db import DEFAULT_DB_ALIAS
 
-  # Determine the IP-address to listen on:
-  # - either as command line argument
-  # - either 0.0.0.0 by default, which means all active IPv4 interfaces
-  address = options.address or '0.0.0.0'
+# Determine the port number
+port = options.port or settings.PORT
 
-  # Redirect all output
-  logfile = os.path.join(settings.FREPPLE_LOGDIR,'server.log')
-  try:
-    sys.stdout = open(logfile, 'a', 0)
-  except:
-    print("Can't open log file", logfile)
+# Determine the IP-address to listen on:
+# - either as command line argument
+# - either 0.0.0.0 by default, which means all active IPv4 interfaces
+address = options.address or '0.0.0.0'
 
-  # Validate the address and port number
-  try:
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.bind( (address, port) )
-    s.close()
-  except socket.error as e:
-    raise Exception("Invalid address '%s' and/or port '%s': %s" % (address, port, e))
+# Redirect all output
+logfile = os.path.join(settings.FREPPLE_LOGDIR,'server.log')
+try:
+  sys.stdout = open(logfile, 'a', 0)
+except:
+  print("Can't open log file", logfile)
 
-  # Print a header message
-  hostname = socket.getfqdn()
-  msg = ['Starting frePPLe web server on URLs:',]
-  if address == '0.0.0.0':
-    msg.append(' http://%s:%s/' % (hostname, port))
-    for ip in socket.gethostbyname_ex(socket.gethostname())[2]:
-      msg.append(' http://%s:%s/' % (ip, port))
-  else:
-    msg.append(' http://%s:%s/' % (address, port))
-  log(''.join(msg))
-  log("frePPLe using %s database '%s' as '%s' on '%s:%s'" % (
-    settings.DATABASES[DEFAULT_DB_ALIAS].get('ENGINE', '').split('.')[-1],
-    settings.DATABASES[DEFAULT_DB_ALIAS].get('NAME', ''),
-    settings.DATABASES[DEFAULT_DB_ALIAS].get('USER', ''),
-    settings.DATABASES[DEFAULT_DB_ALIAS].get('HOST', ''),
-    settings.DATABASES[DEFAULT_DB_ALIAS].get('PORT', '')
-    ))
+# Validate the address and port number
+try:
+  s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+  s.bind( (address, port) )
+  s.close()
+except socket.error as e:
+  raise Exception("Invalid address '%s' and/or port '%s': %s" % (address, port, e))
 
-
-  # Start a separate thread that will check for updates.
-  # We don't wait for it to finish.
-  CheckUpdates().start()
-
-  # Run the WSGI server in a new thread
-  wsgi = RunWSGIServer(address, port)
-  wsgi.start()
-
-  # Run an icon in the system tray
-  SysTrayIcon(
-    1, #  Icon. If integer it is loaded from the executable, otherwise loaded from file.
-    'frePPLe server on port %s' % port, # Text displayed when hovering over the icon
-    (    # Menu_options
-      ('Open browser', None, OpenBrowser),
-      ('Show log directory', None, ShowLogDirectory),
-      ('Show configuration directory', None, ShowConfigDirectory),
-    ),
-    on_quit = on_quit,      # Method called when quitting the application
-    default_menu_index = 0, # Double clicking on icon opens this menu option
-    window_class_name = "frePPLe server"
-    )
+# Print a header message
+hostname = socket.getfqdn()
+msg = ['Starting frePPLe web server on URLs:',]
+if address == '0.0.0.0':
+  msg.append(' http://%s:%s/' % (hostname, port))
+  for ip in socket.gethostbyname_ex(socket.gethostname())[2]:
+    msg.append(' http://%s:%s/' % (ip, port))
+else:
+  msg.append(' http://%s:%s/' % (address, port))
+log(''.join(msg))
+log("frePPLe using %s database '%s' as '%s' on '%s:%s'" % (
+  settings.DATABASES[DEFAULT_DB_ALIAS].get('ENGINE', '').split('.')[-1],
+  settings.DATABASES[DEFAULT_DB_ALIAS].get('NAME', ''),
+  settings.DATABASES[DEFAULT_DB_ALIAS].get('USER', ''),
+  settings.DATABASES[DEFAULT_DB_ALIAS].get('HOST', ''),
+  settings.DATABASES[DEFAULT_DB_ALIAS].get('PORT', '')
+  ))
 
 
+# Run the WSGI server in a new thread
+wsgi = RunWSGIServer(address, port)
+wsgi.start()
+
+# Run an icon in the system tray
+SysTrayIcon(
+  1, #  Icon. If integer it is loaded from the executable, otherwise loaded from file.
+  'frePPLe server on port %s' % port, # Text displayed when hovering over the icon
+  (    # Menu_options
+    ('Open browser', None, OpenBrowser),
+    ('Show log directory', None, ShowLogDirectory),
+    ('Show configuration directory', None, ShowConfigDirectory),
+    ('Open command window', None, OpenCommandWindow),
+  ),
+  on_quit = on_quit,      # Method called when quitting the application
+  default_menu_index = 0, # Double clicking on icon opens this menu option
+  window_class_name = "frePPLe server"
+  )

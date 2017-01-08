@@ -15,16 +15,17 @@
 # License along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-import inspect
+import json
 
 from django.shortcuts import render_to_response
 from django.contrib import messages
 from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.decorators import login_required
-from django.contrib.admin.utils import unquote, quote
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.contenttypes.models import ContentType
+from django.core import serializers
 from django.core.urlresolvers import reverse, resolve
+from django.db import connections, transaction
 from django.template import RequestContext, loader, TemplateDoesNotExist
 from django import forms
 from django.utils.encoding import force_text
@@ -33,18 +34,37 @@ from django.utils.text import capfirst
 from django.contrib.auth.models import Group
 from django.utils import translation
 from django.conf import settings
-from django.http import Http404, HttpResponseRedirect, HttpResponse, HttpResponseServerError, HttpResponseNotFound
+from django.http import Http404, HttpResponseRedirect, HttpResponse, HttpResponseServerError, HttpResponseNotFound, HttpResponseForbidden
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.debug import sensitive_variables
 
-from freppledb.common.models import User, Parameter, Comment, Bucket, BucketDetail
+from freppledb.common.models import User, Parameter, Comment, Bucket, BucketDetail, Wizard
 from freppledb.common.report import GridReport, GridFieldLastModified, GridFieldText
 from freppledb.common.report import GridFieldBool, GridFieldDateTime, GridFieldInteger
 
 from freppledb.admin import data_site
+from freppledb import VERSION
 
 import logging
 logger = logging.getLogger(__name__)
+
+
+@staff_member_required
+def AboutView(request):
+  return HttpResponse(
+     content=json.dumps({'version': VERSION, 'apps': settings.INSTALLED_APPS }),
+     content_type='application/json; charset=%s' % settings.DEFAULT_CHARSET
+     )
+
+
+@staff_member_required
+def cockpit(request):
+  return render_to_response('index.html', {
+    'title': _('cockpit'),
+    'bucketnames': Bucket.objects.order_by('-level').values_list('name', flat=True),
+    },
+    context_instance=RequestContext(request)
+    )
 
 
 def handler404(request):
@@ -56,7 +76,7 @@ def handler404(request):
     #. Translators: Translation included with Django
     force_text(_('Page not found') + ": " + request.prefix + request.get_full_path())
     )
-  return HttpResponseRedirect(request.prefix + "/data/")
+  return HttpResponseRedirect(request.prefix + "/")
 
 
 def handler500(request):
@@ -65,6 +85,7 @@ def handler500(request):
   The only difference with the default Django handler is that we passes more context
   to the error template.
   '''
+
   try:
     template = loader.get_template("500.html")
   except TemplateDoesNotExist:
@@ -72,26 +93,78 @@ def handler500(request):
   return HttpResponseServerError(template.render(RequestContext(request)))
 
 
+###############################################
+@login_required
+@csrf_protect
+def wizard(request):
+
+  if request.method == 'POST':
+    if not request.is_ajax():
+      return HttpResponseForbidden('%s' % _('Permission denied'))
+    errors=[]
+    try:
+      data = json.loads(request.body.decode(request.encoding))
+      for instruction in data:
+        try:
+          if instruction['command'] == 'set':
+            wiz = Wizard.objects.all().using(request.database).get(pk=instruction['key'])
+            wiz.status = instruction['value']
+            wiz.save(update_fields=['status'], using=request.database)
+          elif instruction['command'] == 'execute':
+            if instruction['key'] == 'Buffers':
+              # Create a buffer for every item+location combination
+              cursor = connections[request.database].cursor()
+              with transaction.atomic(using=request.database):
+                cursor.execute('''
+                  update buffer
+                    set name = item_id || ' @ ' || location_id
+                  where item_id || ' @ ' || location_id <> name
+                  ''')
+                cursor.execute('''
+                  insert into buffer
+                    (name, item_id, location_id, onhand, source, lastmodified)
+                  select item.name || ' @ ' || location.name,
+                    item.name, location.name, 0, 'wizard', now()
+                  from item
+                  cross join location
+                  except
+                  select name, item_id, location_id, 0, 'wizard', now()
+                  from buffer
+                  ''')
+        except Exception as e:
+          errors.append(str(e))
+    except Exception as e:
+      errors.append(str(e))
+
+    if errors:
+      logger.error("Error saving wizard updates: %s" % "".join(errors))
+      return HttpResponseServerError('Error saving wizard updates: %s' % "<br/>".join(errors))
+    else:
+      return HttpResponse(content="OK")
+
+  return render_to_response('common/wizard.html', {
+    'title': _('Wizard to load your data'),
+    'subjectlist': serializers.serialize("json",Wizard.objects.all().using(request.database).order_by('sequenceorder'))
+    },
+    context_instance=RequestContext(request)
+    )
+
+
 class PreferencesForm(forms.Form):
   language = forms.ChoiceField(
-    label=_("Language"),
+    label=_("language"),
     initial="auto",
-    choices=User.languageList,
-    help_text=_("Language of the user interface"),
+    choices=User.languageList
     )
   pagesize = forms.IntegerField(
     label=_('Page size'),
     required=False,
-    initial=100,
-    min_value=25,
-    help_text=_('Number of records to display in a single page'),
+    initial=100
     )
-
   theme = forms.ChoiceField(
     label=_('Theme'),
     required=False,
     choices=[ (i, capfirst(i)) for i in settings.THEMES ],
-    help_text=_('Theme for the user interface'),
     )
   cur_password = forms.CharField(
     #. Translators: Translation included with Django
@@ -123,6 +196,10 @@ class PreferencesForm(forms.Form):
 
   def clean(self):
     newdata = super(PreferencesForm, self).clean()
+    if newdata.get('pagesize',0) > 10000:
+      raise forms.ValidationError("Maximum page size is 10000.")
+    if newdata.get('pagesize',25) < 25:
+      raise forms.ValidationError("Minimum page size is 25.")
     if newdata['cur_password']:
       if not self.user.check_password(newdata['cur_password']):
         #. Translators: Translation included with Django
@@ -173,11 +250,18 @@ def preferences(request):
       'theme': pref.theme,
       'pagesize': pref.pagesize,
       })
+  LANGUAGE = User.languageList[0][1]
+  for l in User.languageList:
+    if l[0] == request.user.language:
+      LANGUAGE = l[1]
   return render_to_response('common/preferences.html', {
      'title': _('My preferences'),
      'form': form,
      },
-     context_instance=RequestContext(request))
+     context_instance=RequestContext(request, {
+        'THEMES': settings.THEMES,
+        "LANGUAGE": LANGUAGE
+        }))
 
 
 class HorizonForm(forms.Form):
@@ -193,12 +277,11 @@ class HorizonForm(forms.Form):
 @csrf_protect
 def horizon(request):
   if request.method != 'POST':
-    raise Http404('Only post requests allowed')
+    return HttpResponseServerError('Only post requests allowed')
   form = HorizonForm(request.POST)
   if not form.is_valid():
-    raise Http404('Invalid form data')
+    return HttpResponseServerError('Invalid form data')
   try:
-    request.user.horizonstart = form.cleaned_data['horizonstart']
     request.user.horizonbuckets = form.cleaned_data['horizonbuckets']
     request.user.horizonstart = form.cleaned_data['horizonstart']
     request.user.horizonend = form.cleaned_data['horizonend']
@@ -221,12 +304,12 @@ class UserList(GridReport):
   basequeryset = User.objects.all()
   model = User
   frozenColumns = 2
-  multiselect = False
   permissions = (("change_user", "Can change user"),)
+  help_url = 'user-guide/user-interface/getting-around/user-permissions-and-roles.html'
 
   rows = (
     #. Translators: Translation included with Django
-    GridFieldInteger('id', title=_('id'), key=True, formatter='detail', extra="role:'common/user'"),
+    GridFieldInteger('id', title=_('id'), key=True, formatter='detail', extra='"role":"common/user"'),
     #. Translators: Translation included with Django
     GridFieldText('username', title=_('username')),
     #. Translators: Translation included with Django
@@ -250,19 +333,18 @@ class GroupList(GridReport):
   '''
   A list report to show groups.
   '''
-  template = 'admin/base_site_grid.html'
   #. Translators: Translation included with Django
   title = _("groups")
   basequeryset = Group.objects.all()
   model = Group
-  frozenColumns = 0
-  multiselect = False
+  frozenColumns = 1
   permissions = (("change_group", "Can change group"),)
+  help_url = 'user-guide/user-interface/getting-around/user-permissions-and-roles.html'
 
   rows = (
-    GridFieldInteger('id', title=_('identifier'), key=True, formatter='detail', extra="role:'auth/group'"),
+    GridFieldInteger('id', title=_('identifier'), key=True, formatter='detail', extra='"role":"auth/group"'),
     #. Translators: Translation included with Django
-    GridFieldText('name', title=_('name'), key=True, width=200),
+    GridFieldText('name', title=_('name'), width=200),
     )
 
 
@@ -275,10 +357,11 @@ class ParameterList(GridReport):
   model = Parameter
   adminsite = 'admin'
   frozenColumns = 1
+  help_url = 'user-guide/model-reference/parameters.html'
 
   rows = (
     #. Translators: Translation included with Django
-    GridFieldText('name', title=_('name'), key=True, formatter='detail', extra="role:'common/parameter'"),
+    GridFieldText('name', title=_('name'), key=True, formatter='detail', extra='"role":"common/parameter"'),
     GridFieldText('value', title=_('value')),
     GridFieldText('description', title=_('description')),
     GridFieldText('source', title=_('source')),
@@ -297,6 +380,7 @@ class CommentList(GridReport):
   editable = False
   multiselect = False
   frozenColumns = 0
+  help_url = 'user-guide/user-interface/getting-around/comments.html'
 
   rows = (
     GridFieldInteger('id', title=_('identifier'), key=True),
@@ -304,7 +388,7 @@ class CommentList(GridReport):
     #. Translators: Translation included with Django
     GridFieldText('user', title=_('user'), field_name='user__username', editable=False, align='center', width=80),
     GridFieldText('model', title=_('model'), field_name='content_type__model', editable=False, align='center'),
-    GridFieldText('object_pk', title=_('object id'), field_name='object_pk', editable=False, align='center', extra='formatter:objectfmt'),
+    GridFieldText('object_pk', title=_('object id'), field_name='object_pk', editable=False, align='center', extra='"formatter":"objectfmt"'),
     GridFieldText('comment', title=_('comment'), width=400, editable=False, align='center'),
     GridFieldText('app', title="app", hidden=True, field_name='content_type__app_label')
     )
@@ -318,9 +402,10 @@ class BucketList(GridReport):
   basequeryset = Bucket.objects.all()
   model = Bucket
   frozenColumns = 1
+  help_url = 'user-guide/model-reference/buckets.html'
   rows = (
     #. Translators: Translation included with Django
-    GridFieldText('name', title=_('name'), key=True, formatter='detail', extra="role:'common/bucket'"),
+    GridFieldText('name', title=_('name'), key=True, formatter='detail', extra='"role":"common/bucket"'),
     GridFieldText('description', title=_('description')),
     GridFieldInteger('level', title=_('level')),
     GridFieldText('source', title=_('source')),
@@ -336,8 +421,9 @@ class BucketDetailList(GridReport):
   basequeryset = BucketDetail.objects.all()
   model = BucketDetail
   frozenColumns = 2
+  help_url = 'user-guide/model-reference/buckets.html'
   rows = (
-    GridFieldText('bucket', title=_('bucket'), field_name='bucket__name', formatter='detail', extra="role:'common/bucket'"),
+    GridFieldText('bucket', title=_('bucket'), field_name='bucket__name', formatter='detail', extra='"role":"common/bucket"'),
     GridFieldDateTime('startdate', title=_('start date')),
     GridFieldDateTime('enddate', title=_('end date')),
     #. Translators: Translation included with Django

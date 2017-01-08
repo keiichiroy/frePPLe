@@ -98,7 +98,7 @@ class Command(BaseCommand):
       os.environ['LD_LIBRARY_PATH'] = settings.FREPPLE_HOME
       if 'DJANGO_SETTINGS_MODULE' not in os.environ:
         os.environ['DJANGO_SETTINGS_MODULE'] = 'freppledb.settings'
-      if os.path.exists(os.path.join(os.environ['FREPPLE_HOME'], 'python27.zip')):
+      if os.path.exists(os.path.join(os.environ['FREPPLE_HOME'], 'python35.zip')):
         # For the py2exe executable
         os.environ['PYTHONPATH'] = os.path.join(
           os.environ['FREPPLE_HOME'],
@@ -110,7 +110,7 @@ class Command(BaseCommand):
       cmdline = [ '"%s"' % i for i in args ]
       cmdline.insert(0, 'frepple')
       cmdline.append( '"%s"' % os.path.join(settings.FREPPLE_APP, 'freppledb', 'execute', 'loadxml.py') )
-      ret = os.system(' '.join(cmdline))
+      (out,ret) = subprocess.run(' '.join(cmdline))
       if ret:
         raise Exception('Exit code of the batch run is %d' % ret)
 

@@ -25,7 +25,7 @@ namespace frepple
 {
 
 
-DECLARE_EXPORT const MetaClass* OperatorDelete::metadata;
+const MetaClass* OperatorDelete::metadata;
 
 
 int OperatorDelete::initialize()
@@ -56,23 +56,26 @@ PyObject* OperatorDelete::create(PyTypeObject* pytype, PyObject* args, PyObject*
     OperatorDelete *s = new OperatorDelete();
 
     // Iterate over extra keywords, and set attributes.   @todo move this responsibility to the readers...
-    PyObject *key, *value;
-    Py_ssize_t pos = 0;
-    while (PyDict_Next(kwds, &pos, &key, &value))
+    if (kwds)
     {
-      PythonData field(value);
-      PyObject* key_utf8 = PyUnicode_AsUTF8String(key);
-      DataKeyword attr(PyBytes_AsString(key_utf8));
-      Py_DECREF(key_utf8);
-      const MetaFieldBase* fmeta = OperatorDelete::metadata->findField(attr.getHash());
-      if (!fmeta)
-        fmeta = Solver::metadata->findField(attr.getHash());
-      if (fmeta)
-        // Update the attribute
-        fmeta->setField(s, field);
-      else
-        s->setProperty(attr.getName(), value);;
-    };
+      PyObject *key, *value;
+      Py_ssize_t pos = 0;
+      while (PyDict_Next(kwds, &pos, &key, &value))
+      {
+        PythonData field(value);
+        PyObject* key_utf8 = PyUnicode_AsUTF8String(key);
+        DataKeyword attr(PyBytes_AsString(key_utf8));
+        Py_DECREF(key_utf8);
+        const MetaFieldBase* fmeta = OperatorDelete::metadata->findField(attr.getHash());
+        if (!fmeta)
+          fmeta = Solver::metadata->findField(attr.getHash());
+        if (fmeta)
+          // Update the attribute
+          fmeta->setField(s, field);
+        else
+          s->setProperty(attr.getName(), value);;
+      };
+    }
 
     // Return the object
     //Py_INCREF(s);  // XXX TODO SHOULD the ref count be set to one? Or do we prevent the opbject from being garbage collected
@@ -81,12 +84,12 @@ PyObject* OperatorDelete::create(PyTypeObject* pytype, PyObject* args, PyObject*
   catch (...)
   {
     PythonType::evalException();
-    return NULL;
+    return nullptr;
   }
 }
 
 
-DECLARE_EXPORT void OperatorDelete::solve(void *v)
+void OperatorDelete::solve(void *v)
 {
    // Loop over all buffers Push to stack, in order of level TODO
 
@@ -100,7 +103,7 @@ DECLARE_EXPORT void OperatorDelete::solve(void *v)
 }
 
 
-DECLARE_EXPORT void OperatorDelete::solve(OperationPlan* o, void* v)
+void OperatorDelete::solve(OperationPlan* o, void* v)
 {
   if (!o) return; // Null argument passed
 
@@ -123,7 +126,7 @@ DECLARE_EXPORT void OperatorDelete::solve(OperationPlan* o, void* v)
 }
 
 
-DECLARE_EXPORT void OperatorDelete::solve(const Resource* r, void* v)
+void OperatorDelete::solve(const Resource* r, void* v)
 {
   if (getLogLevel()>0)
     logger << "Scanning " << r << " for excess" << endl;
@@ -147,7 +150,7 @@ DECLARE_EXPORT void OperatorDelete::solve(const Resource* r, void* v)
 }
 
 
-DECLARE_EXPORT void OperatorDelete::solve(const Demand* d, void* v)
+void OperatorDelete::solve(const Demand* d, void* v)
 {
   if (getLogLevel()>1)
     logger << "Scanning " << d << " for excess" << endl;
@@ -158,7 +161,7 @@ DECLARE_EXPORT void OperatorDelete::solve(const Demand* d, void* v)
   while (true)
   {
     // Find a candidate operationplan to delete
-    OperationPlan *candidate = NULL;
+    OperationPlan *candidate = nullptr;
     const Demand::OperationPlanList& deli = d->getDelivery();
     for (Demand::OperationPlanList::const_iterator i = deli.begin(); i != deli.end(); ++i)
       if (!(*i)->getLocked())
@@ -241,7 +244,7 @@ void OperatorDelete::solve(const Buffer* b, void* v)
       ++fiter;
       continue;
     }
-    FlowPlan* fp = NULL;
+    FlowPlan* fp = nullptr;
     if (fiter->getEventType() == 1)
       fp = const_cast<FlowPlan*>(static_cast<const FlowPlan*>(&*fiter));
     double cur_excess = b->getFlowPlans().getExcess(&*fiter);
@@ -313,9 +316,9 @@ void OperatorDelete::solve(const Buffer* b, void* v)
 PyObject* OperatorDelete::solve(PyObject *self, PyObject *args)
 {
   // Parse the argument
-  PyObject *obj = NULL;
+  PyObject *obj = nullptr;
   short objtype = 0;
-  if (args && !PyArg_ParseTuple(args, "|O:solve", &obj)) return NULL;
+  if (args && !PyArg_ParseTuple(args, "|O:solve", &obj)) return nullptr;
   if (obj)
   {
     if (PyObject_TypeCheck(obj, Demand::metadata->pythonClass))
@@ -332,7 +335,7 @@ PyObject* OperatorDelete::solve(PyObject *self, PyObject *args)
         PythonDataException,
         "solve(d) argument must be a demand, buffer, resource or operationplan"
         );
-      return NULL;
+      return nullptr;
     }
   }
 
@@ -366,7 +369,7 @@ PyObject* OperatorDelete::solve(PyObject *self, PyObject *args)
   {
     Py_BLOCK_THREADS;
     PythonType::evalException();
-    return NULL;
+    return nullptr;
   }
   Py_END_ALLOW_THREADS   // Reclaim Python interpreter
   return Py_BuildValue("");

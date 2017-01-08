@@ -28,10 +28,12 @@ from django.utils.encoding import force_text
 from django.utils.text import capfirst
 
 from freppledb.input.models import Resource, Operation, Location, SetupMatrix
-from freppledb.input.models import Buffer, Customer, Demand, Item, Load, Flow, Skill
-from freppledb.input.models import Calendar, CalendarBucket, OperationPlan, SubOperation
+from freppledb.input.models import Skill, Buffer, Customer, Demand
+from freppledb.input.models import Item, OperationResource, OperationMaterial
+from freppledb.input.models import Calendar, CalendarBucket, ManufacturingOrder, SubOperation
 from freppledb.input.models import ResourceSkill, Supplier, ItemSupplier, searchmode
 from freppledb.input.models import ItemDistribution, DistributionOrder, PurchaseOrder
+from freppledb.input.models import OperationPlan
 from freppledb.common.report import GridReport, GridFieldBool, GridFieldLastModified
 from freppledb.common.report import GridFieldDateTime, GridFieldTime, GridFieldText
 from freppledb.common.report import GridFieldNumber, GridFieldInteger, GridFieldCurrency
@@ -79,15 +81,17 @@ class PathReport(GridReport):
   a specific item.
   '''
   template = 'input/path.html'
-  title = _("Supply path")
+  title = _("supply path")
   filterable = False
   frozenColumns = 0
   editable = False
   default_sort = None
   multiselect = False
+  help_url = 'user-guide/user-interface/supply-path-where-used.html'
+
   rows = (
     GridFieldText('depth', title=_('depth'), editable=False, sortable=False),
-    GridFieldText('operation', title=_('operation'), editable=False, sortable=False, formatter='detail', extra="role:'input/operation'"),
+    GridFieldText('operation', title=_('operation'), editable=False, sortable=False, formatter='detail', extra='"role":"input/operation"'),
     GridFieldNumber('quantity', title=_('quantity'), editable=False, sortable=False),
     GridFieldText('location', title=_('location'), editable=False, sortable=False),
     GridFieldText('type', title=_('type'), editable=False, sortable=False),
@@ -124,7 +128,7 @@ class PathReport(GridReport):
     return {
       'title': capfirst(
         force_text(reportclass.objecttype._meta.verbose_name) + " " + args[0] +
-        ": " + force_text(reportclass.downstream and _("Where Used") or _("Supply Path"))
+        ": " + force_text(reportclass.downstream and _("where used") or _("supply path"))
         ),
       'downstream': reportclass.downstream,
       'active_tab': reportclass.downstream and 'whereused' or 'supplypath',
@@ -140,47 +144,33 @@ class PathReport(GridReport):
   @classmethod
   def findDeliveries(reportclass, item, location, db):
     # Automatically detect delivery operations. This is done by looking for
-    # a buffer for this item and location combination. (Special case is when
-    # there is only a single location in the model, in which case only a match
-    # on the item is sufficient.)
-    # If this buffer results in a single buffer, we call the method to pick up
-    # its replenishing operations.
+    # a buffer for this item and location combination.
     buf = None
-    if location:
-      for b in Buffer.objects.using(db).filter(item=item, location=location):
-        if buf:
-          # More than 1 buffer found
-          return []
-        else:
-          # First buffer found
-          buf = b
-    else:
-      if Location.objects.using(db).count() > 1:
-        return []
-      # Special case: only 1 location exists, and a match on the item is enough
-      for b in Buffer.objects.using(db).filter(item=item):
-        if buf:
-          # More than 1 buffer found
-          return []
-        else:
-          # First buffer found
-          buf = b
+    # Find a buffer record
+    for b in Buffer.objects.using(db).filter(item=item, location=location):
+      buf = b
+    if not buf:
+      # Create a buffer record
+      buf = Buffer(
+        name='%s @ %s' % (item, location),
+        item=Item.objects.using(db).get(name=item),
+        location=Location.objects.using(db).get(name=location)
+        )
     return reportclass.findReplenishment(buf, db, 0, 1, 0, False)
 
 
   @classmethod
   def findUsage(reportclass, buffer, db, level, curqty, realdepth, pushsuper):
     result = [
-      (level + 1, None, i.operation, curqty, 0, None, realdepth, pushsuper, buffer.location.name if buffer.location else None)
-      for i in buffer.flows.filter(quantity__lt=0).only('operation').using(db)
+      (level - 1, None, i.operation, curqty, 0, None, realdepth, pushsuper, buffer.location.name if buffer.location else None)
+      for i in buffer.item.operationmaterials.filter(quantity__lt=0).filter(operation__location__name=buffer.location.name).only('operation').using(db)
       ]
-    result.extend([
-      (level + 1, None, i, curqty, 0, None, realdepth, pushsuper, i.location.name if i.location else None)
-      for i in ItemDistribution.objects.using(db).filter(
+    for i in ItemDistribution.objects.using(db).filter(
         item__lft__lte=buffer.item.lft, item__rght__gt=buffer.item.lft,
-        origin__lft__lte=buffer.location.lft, origin__rght__gt=buffer.location.lft
-        )
-      ])
+        origin__name=buffer.location.name
+        ):
+      i.item = buffer.item
+      result.append( (level - 1, None, i, curqty, 0, None, realdepth - 1, pushsuper, i.location.name if i.location else None) )
     return result
 
 
@@ -192,34 +182,54 @@ class PathReport(GridReport):
     # item supplier models for the item and location combination. (As a special
     # case in case only a single location exists in the model, a match on the
     # item is sufficient).
-    if buffer.producing:
-      return [ (level, None, buffer.producing, curqty, 0, None, realdepth, pushsuper, buffer.producing.location.name if buffer.producing.location else None) ]
     result = []
     if Location.objects.using(db).count() > 1:
       # Multiple locations
-      result.extend([
-        (level, None, i, curqty, 0, None, realdepth, pushsuper, buffer.location.name if buffer.location else None)
-        for i in ItemSupplier.objects.using(db).filter(
-          Q(location__isnull=True) | (Q(location__lft__lte=buffer.location.lft) & Q(location__rght__gt=buffer.location.lft)),
-          item__lft__lte=buffer.item.lft, item__rght__gt=buffer.item.lft
-          )
-        ])
-      # TODO if the itemdistribution is at an aggregate location level, we should loop over all child locations
-      result.extend([
-        (level, None, i, curqty, 0, None, realdepth, pushsuper, i.origin.name if i.origin else None)
-        for i in ItemDistribution.objects.using(db).filter(
-          item__lft__lte=buffer.item.lft, item__rght__gt=buffer.item.lft,
-          location__lft__lte=buffer.location.lft, location__rght__gt=buffer.location.lft
-          )
-        ])
+      for i in ItemSupplier.objects.using(db).filter(
+        Q(location__isnull=True) | Q(location__name=buffer.location.name),
+        item__lft__lte=buffer.item.lft, item__rght__gt=buffer.item.lft
+        ):
+          i.item = buffer.item
+          i.location = buffer.location
+          result.append(
+            (level, None, i, curqty, 0, None, realdepth, pushsuper, buffer.location.name if buffer.location else None)
+            )
+      for i in ItemDistribution.objects.using(db).filter(
+        Q(location__isnull=True) | Q(location__name=buffer.location.name),
+        item__lft__lte=buffer.item.lft, item__rght__gt=buffer.item.lft
+        ):
+          i.item = buffer.item
+          i.location = buffer.location
+          result.append(
+            (level, None, i, curqty, 0, None, realdepth, pushsuper, i.location.name if i.location else None)
+            )
+      for i in Operation.objects.using(db).filter(
+        Q(location__isnull=True) | Q(location__name=buffer.location.name),
+        item__lft__lte=buffer.item.lft, item__rght__gt=buffer.item.lft
+        ):
+          i.item = buffer.item
+          i.location = buffer.location
+          result.append(
+            (level, None, i, curqty, 0, None, realdepth, pushsuper, i.location.name if i.location else None)
+            )
     else:
-      # Single location, and itemdistributions obviously aren't defined here
-      result.extend([
-        (level, None, i, curqty, 0, None, realdepth, pushsuper, buffer.location.name if buffer.location else None)
-        for i in ItemSupplier.objects.using(db).filter(
-          item__lft__lte=buffer.item.lft, item__rght__gt=buffer.item.rght
+      # Single location
+      for i in ItemSupplier.objects.using(db).filter(
+        item__lft__lte=buffer.item.lft, item__rght__gt=buffer.item.lft
+        ):
+        i.item = buffer.item
+        i.location = buffer.location
+        result.append(
+          (level, None, i, curqty, 0, None, realdepth, pushsuper, buffer.location.name if buffer.location else None)
           )
-        ])
+      for i in Operation.objects.using(db).filter(
+        item__lft__lte=buffer.item.lft, item__rght__gt=buffer.item.lft
+        ):
+          i.item = buffer.item
+          i.location = buffer.location
+          result.append(
+            (level, None, i, curqty, 0, None, realdepth, pushsuper, buffer.location.name if buffer.location else None)
+            )
     return result
 
 
@@ -228,13 +238,13 @@ class PathReport(GridReport):
     '''
     A function that recurses upstream or downstream in the supply chain.
     '''
-    entity = basequery.query.get_compiler(basequery.db).as_sql(with_col_aliases=False)[1]
-    entity = entity[0]
-    root = reportclass.getRoot(request, entity)
-
     # Update item and location hierarchies
     Item.rebuildHierarchy(database=request.database)
     Location.rebuildHierarchy(database=request.database)
+
+    entity = basequery.query.get_compiler(basequery.db).as_sql(with_col_aliases=False)[1]
+    entity = entity[0]
+    root = reportclass.getRoot(request, entity)
 
     # Recurse over all operations
     # TODO the current logic isn't generic enough. A lot of buffers may not be explicitly
@@ -242,12 +252,14 @@ class PathReport(GridReport):
     # Currently we don't account for such situations.
     # TODO usage search doesn't find item distributions from that location
     counter = 1
-    #operations = set()
+    operations = set()
     while len(root) > 0:
       # Pop the current node from the stack
       level, parent, curoperation, curqty, issuboperation, parentoper, realdepth, pushsuper, location = root.pop()
       curnode = counter
       counter += 1
+      if isinstance(location, str):
+        curlocation = Location.objects.all().using(request.database).get(name=location)
 
       # If an operation has parent operations we forget about the current operation
       # and use only the parent
@@ -260,12 +272,15 @@ class PathReport(GridReport):
           continue
 
       # Avoid showing the same operation twice.
-      # This feature is disabled by default a) because it is not intuitive to understand
-      # where operations are skipped, and b) because the quantity of each occurrence might
-      # be different.
-      # In some models the duplication is confusing and you can enable this feature.
-      #if curoperation in operations: continue
-      #operations.add(curoperation)
+      # This feature is enabled by default. Without it we cannot correctly display
+      # supply paths with loops (which are normally a modeling error).
+      # The use of this feature has some drawbacks  a) because it is not intuitive 
+      # to understand where operations are skipped in the path, and b) because
+      # the quantity of each occurrence might be different.
+      # You may choose can disable this feature by commenting out the next 3 lines.
+      if curoperation in operations: 
+        continue
+      operations.add(curoperation)
 
       # Find the next level
       hasChildren = False
@@ -278,12 +293,16 @@ class PathReport(GridReport):
           duration = curoperation.leadtime
           duration_per = None
           buffers = [ ("%s @ %s" % (curoperation.item.name, curoperation.location.name), 1), ]
-          resources = None
+          if curoperation.resource:
+            resources = [ (curoperation.resource.name, float(curoperation.resource_qty)) ]
+          else:
+            resources = None
           try:
             downstr = Buffer.objects.using(request.database).get(name="%s @ %s" % (curoperation.item.name, curoperation.location.name))
-            root.extend( reportclass.findUsage(downstr, request.database, level, curqty, realdepth + 1, False, location) )
+            root.extend( reportclass.findUsage(downstr, request.database, level, curqty, realdepth + 1, True) )
           except Buffer.DoesNotExist:
-            pass
+            downstr = Buffer(name="%s @ %s" % (curoperation.item.name, curoperation.location.name), item=curoperation.item, location=curlocation)
+            root.extend( reportclass.findUsage(downstr, request.database, level, curqty, realdepth + 1, True) )
         elif isinstance(curoperation, ItemDistribution):
           name = 'Ship %s from %s to %s' % (curoperation.item.name, curoperation.origin.name, curoperation.location.name)
           optype = "distribution"
@@ -293,19 +312,34 @@ class PathReport(GridReport):
             ("%s @ %s" % (curoperation.item.name, curoperation.origin.name), -1),
             ("%s @ %s" % (curoperation.item.name, curoperation.location.name), 1)
             ]
-          resources = None
+          if curoperation.resource:
+            resources = [ (curoperation.resource.name, float(curoperation.resource_qty)) ]
+          else:
+            resources = None
+          try:
+            downstr = Buffer.objects.using(request.database).get(name="%s @ %s" % (curoperation.item.name, location))
+            root.extend( reportclass.findUsage(downstr, request.database, level, curqty, realdepth + 1, True) )
+          except Buffer.DoesNotExist:
+            downstr = Buffer(name="%s @ %s" % (curoperation.item.name, location), item=curoperation.item, location=curlocation)
+            root.extend( reportclass.findUsage(downstr, request.database, level, curqty, realdepth + 1, True) )
         else:
           name = curoperation.name
           optype = curoperation.type
           duration = curoperation.duration
           duration_per = curoperation.duration_per
-          buffers = [ (x.thebuffer.name, float(x.quantity)) for x in curoperation.flows.only('thebuffer', 'quantity').using(request.database) ]
-          resources = [ (x.resource.name, float(x.quantity)) for x in curoperation.loads.only('resource', 'quantity').using(request.database) ]
-          for x in curoperation.flows.filter(quantity__gt=0).only('thebuffer').using(request.database):
-            curflows = x.thebuffer.flows.filter(quantity__lt=0).only('operation', 'quantity').using(request.database)
+          buffers = [ ('%s @ %s' % (x.item.name, curoperation.location.name), float(x.quantity)) for x in curoperation.operationmaterials.only('item', 'quantity').using(request.database) ]
+          resources = [ (x.resource.name, float(x.quantity)) for x in curoperation.operationresources.only('resource', 'quantity').using(request.database) ]
+          for x in curoperation.operationmaterials.filter(quantity__gt=0).only('item').using(request.database):
+            curflows = x.item.operationmaterials.filter(quantity__lt=0, operation__location=curoperation.location.name).only('operation', 'quantity').using(request.database)
             for y in curflows:
               hasChildren = True
-              root.append( (level - 1, curnode, y.operation, - curqty * y.quantity, subcount, None, realdepth - 1, pushsuper, x.thebuffer.location.name if x.thebuffer.location else None) )
+              root.append( (level - 1, curnode, y.operation, - curqty * y.quantity, subcount, None, realdepth - 1, pushsuper, x.operation.location.name if x.operation.location else None) )
+            try:
+              downstr = Buffer.objects.using(request.database).get(name="%s @ %s" % (x.item.name, location))
+              root.extend( reportclass.findUsage(downstr, request.database, level-1, curqty, realdepth - 1, True) )
+            except Buffer.DoesNotExist:
+              downstr = Buffer(name="%s @ %s" % (curoperation.item.name, location), item=x.item, location=curlocation)
+              root.extend( reportclass.findUsage(downstr, request.database, level-1, curqty, realdepth - 1, True) )
           for x in curoperation.suboperations.using(request.database).only('suboperation').order_by("-priority"):
             subcount += curoperation.type == "routing" and 1 or -1
             root.append( (level - 1, curnode, x.suboperation, curqty, subcount, curoperation, realdepth, False, location) )
@@ -318,7 +352,10 @@ class PathReport(GridReport):
           duration = curoperation.leadtime
           duration_per = None
           buffers = [ ("%s @ %s" % (curoperation.item.name, location), 1), ]
-          resources = None
+          if curoperation.resource:
+            resources = [ (curoperation.resource.name, float(curoperation.resource_qty)) ]
+          else:
+            resources = None
         elif isinstance(curoperation, ItemDistribution):
           name = 'Ship %s from %s to %s' % (curoperation.item.name, curoperation.origin.name, location)
           optype = "distribution"
@@ -328,33 +365,34 @@ class PathReport(GridReport):
             ("%s @ %s" % (curoperation.item.name, curoperation.origin.name), -1),
             ("%s @ %s" % (curoperation.item.name, curoperation.location.name), 1)
             ]
-          resources = None
+          if curoperation.resource:
+            resources = [ (curoperation.resource.name, float(curoperation.resource_qty)) ]
+          else:
+            resources = None
           try:
             upstr = Buffer.objects.using(request.database).get(name="%s @ %s" % (curoperation.item.name, curoperation.origin.name))
-            root.extend( reportclass.findReplenishment(upstr, request.database, level + 2, curqty, realdepth + 1, False) )
+            root.extend( reportclass.findReplenishment(upstr, request.database, level + 2, curqty, realdepth + 1, True) )
           except Buffer.DoesNotExist:
-            pass
+            upstr = Buffer(name="%s @ %s" % (curoperation.item.name, curoperation.origin.name), item=curoperation.item, location=curoperation.origin)
+            root.extend( reportclass.findReplenishment(upstr, request.database, level + 2, curqty, realdepth + 1, True) )
         else:
           curprodflow = None
           name = curoperation.name
           optype = curoperation.type
           duration = curoperation.duration
           duration_per = curoperation.duration_per
-          buffers = [ (x.thebuffer.name, float(x.quantity)) for x in curoperation.flows.only('thebuffer', 'quantity').using(request.database) ]
-          resources = [ (x.resource.name, float(x.quantity)) for x in curoperation.loads.only('resource', 'quantity').using(request.database) ]
-          for x in curoperation.flows.filter(quantity__gt=0).only('quantity').using(request.database):
+          buffers = [ ('%s @ %s' % (x.item.name, curoperation.location.name), float(x.quantity)) for x in curoperation.operationmaterials.only('item', 'quantity').using(request.database) ]
+          resources = [ (x.resource.name, float(x.quantity)) for x in curoperation.operationresources.only('resource', 'quantity').using(request.database) ]
+          for x in curoperation.operationmaterials.filter(quantity__gt=0).only('quantity').using(request.database):
             curprodflow = x
-          curflows = curoperation.flows.filter(quantity__lt=0).only('thebuffer', 'quantity').using(request.database)
+          curflows = curoperation.operationmaterials.filter(quantity__lt=0).only('item', 'quantity').using(request.database)
           for y in curflows:
-            if y.thebuffer.producing:
-              hasChildren = True
-              root.append( (
-                level + 1, curnode, y.thebuffer.producing,
-                curprodflow and (-curqty * y.quantity) / curprodflow.quantity or (-curqty * y.quantity),
-                subcount, None, realdepth + 1, True, y.thebuffer.location
-                ) )
-            else:
-              root.extend( reportclass.findReplenishment(y.thebuffer, request.database, level + 2, curqty, realdepth + 1, False) )
+            b = Buffer(
+              name='%s @ %s' % (y.item.name, curoperation.location.name),
+              item=y.item,
+              location=curoperation.location
+              )
+            root.extend( reportclass.findReplenishment(b, request.database, level + 2, curqty, realdepth + 1, True) )
           for x in curoperation.suboperations.using(request.database).only('suboperation').order_by("-priority"):
             subcount += curoperation.type == "routing" and 1 or -1
             root.append( (level + 1, curnode, x.suboperation, curqty, subcount, curoperation, realdepth, False, location) )
@@ -398,9 +436,6 @@ class UpstreamDemandPath(PathReport):
     if dmd.operation:
       # Delivery operation on the demand
       return [ (0, None, dmd.operation, 1, 0, None, 0, False, None) ]
-    elif dmd.item.operation:
-      # Delivery operation on the item
-      return [ (0, None, dmd.item.operation, 1, 0, None, 0, False, None) ]
     else:
       # Autogenerated delivery operation
       try:
@@ -417,23 +452,64 @@ class UpstreamItemPath(PathReport):
   def getRoot(reportclass, request, entity):
     from django.core.exceptions import ObjectDoesNotExist
     try:
+      locs = set()
+      result = []
       it = Item.objects.using(request.database).get(name=entity)
       if reportclass.downstream:
         # Find all buffers where the item is being stored and walk downstream
-        result = []
         for b in Buffer.objects.filter(item=it).using(request.database):
-          result.extend( reportclass.findUsage(b, request.database, 0, 1, 0, False) )
+          locs.add(b.location.name)
+          result.extend( reportclass.findUsage(b, request.database, 0, 1, 0, True) )
+        # Add item locations that can be replenished
+        for itmdist in ItemDistribution.objects.using(request.database).filter(
+          item__lft__lte=it.lft, item__rght__gt=it.lft
+          ):
+            if itmdist.location.name in locs:
+              continue
+            locs.add(itmdist.location.name)
+            itmdist.item = it
+            result.append(
+              (0, None, itmdist, 1, 0, None, 0, False, itmdist.location.name)
+              )
+        # Add item locations that can be replenished
+        for itmsup in Operation.objects.using(request.database).filter(          
+          item__lft__lte=it.lft, item__rght__gt=it.lft
+          ):
+            if itmsup.location.name in locs:
+              continue
+            locs.add(itmsup.location.name)
+            itmsup.item = it            
+            result.append(
+              (0, None, itmsup, 1, 0, None, 0, False, itmsup.location.name)
+              )        
         return result
       else:
-        if it.operation:
-          # Delivery operation on the item
-          return [ (0, None, it.operation, 1, 0, None, 0, False, None) ]
-        else:
-          # Find the supply path of all buffers of this item
-          result = []
-          for b in Buffer.objects.filter(item=entity).using(request.database):
-            result.extend( reportclass.findReplenishment(b, request.database, 0, 1, 0, False) )
-          return result
+        # Find the supply path of all buffers of this item
+        for b in Buffer.objects.filter(item=entity).using(request.database):
+          result.extend( reportclass.findReplenishment(b, request.database, 0, 1, 0, True) )
+        # Add item locations that can be replenished
+        for itmdist in ItemDistribution.objects.using(request.database).filter(
+          item__lft__lte=it.lft, item__rght__gt=it.lft
+          ):
+            if itmdist.location.name in locs:
+              continue
+            locs.add(itmdist.location.name)
+            itmdist.item = it
+            result.append(
+              (0, None, itmdist, 1, 0, None, 0, False, itmdist.location.name)
+              )
+        # Add item locations that can be replenished
+        for itmsup in Operation.objects.using(request.database).filter(          
+          item__lft__lte=it.lft, item__rght__gt=it.lft
+          ):
+            if itmsup.location.name in locs:
+              continue
+            locs.add(itmsup.location.name)
+            itmsup.item = it            
+            result.append(
+              (0, None, itmsup, 1, 0, None, 0, False, itmsup.location.name)
+              )        
+        return result
     except ObjectDoesNotExist:
       raise Http404("item %s doesn't exist" % entity)
 
@@ -448,9 +524,9 @@ class UpstreamBufferPath(PathReport):
     try:
       buf = Buffer.objects.using(request.database).get(name=entity)
       if reportclass.downstream:
-        return reportclass.findUsage(buf, request.database, 0, 1, 0, False)
+        return reportclass.findUsage(buf, request.database, 0, 1, 0, True)
       else:
-        return reportclass.findReplenishment(buf, request.database, 0, 1, 0, False)
+        return reportclass.findReplenishment(buf, request.database, 0, 1, 0, True)
     except ObjectDoesNotExist:
       raise Http404("buffer %s doesn't exist" % entity)
 
@@ -468,7 +544,7 @@ class UpstreamResourcePath(PathReport):
       raise Http404("resource %s doesn't exist" % entity)
     return [
       (0, None, i.operation, 1, 0, None, 0, True, i.operation.location.name if i.operation.location else None)
-      for i in root.loads.using(request.database).all()
+      for i in root.operationresources.using(request.database).all()
       ]
 
 
@@ -515,29 +591,29 @@ class BufferList(GridReport):
   '''
   A list report to show buffers.
   '''
-
   title = _("buffers")
   basequeryset = Buffer.objects.all()
   model = Buffer
   frozenColumns = 1
+  help_url = 'user-guide/modeling-wizard/master-data/buffers.html'
 
   rows = (
     #. Translators: Translation included with Django
-    GridFieldText('name', title=_('name'), key=True, formatter='detail', extra="role:'input/buffer'"),
+    GridFieldText('name', title=_('name'), key=True, formatter='detail', extra='"role":"input/buffer", "editable":false'),
     GridFieldText('description', title=_('description')),
     GridFieldText('category', title=_('category')),
     GridFieldText('subcategory', title=_('subcategory')),
-    GridFieldText('location', title=_('location'), field_name='location__name', formatter='detail', extra="role:'input/location'"),
-    GridFieldText('item', title=_('item'), field_name='item__name', formatter='detail', extra="role:'input/item'"),
+    GridFieldText('location', title=_('location'), field_name='location__name', formatter='detail', extra='"role":"input/location"'),
+    GridFieldText('item', title=_('item'), field_name='item__name', formatter='detail', extra='"role":"input/item"'),
     GridFieldNumber('onhand', title=_('onhand')),
-    GridFieldText('owner', title=_('owner'), field_name='owner__name', formatter='detail', extra="role:'input/buffer'"),
+    GridFieldText('owner', title=_('owner'), field_name='owner__name', formatter='detail', extra='"role":"input/buffer"'),
     GridFieldChoice('type', title=_('type'), choices=Buffer.types),
     GridFieldNumber('minimum', title=_('minimum')),
-    GridFieldText('minimum_calendar', title=_('minimum calendar'), field_name='minimum_calendar__name', formatter='detail', extra="role:'input/calendar'"),
-    GridFieldText('producing', title=_('producing'), field_name='producing__name', formatter='detail', extra="role:'input/operation'"),
+    GridFieldText('minimum_calendar', title=_('minimum calendar'), field_name='minimum_calendar__name', formatter='detail', extra='"role":"input/calendar"'),
     GridFieldText('source', title=_('source')),
     GridFieldLastModified('lastmodified'),
     )
+
 
 class SetupMatrixList(GridReport):
   '''
@@ -547,10 +623,11 @@ class SetupMatrixList(GridReport):
   basequeryset = SetupMatrix.objects.all()
   model = SetupMatrix
   frozenColumns = 1
+  help_url = 'user-guide/model-reference/setup-matrices.html'
 
   rows = (
     #. Translators: Translation included with Django
-    GridFieldText('name', title=_('name'), key=True, formatter='detail', extra="role:'input/setupmatrix'"),
+    GridFieldText('name', title=_('name'), key=True, formatter='detail', extra='"role":"input/setupmatrix"'),
     GridFieldText('source', title=_('source')),
     GridFieldLastModified('lastmodified'),
     )
@@ -564,25 +641,27 @@ class ResourceList(GridReport):
   basequeryset = Resource.objects.all()
   model = Resource
   frozenColumns = 1
+  help_url = 'user-guide/modeling-wizard/manufacturing-capacity/resources.html'
 
   rows = (
     #. Translators: Translation included with Django
-    GridFieldText('name', title=_('name'), key=True, formatter='detail', extra="role:'input/resource'"),
+    GridFieldText('name', title=_('name'), key=True, formatter='detail', extra='"role":"input/resource"'),
     GridFieldText('description', title=_('description')),
     GridFieldText('category', title=_('category')),
     GridFieldText('subcategory', title=_('subcategory')),
-    GridFieldText('location', title=_('location'), field_name='location__name', formatter='detail', extra="role:'input/location'"),
-    GridFieldText('owner', title=_('owner'), field_name='owner__name', formatter='detail', extra="role:'input/resource'"),
+    GridFieldText('location', title=_('location'), field_name='location__name', formatter='detail', extra='"role":"input/location"'),
+    GridFieldText('owner', title=_('owner'), field_name='owner__name', formatter='detail', extra='"role":"input/resource"'),
     GridFieldChoice('type', title=_('type'), choices=Resource.types),
     GridFieldNumber('maximum', title=_('maximum')),
-    GridFieldText('maximum_calendar', title=_('maximum calendar'), field_name='maximum_calendar__name', formatter='detail', extra="role:'input/calendar'"),
+    GridFieldText('maximum_calendar', title=_('maximum calendar'), field_name='maximum_calendar__name', formatter='detail', extra='"role":"input/calendar"'),
     GridFieldCurrency('cost', title=_('cost')),
     GridFieldDuration('maxearly', title=_('maxearly')),
-    GridFieldText('setupmatrix', title=_('setup matrix'), formatter='detail', extra="role:'input/setupmatrix'"),
+    GridFieldText('setupmatrix', title=_('setup matrix'), field_name='setupmatrix__name', formatter='detail', extra='"role":"input/setupmatrix"'),
     GridFieldText('setup', title=_('setup')),
     GridFieldText('source', title=_('source')),
     GridFieldLastModified('lastmodified'),
     )
+
 
 class LocationList(GridReport):
   '''
@@ -592,18 +671,20 @@ class LocationList(GridReport):
   basequeryset = Location.objects.all()
   model = Location
   frozenColumns = 1
+  help_url = 'user-guide/modeling-wizard/master-data/locations.html'
 
   rows = (
     #. Translators: Translation included with Django
-    GridFieldText('name', title=_('name'), key=True, formatter='detail', extra="role:'input/location'"),
+    GridFieldText('name', title=_('name'), key=True, formatter='detail', extra='"role":"input/location"'),
     GridFieldText('description', title=_('description')),
     GridFieldText('category', title=_('category')),
     GridFieldText('subcategory', title=_('subcategory')),
-    GridFieldText('available', title=_('available'), field_name='available__name', formatter='detail', extra="role:'input/calendar'"),
-    GridFieldText('owner', title=_('owner'), field_name='owner__name', formatter='detail', extra="role:'input/location'"),
+    GridFieldText('available', title=_('available'), field_name='available__name', formatter='detail', extra='"role":"input/calendar"'),
+    GridFieldText('owner', title=_('owner'), field_name='owner__name', formatter='detail', extra='"role":"input/location"'),
     GridFieldText('source', title=_('source')),
     GridFieldLastModified('lastmodified'),
     )
+
 
 class CustomerList(GridReport):
   '''
@@ -613,17 +694,19 @@ class CustomerList(GridReport):
   basequeryset = Customer.objects.all()
   model = Customer
   frozenColumns = 1
+  help_url = 'user-guide/modeling-wizard/master-data/customers.html'
 
   rows = (
     #. Translators: Translation included with Django
-    GridFieldText('name', title=_('name'), key=True, formatter='detail', extra="role:'input/customer'"),
+    GridFieldText('name', title=_('name'), key=True, formatter='detail', extra='"role":"input/customer"'),
     GridFieldText('description', title=_('description')),
     GridFieldText('category', title=_('category')),
     GridFieldText('subcategory', title=_('subcategory')),
-    GridFieldText('owner', title=_('owner'), field_name='owner__name', formatter='detail', extra="role:'input/customer'"),
+    GridFieldText('owner', title=_('owner'), field_name='owner__name', formatter='detail', extra='"role":"input/customer"'),
     GridFieldText('source', title=_('source')),
     GridFieldLastModified('lastmodified'),
     )
+
 
 class SupplierList(GridReport):
   '''
@@ -633,17 +716,19 @@ class SupplierList(GridReport):
   basequeryset = Supplier.objects.all()
   model = Supplier
   frozenColumns = 1
+  help_url = 'user-guide/modeling-wizard/purchasing/suppliers.html'
 
   rows = (
     #. Translators: Translation included with Django
-    GridFieldText('name', title=_('name'), key=True, formatter='detail', extra="role:'input/supplier'"),
+    GridFieldText('name', title=_('name'), key=True, formatter='detail', extra='"role":"input/supplier"'),
     GridFieldText('description', title=_('description')),
     GridFieldText('category', title=_('category')),
     GridFieldText('subcategory', title=_('subcategory')),
-    GridFieldText('owner', title=_('owner'), field_name='owner__name', formatter='detail', extra="role:'input/supplier'"),
+    GridFieldText('owner', title=_('owner'), field_name='owner__name', formatter='detail', extra='"role":"input/supplier"'),
     GridFieldText('source', title=_('source')),
     GridFieldLastModified('lastmodified'),
     )
+
 
 class ItemSupplierList(GridReport):
   '''
@@ -653,22 +738,27 @@ class ItemSupplierList(GridReport):
   basequeryset = ItemSupplier.objects.all()
   model = ItemSupplier
   frozenColumns = 1
+  help_url = 'user-guide/modeling-wizard/purchasing/item-suppliers.html'
 
   rows = (
-    GridFieldInteger('id', title=_('identifier'), key=True, formatter='detail', extra="role:'input/itemsupplier'"),
-    GridFieldText('item', title=_('item'), formatter='detail', extra="role:'input/item'"),
-    GridFieldText('location', title=_('location'), formatter='detail', extra="role:'input/location'"),
-    GridFieldText('supplier', title=_('supplier'), formatter='detail', extra="role:'input/supplier'"),
+    GridFieldInteger('id', title=_('identifier'), key=True, formatter='detail', extra='"role":"input/itemsupplier"'),
+    GridFieldText('item', title=_('item'), field_name='item__name', formatter='detail', extra='"role":"input/item"'),
+    GridFieldText('location', title=_('location'), field_name='location__name', formatter='detail', extra='"role":"input/location"'),
+    GridFieldText('supplier', title=_('supplier'), field_name='supplier__name', formatter='detail', extra='"role":"input/supplier"'),
     GridFieldDuration('leadtime', title=_('lead time')),
     GridFieldNumber('sizeminimum', title=_('size minimum')),
     GridFieldNumber('sizemultiple', title=_('size multiple')),
     GridFieldCurrency('cost', title=_('cost')),
-    GridFieldNumber('priority', title=_('priority')),
+    GridFieldInteger('priority', title=_('priority')),
+    GridFieldDuration('fence', title=_('fence')),
     GridFieldDateTime('effective_start', title=_('effective start')),
     GridFieldDateTime('effective_end', title=_('effective end')),
+    GridFieldText('resource', title=_('resource'), field_name='resource__name', formatter='detail', extra='"role":"input/resource"'),
+    GridFieldNumber('resource_qty', title=_('resource quantity')),
     GridFieldText('source', title=_('source')),
     GridFieldLastModified('lastmodified'),
     )
+
 
 class ItemDistributionList(GridReport):
   '''
@@ -678,22 +768,27 @@ class ItemDistributionList(GridReport):
   basequeryset = ItemDistribution.objects.all()
   model = ItemDistribution
   frozenColumns = 1
+  help_url = 'user-guide/modeling-wizard/distribution/item-distributions.html'
 
   rows = (
-    GridFieldInteger('id', title=_('identifier'), key=True, formatter='detail', extra="role:'input/itemdistribution'"),
-    GridFieldText('item', title=_('item'), formatter='detail', extra="role:'input/item'"),
-    GridFieldText('location', title=_('location'), formatter='detail', extra="role:'input/location'"),
-    GridFieldText('origin', title=_('origin'), formatter='detail', extra="role:'input/location'"),
+    GridFieldInteger('id', title=_('identifier'), key=True, formatter='detail', extra='"role":"input/itemdistribution"'),
+    GridFieldText('item', title=_('item'), field_name='item__name', formatter='detail', extra='"role":"input/item"'),
+    GridFieldText('location', title=_('location'), field_name='location__name', formatter='detail', extra='"role":"input/location"'),
+    GridFieldText('origin', title=_('origin'), field_name='origin__name', formatter='detail', extra='"role":"input/location"'),
     GridFieldDuration('leadtime', title=_('lead time')),
     GridFieldNumber('sizeminimum', title=_('size minimum')),
     GridFieldNumber('sizemultiple', title=_('size multiple')),
     GridFieldCurrency('cost', title=_('cost')),
-    GridFieldNumber('priority', title=_('priority')),
+    GridFieldInteger('priority', title=_('priority')),
+    GridFieldDuration('fence', title=_('fence')),
     GridFieldDateTime('effective_start', title=_('effective start')),
     GridFieldDateTime('effective_end', title=_('effective end')),
+    GridFieldText('resource', title=_('resource'), field_name='resource__name', formatter='detail', extra='"role":"input/resource"'),
+    GridFieldNumber('resource_qty', title=_('resource quantity')),
     GridFieldText('source', title=_('source')),
     GridFieldLastModified('lastmodified'),
     )
+
 
 class ItemList(GridReport):
   '''
@@ -704,19 +799,20 @@ class ItemList(GridReport):
   model = Item
   frozenColumns = 1
   editable = True
+  help_url = 'user-guide/modeling-wizard/master-data/items.html'
 
   rows = (
     #. Translators: Translation included with Django
-    GridFieldText('name', title=_('name'), key=True, formatter='detail', extra="role:'input/item'"),
+    GridFieldText('name', title=_('name'), key=True, formatter='detail', extra='"role":"input/item"'),
     GridFieldText('description', title=_('description')),
     GridFieldText('category', title=_('category')),
     GridFieldText('subcategory', title=_('subcategory')),
-    GridFieldText('operation', title=_('operation'), field_name='operation__name', formatter='detail', extra="role:'input/operation'"),
     GridFieldText('owner', title=_('owner'), field_name='owner__name'),
     GridFieldCurrency('price', title=_('price')),
     GridFieldText('source', title=_('source')),
     GridFieldLastModified('lastmodified'),
     )
+
 
 class SkillList(GridReport):
   '''
@@ -726,13 +822,15 @@ class SkillList(GridReport):
   basequeryset = Skill.objects.all()
   model = Skill
   frozenColumns = 1
+  help_url = 'user-guide/model-reference/skills.html'
 
   rows = (
     #. Translators: Translation included with Django
-    GridFieldText('name', title=_('name'), key=True, formatter='detail', extra="role:'input/skill'"),
+    GridFieldText('name', title=_('name'), key=True, formatter='detail', extra='"role":"input/skill"'),
     GridFieldText('source', title=_('source')),
     GridFieldLastModified('lastmodified'),
     )
+
 
 class ResourceSkillList(GridReport):
   '''
@@ -742,106 +840,123 @@ class ResourceSkillList(GridReport):
   basequeryset = ResourceSkill.objects.all()
   model = ResourceSkill
   frozenColumns = 1
+  help_url = 'user-guide/model-reference/resource-skills.html'
 
   rows = (
-    GridFieldInteger('id', title=_('identifier'), key=True, formatter='detail', extra="role:'input/resourceskill'"),
-    GridFieldText('resource', title=_('resource'), formatter='detail', extra="role:'input/resource'"),
-    GridFieldText('skill', title=_('skill'), formatter='detail', extra="role:'input/skill'"),
+    GridFieldInteger('id', title=_('identifier'), key=True, formatter='detail', extra='"role":"input/resourceskill"'),
+    GridFieldText('resource', title=_('resource'), field_name='resource__name', formatter='detail', extra='"role":"input/resource"'),
+    GridFieldText('skill', title=_('skill'), field_name='skill__name', formatter='detail', extra='"role":"input/skill"'),
     GridFieldDateTime('effective_start', title=_('effective start')),
     GridFieldDateTime('effective_end', title=_('effective end')),
-    GridFieldNumber('priority', title=_('priority')),
+    GridFieldInteger('priority', title=_('priority')),
     GridFieldText('source', title=_('source')),
     GridFieldLastModified('lastmodified'),
     )
 
-class LoadList(GridReport):
+
+class OperationResourceList(GridReport):
   '''
-  A list report to show loads.
+  A list report to show operationresources.
   '''
-  title = _("loads")
-  basequeryset = Load.objects.all()
-  model = Load
+  title = _("operation resources")
+  basequeryset = OperationResource.objects.all()
+  model = OperationResource
   frozenColumns = 1
+  help_url = 'user-guide/modeling-wizard/manufacturing-capacity/operation-resources.html'
 
   rows = (
-    GridFieldInteger('id', title=_('identifier'), key=True, formatter='detail', extra="role:'input/load'"),
-    GridFieldText('operation', title=_('operation'), field_name='operation__name', formatter='detail', extra="role:'input/operation'"),
-    GridFieldText('resource', title=_('resource'), field_name='resource__name', formatter='detail', extra="role:'input/resource'"),
-    GridFieldText('skill', title=_('skill'), formatter='detail', extra="role:'input/skill'"),
+    GridFieldInteger('id', title=_('identifier'), key=True, formatter='detail', extra='"role":"input/operationresource"'),
+    GridFieldText('operation', title=_('operation'), field_name='operation__name', formatter='detail', extra='"role":"input/operation"'),
+    GridFieldText('resource', title=_('resource'), field_name='resource__name', formatter='detail', extra='"role":"input/resource"'),
+    GridFieldText('skill', title=_('skill'), field_name='skill__name', formatter='detail', extra='"role":"input/skill"'),
     GridFieldNumber('quantity', title=_('quantity')),
     GridFieldDateTime('effective_start', title=_('effective start')),
     GridFieldDateTime('effective_end', title=_('effective end')),
     #. Translators: Translation included with Django
     GridFieldText('name', title=_('name')),
-    GridFieldNumber('priority', title=_('priority')),
+    GridFieldInteger('priority', title=_('priority')),
     GridFieldText('setup', title=_('setup')),
     GridFieldChoice('search', title=_('search mode'), choices=searchmode),
     GridFieldText('source', title=_('source')),
     GridFieldLastModified('lastmodified'),
     )
 
-class FlowList(GridReport):
+
+class OperationMaterialList(GridReport):
   '''
-  A list report to show flows.
+  A list report to show operationmaterials.
   '''
-  title = _("flows")
-  basequeryset = Flow.objects.all()
-  model = Flow
+  title = _("operation materials")
+  basequeryset = OperationMaterial.objects.all()
+  model = OperationMaterial
   frozenColumns = 1
+  help_url = 'user-guide/modeling-wizard/manufacturing-bom/operation-materials.html'
 
   rows = (
-    GridFieldInteger('id', title=_('identifier'), key=True, formatter='detail', extra="role:'input/flow'"),
-    GridFieldText('operation', title=_('operation'), field_name='operation__name', formatter='detail', extra="role:'input/operation'"),
-    GridFieldText('thebuffer', title=_('buffer'), field_name='thebuffer__name', formatter='detail', extra="role:'input/buffer'"),
-    GridFieldChoice('type', title=_('type'), choices=Flow.types),
+    GridFieldInteger('id', title=_('identifier'), key=True, formatter='detail', extra='"role":"input/operationmaterial"'),
+    GridFieldText('operation', title=_('operation'), field_name='operation__name', formatter='detail', extra='"role":"input/operation"'),
+    GridFieldText('item', title=_('item'), field_name='item__name', formatter='detail', extra='"role":"input/item"'),
+    GridFieldChoice('type', title=_('type'), choices=OperationMaterial.types),
     GridFieldNumber('quantity', title=_('quantity')),
     GridFieldDateTime('effective_start', title=_('effective start')),
     GridFieldDateTime('effective_end', title=_('effective end')),
     #. Translators: Translation included with Django
     GridFieldText('name', title=_('name')),
-    GridFieldNumber('priority', title=_('priority')),
+    GridFieldInteger('priority', title=_('priority')),
     GridFieldChoice('search', title=_('search mode'), choices=searchmode),
     GridFieldText('source', title=_('source')),
     GridFieldLastModified('lastmodified'),
     )
 
+
 class DemandList(GridReport):
   '''
-  A list report to show demands.
+  A list report to show sales orders.
   '''
   title = _("sales orders")
   basequeryset = Demand.objects.all()
   model = Demand
   frozenColumns = 1
+  help_url = 'user-guide/modeling-wizard/master-data/sales-orders.html'
 
   rows = (
     #. Translators: Translation included with Django
-    GridFieldText('name', title=_('name'), key=True, formatter='detail', extra="role:'input/demand'"),
-    GridFieldText('item', title=_('item'), field_name='item__name', formatter='detail', extra="role:'input/item'"),
-    GridFieldText('location', title=_('location'), field_name='location__name', formatter='detail', extra="role:'input/location'"),
-    GridFieldText('customer', title=_('customer'), field_name='customer__name', formatter='detail', extra="role:'input/customer'"),
+    GridFieldText('name', title=_('name'), key=True, formatter='detail', extra='"role":"input/demand"'),
+    GridFieldText('item', title=_('item'), field_name='item__name', formatter='detail', extra='"role":"input/item"'),
+    GridFieldText('location', title=_('location'), field_name='location__name', formatter='detail', extra='"role":"input/location"'),
+    GridFieldText('customer', title=_('customer'), field_name='customer__name', formatter='detail', extra='"role":"input/customer"'),
     GridFieldChoice('status', title=_('status'), choices=Demand.demandstatus),
     GridFieldText('description', title=_('description')),
     GridFieldText('category', title=_('category')),
     GridFieldText('subcategory', title=_('subcategory')),
     GridFieldDateTime('due', title=_('due')),
     GridFieldNumber('quantity', title=_('quantity')),
-    GridFieldText('operation', title=_('delivery operation'), formatter='detail', extra="role:'input/operation'"),
+    GridFieldText('operation', title=_('delivery operation'), field_name='operation__name', formatter='detail', extra='"role":"input/operation"'),
     GridFieldInteger('priority', title=_('priority')),
-    GridFieldText('owner', title=_('owner'), formatter='detail', extra="role:'input/demand'"),
+    GridFieldText('owner', title=_('owner'), field_name='owner__name', formatter='detail', extra='"role":"input/demand"'),
     GridFieldDuration('maxlateness', title=_('maximum lateness')),
     GridFieldNumber('minshipment', title=_('minimum shipment')),
     GridFieldText('source', title=_('source')),
     GridFieldLastModified('lastmodified'),
     )
 
-  actions = [
+  if 'freppledb.openbravo' in settings.INSTALLED_APPS:
+    actions = [
+      {"name": 'openbravo_incr_export', "label": _("export to %(erp)s") % {'erp': 'openbravo'}, "function": "ERPconnection.SODepExport(jQuery('#grid'),'SO','openbravo')"},
+      ]
+  elif 'freppledb.odoo' in settings.INSTALLED_APPS:
+    actions = [
+      {"name": 'odoo_incr_export', "label": _("export to %(erp)s") % {'erp': 'odoo'}, "function": "ERPconnection.SODepExport(jQuery('#grid'),'SO','odoo')"},
+      ]
+  else:
+    actions = [
     {"name": 'inquiry', "label": _("change status to %(status)s") % {'status': _("inquiry")}, "function": "grid.setStatus('inquiry')"},
     {"name": 'quote', "label": _("change status to %(status)s") % {'status': _("quote")}, "function": "grid.setStatus('quote')"},
     {"name": 'open', "label": _("change status to %(status)s") % {'status': _("open")}, "function": "grid.setStatus('open')"},
     {"name": 'closed', "label": _("change status to %(status)s") % {'status': _("closed")}, "function": "grid.setStatus('closed')"},
     {"name": 'canceled', "label": _("change status to %(status)s") % {'status': _("canceled")}, "function": "grid.setStatus('canceled')"},
     ]
+
 
 class CalendarList(GridReport):
   '''
@@ -851,9 +966,11 @@ class CalendarList(GridReport):
   basequeryset = Calendar.objects.all()
   model = Calendar
   frozenColumns = 1
+  help_url = 'user-guide/model-reference/calendars.html'
+
   rows = (
     #. Translators: Translation included with Django
-    GridFieldText('name', title=_('name'), key=True, formatter='detail', extra="role:'input/calendar'"),
+    GridFieldText('name', title=_('name'), key=True, formatter='detail', extra='"role":"input/calendar"'),
     GridFieldText('description', title=_('description')),
     GridFieldText('category', title=_('category')),
     GridFieldText('subcategory', title=_('subcategory')),
@@ -870,11 +987,13 @@ class CalendarBucketList(GridReport):
   basequeryset = CalendarBucket.objects.all()
   model = CalendarBucket
   frozenColumns = 3
+  help_url = 'user-guide/model-reference/calendars.html'
+
   rows = (
-    GridFieldInteger('id', title=_('identifier'), formatter='detail', extra="role:'input/calendarbucket'"),
-    GridFieldText('calendar', title=_('calendar'), field_name='calendar__name', formatter='detail', extra="role:'input/calendar'"),
+    GridFieldInteger('id', title=_('identifier'), formatter='detail', extra='"role":"input/calendarbucket"'),
+    GridFieldText('calendar', title=_('calendar'), field_name='calendar__name', formatter='detail', extra='"role":"input/calendar"'),
     GridFieldDateTime('startdate', title=_('start date')),
-    GridFieldDateTime('enddate', title=_('end date'), editable=False),
+    GridFieldDateTime('enddate', title=_('end date')),
     GridFieldNumber('value', title=_('value')),
     GridFieldInteger('priority', title=_('priority')),
     #. Translators: Translation included with Django
@@ -897,6 +1016,7 @@ class CalendarBucketList(GridReport):
     GridFieldLastModified('lastmodified'),
     )
 
+
 class OperationList(GridReport):
   '''
   A list report to show operations.
@@ -905,15 +1025,17 @@ class OperationList(GridReport):
   basequeryset = Operation.objects.all()
   model = Operation
   frozenColumns = 1
+  help_url = 'user-guide/modeling-wizard/manufacturing-bom/operations.html'
 
   rows = (
     #. Translators: Translation included with Django
-    GridFieldText('name', title=_('name'), key=True, formatter='detail', extra="role:'input/operation'"),
+    GridFieldText('name', title=_('name'), key=True, formatter='detail', extra='"role":"input/operation"'),
     GridFieldText('description', title=_('description')),
     GridFieldText('category', title=_('category')),
     GridFieldText('subcategory', title=_('subcategory')),
     GridFieldChoice('type', title=_('type'), choices=Operation.types),
-    GridFieldText('location', title=_('location'), field_name='location__name', formatter='detail', extra="role:'input/location'"),
+    GridFieldText('item', title=_('item'), formatter='detail', extra='"role":"input/item"'),
+    GridFieldText('location', title=_('location'), field_name='location__name', formatter='detail', extra='"role":"input/location"'),
     GridFieldDuration('duration', title=_('duration')),
     GridFieldDuration('duration_per', title=_('duration per unit')),
     GridFieldDuration('fence', title=_('release fence')),
@@ -921,11 +1043,15 @@ class OperationList(GridReport):
     GridFieldNumber('sizeminimum', title=_('size minimum')),
     GridFieldNumber('sizemultiple', title=_('size multiple')),
     GridFieldNumber('sizemaximum', title=_('size maximum')),
+    GridFieldInteger('priority', title=_('priority')),
+    GridFieldDateTime('effective_start', title=_('effective start')),
+    GridFieldDateTime('effective_end', title=_('effective end')),
     GridFieldCurrency('cost', title=_('cost')),
     GridFieldChoice('search', title=_('search mode'), choices=searchmode),
     GridFieldText('source', title=_('source')),
     GridFieldLastModified('lastmodified'),
     )
+
 
 class SubOperationList(GridReport):
   '''
@@ -935,11 +1061,12 @@ class SubOperationList(GridReport):
   basequeryset = SubOperation.objects.all()
   model = SubOperation
   frozenColumns = 1
+  help_url = 'user-guide/model-reference/suboperations.html'
 
   rows = (
     GridFieldInteger('id', title=_('identifier'), key=True),
-    GridFieldText('operation', title=_('operation'), field_name='operation__name', formatter='detail', extra="role:'input/operation'"),
-    GridFieldText('suboperation', title=_('suboperation'), field_name='suboperation__name', formatter='detail', extra="role:'input/operation'"),
+    GridFieldText('operation', title=_('operation'), field_name='operation__name', formatter='detail', extra='"role":"input/operation"'),
+    GridFieldText('suboperation', title=_('suboperation'), field_name='suboperation__name', formatter='detail', extra='"role":"input/operation"'),
     GridFieldInteger('priority', title=_('priority')),
     GridFieldDateTime('effective_start', title=_('effective start')),
     GridFieldDateTime('effective_end', title=_('effective end')),
@@ -947,32 +1074,56 @@ class SubOperationList(GridReport):
     GridFieldLastModified('lastmodified'),
     )
 
-class OperationPlanList(GridReport):
+
+class ManufacturingOrderList(GridReport):
   '''
-  A list report to show operationplans.
+  A list report to show manufacturing orders.
   '''
-  title = _("operationplans")
-  basequeryset = OperationPlan.objects.all()
-  model = OperationPlan
+  title = _("manufacturing orders")
+  basequeryset = ManufacturingOrder.objects.all()
+  model = ManufacturingOrder
   frozenColumns = 1
+  help_url = 'user-guide/modeling-wizard/manufacturing-bom/manufacturing-orders.html'
+
+  @ classmethod
+  def basequeryset(reportclass, request, args, kwargs):
+    return ManufacturingOrder.objects.all().extra(select={
+      'demand': "(select string_agg(value || ' : ' || key, ', ') from (select key, value from json_each_text(operationplan.plan) order by key desc) peg)"
+      })
 
   rows = (
-    GridFieldInteger('id', title=_('identifier'), key=True),
+    GridFieldInteger('id', title=_('identifier'), key=True, formatter='detail', extra="role:'input/manufacturingorder'"),
+    GridFieldText('reference', title=_('reference'),
+      editable='freppledb.openbravo' not in settings.INSTALLED_APPS
+      ),
     GridFieldText('operation', title=_('operation'), field_name='operation__name', formatter='detail', extra="role:'input/operation'"),
     GridFieldDateTime('startdate', title=_('start date')),
     GridFieldDateTime('enddate', title=_('end date')),
     GridFieldNumber('quantity', title=_('quantity')),
     GridFieldChoice('status', title=_('status'), choices=OperationPlan.orderstatus),
-    GridFieldInteger('owner', title=_('owner'), extra="formatoptions:{defaultValue:''}"),
+    GridFieldInteger('owner', title=_('owner'), extra='"formatoptions":{"defaultValue":""}'),
+    GridFieldNumber('criticality', title=_('criticality'), editable=False),
+    GridFieldDuration('delay', title=_('delay'), editable=False),
+    GridFieldText('demand', title=_('demands'), editable=False, sortable=False, formatter='demanddetail', extra='"role":"input/demand"'),
     GridFieldText('source', title=_('source')),
     GridFieldLastModified('lastmodified'),
     )
 
-  actions = [
-    {"name": 'proposed', "label": _("change status to %(status)s") % {'status': _("proposed")}, "function": "grid.setStatus('proposed')"},
-    {"name": 'confirmed', "label": _("change status to %(status)s") % {'status': _("confirmed")}, "function": "grid.setStatus('confirmed')"},
-    {"name": 'closed', "label": _("change status to %(status)s") % {'status': _("closed")}, "function": "grid.setStatus('closed')"},
-    ]
+  if 'freppledb.openbravo' in settings.INSTALLED_APPS:
+    actions = [
+      {"name": 'openbravo_incr_export', "label": _("export to %(erp)s") % {'erp': 'openbravo'}, "function": "ERPconnection.IncrementalExport(jQuery('#grid'),'OP','openbravo')"},
+      ]
+  elif 'freppledb.odoo' in settings.INSTALLED_APPS:
+    actions = [
+      {"name": 'odoo_incr_export', "label": _("export to %(erp)s") % {'erp': 'odoo'}, "function": "ERPconnection.IncrementalExport(jQuery('#grid'),'OP','odoo')"},
+      ]
+  else:
+    actions = [
+      {"name": 'proposed', "label": _("change status to %(status)s") % {'status': _("proposed")}, "function": "grid.setStatus('proposed')"},
+      {"name": 'approved', "label": _("change status to %(status)s") % {'status': _("approved")}, "function": "grid.setStatus('approved')"},
+      {"name": 'confirmed', "label": _("change status to %(status)s") % {'status': _("confirmed")}, "function": "grid.setStatus('confirmed')"},
+      {"name": 'closed', "label": _("change status to %(status)s") % {'status': _("closed")}, "function": "grid.setStatus('closed')"},
+      ]
 
 
 class DistributionOrderList(GridReport):
@@ -983,37 +1134,50 @@ class DistributionOrderList(GridReport):
   basequeryset = DistributionOrder.objects.all()
   model = DistributionOrder
   frozenColumns = 1
+  help_url = 'user-guide/modeling-wizard/distribution/distribution-orders.html'
+
+  @ classmethod
+  def basequeryset(reportclass, request, args, kwargs):
+    return DistributionOrder.objects.all().extra(select={
+      'demand': "(select string_agg(value || ' : ' || key, ', ') from (select key, value from json_each_text(operationplan.plan) order by key desc) peg)"
+      })
 
   rows = (
-    GridFieldInteger('id', title=_('identifier'), key=True),
+    GridFieldInteger('id', title=_('identifier'), key=True, formatter='detail', extra='role:"input/distributionorder"'),
     GridFieldText('reference', title=_('reference'),
       editable='freppledb.openbravo' not in settings.INSTALLED_APPS
       ),
     GridFieldChoice('status', title=_('status'), choices=DistributionOrder.orderstatus,
       editable='freppledb.openbravo' not in settings.INSTALLED_APPS
       ),
-    GridFieldText('item', title=_('item'), field_name='item__name', formatter='detail', extra="role:'input/item'"),
-    GridFieldText('origin', title=_('origin'), field_name='origin__name', formatter='detail', extra="role:'input/location'"),
-    GridFieldText('destination', title=_('destination'), field_name='destination__name', formatter='detail', extra="role:'input/location'"),
+    GridFieldText('item', title=_('item'), field_name='item__name', formatter='detail', extra='"role":"input/item"'),
+    GridFieldText('origin', title=_('origin'), field_name='origin__name', formatter='detail', extra='"role":"input/location"'),
+    GridFieldText('destination', title=_('destination'), field_name='destination__name', formatter='detail', extra='"role":"input/location"'),
     GridFieldDateTime('startdate', title=_('start date')),
     GridFieldDateTime('enddate', title=_('end date')),
     GridFieldNumber('quantity', title=_('quantity')),
-    GridFieldBool('consume_material', title=_('consume material')),
+    GridFieldText('demand', title=_('demands'), editable=False, sortable=False, formatter='demanddetail', extra='"role":"input/demand"'),
     GridFieldNumber('criticality', title=_('criticality'), editable=False),
+    GridFieldDuration('delay', title=_('delay'), editable=False),
     GridFieldText('source', title=_('source')),
     GridFieldLastModified('lastmodified'),
     )
 
   if 'freppledb.openbravo' in settings.INSTALLED_APPS:
     actions = [
-      {"name": 'openbravo_incr_export', "label": _("incremental export to openbravo"), "function": "openbravo.IncrementalExport(jQuery('#grid'),'DO')"},
+      {"name": 'openbravo_incr_export', "label": _("export to %(erp)s") % {'erp': 'openbravo'}, "function": "ERPconnection.IncrementalExport(jQuery('#grid'),'DO','openbravo')"},
+    ]
+  elif 'freppledb.odoo' in settings.INSTALLED_APPS:
+    actions = [
+      {"name": 'odoo_incr_export', "label": _("export to %(erp)s") % {'erp': 'odoo'}, "function": "ERPconnection.IncrementalExport(jQuery('#grid'),'DO','odoo')"},
     ]
   else:
     actions = [
       {"name": 'proposed', "label": _("change status to %(status)s") % {'status': _("proposed")}, "function": "grid.setStatus('proposed')"},
+      {"name": 'approved', "label": _("change status to %(status)s") % {'status': _("approved")}, "function": "grid.setStatus('approved')"},
       {"name": 'confirmed', "label": _("change status to %(status)s") % {'status': _("confirmed")}, "function": "grid.setStatus('confirmed')"},
       {"name": 'closed', "label": _("change status to %(status)s") % {'status': _("closed")}, "function": "grid.setStatus('closed')"},
-      ]
+    ]
 
 
 class PurchaseOrderList(GridReport):
@@ -1024,33 +1188,47 @@ class PurchaseOrderList(GridReport):
   basequeryset = PurchaseOrder.objects.all()
   model = PurchaseOrder
   frozenColumns = 1
+  help_url = 'user-guide/modeling-wizard/purchasing/purchase-orders.html'
+
+  @ classmethod
+  def basequeryset(reportclass, request, args, kwargs):
+    return PurchaseOrder.objects.all().extra(select={
+      'demand': "coalesce((select string_agg(value || ' : ' || key, ', ') from (select key, value from json_each_text(operationplan.plan) order by key desc) peg), '')"
+      })
 
   rows = (
-    GridFieldInteger('id', title=_('identifier'), key=True),
+    GridFieldInteger('id', title=_('identifier'), key=True, formatter='detail', extra='role:"input/purchaseorder"'),
     GridFieldText('reference', title=_('reference'),
       editable='freppledb.openbravo' not in settings.INSTALLED_APPS
       ),
     GridFieldChoice('status', title=_('status'),
       choices=PurchaseOrder.orderstatus, editable='freppledb.openbravo' not in settings.INSTALLED_APPS
       ),
-    GridFieldText('item', title=_('item'), field_name='item__name', formatter='detail', extra="role:'input/item'"),
-    GridFieldText('location', title=_('location'), field_name='location__name', formatter='detail', extra="role:'input/location'"),
-    GridFieldText('supplier', title=_('supplier'), formatter='detail', extra="role:'input/supplier'"),
+    GridFieldText('item', title=_('item'), field_name='item__name', formatter='detail', extra='"role":"input/item"'),
+    GridFieldText('location', title=_('location'), field_name='location__name', formatter='detail', extra='"role":"input/location"'),
+    GridFieldText('supplier', title=_('supplier'), field_name='supplier__name', formatter='detail', extra='"role":"input/supplier"'),
     GridFieldDateTime('startdate', title=_('start date')),
     GridFieldDateTime('enddate', title=_('end date')),
     GridFieldNumber('quantity', title=_('quantity')),
+    GridFieldText('demand', title=_('demands'), editable=False, sortable=False, formatter='demanddetail', extra='"role":"input/demand"'),
     GridFieldNumber('criticality', title=_('criticality'), editable=False),
+    GridFieldDuration('delay', title=_('delay'), editable=False),
     GridFieldText('source', title=_('source')),
     GridFieldLastModified('lastmodified'),
     )
 
   if 'freppledb.openbravo' in settings.INSTALLED_APPS:
     actions = [
-      {"name": 'openbravo_incr_export', "label": _("incremental export to openbravo"), "function": "openbravo.IncrementalExport(jQuery('#grid'),'PO')"},
-    ]
+      {"name": 'openbravo_incr_export', "label": _("export to %(erp)s") % {'erp': 'openbravo'}, "function": "ERPconnection.IncrementalExport(jQuery('#grid'),'PO','openbravo')"},
+      ]
+  elif 'freppledb.odoo' in settings.INSTALLED_APPS:
+    actions = [
+      {"name": 'odoo_incr_export', "label": _("export to %(erp)s") % {'erp': 'odoo'}, "function": "ERPconnection.IncrementalExport(jQuery('#grid'),'PO','odoo')"},
+      ]
   else:
     actions = [
       {"name": 'proposed', "label": _("change status to %(status)s") % {'status': _("proposed")}, "function": "grid.setStatus('proposed')"},
+      {"name": 'approved', "label": _("change status to %(status)s") % {'status': _("approved")}, "function": "grid.setStatus('approved')"},
       {"name": 'confirmed', "label": _("change status to %(status)s") % {'status': _("confirmed")}, "function": "grid.setStatus('confirmed')"},
       {"name": 'closed', "label": _("change status to %(status)s") % {'status': _("closed")}, "function": "grid.setStatus('closed')"},
       ]

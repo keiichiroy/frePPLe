@@ -20,17 +20,17 @@ Echoing locations:
   Location: locB None None None None
 
 Echoing items:
-  Item: end item None None None None delivery end item
-  Item: item 0 None None None None None
-  Item: item 1 None None None None None
-  Item: item 2 None None None None None
-  Item: item 3 None None None None None
-  Item: item 4 None None None None None
-  Item: item 5 None None None None None
-  Item: item 6 None None None None None
-  Item: item 7 None None None None None
-  Item: item 8 None None None None None
-  Item: item 9 None None None None None
+  Item: end item None None None None
+  Item: item 0 None None None None
+  Item: item 1 None None None None
+  Item: item 2 None None None None
+  Item: item 3 None None None None
+  Item: item 4 None None None None
+  Item: item 5 None None None None
+  Item: item 6 None None None None
+  Item: item 7 None None None None
+  Item: item 8 None None None None
+  Item: item 9 None None None None
 
 Echoing resources:
   Resource: Resource None None None None
@@ -127,6 +127,6 @@ Echoing operationplans:
         make item 10.0 2009-02-22 09:00:00 2009-03-01 09:00:00
 
 Printing problems
-  Problem: buffer invalid data no replenishment defined 1971-01-01 00:00:00 2030-12-31 00:00:00 1.0
-  Problem: buffer invalid data no replenishment defined 1971-01-01 00:00:00 2030-12-31 00:00:00 1.0
+  Problem: material invalid data No replenishment defined for 'buffer1' 1971-01-01 00:00:00 2030-12-31 00:00:00 1.0
+  Problem: material invalid data No replenishment defined for 'buffer2' 1971-01-01 00:00:00 2030-12-31 00:00:00 1.0
   Problem: material material excess Buffer 'end item' has material excess of 20 2009-02-15 09:00:00 2009-03-01 20:00:00 20.0

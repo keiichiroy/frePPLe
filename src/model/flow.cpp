@@ -23,11 +23,11 @@
 namespace frepple
 {
 
-DECLARE_EXPORT const MetaCategory* Flow::metadata;
-DECLARE_EXPORT const MetaClass* FlowStart::metadata;
-DECLARE_EXPORT const MetaClass* FlowEnd::metadata;
-DECLARE_EXPORT const MetaClass* FlowFixedStart::metadata;
-DECLARE_EXPORT const MetaClass* FlowFixedEnd::metadata;
+const MetaCategory* Flow::metadata;
+const MetaClass* FlowStart::metadata;
+const MetaClass* FlowEnd::metadata;
+const MetaClass* FlowFixedStart::metadata;
+const MetaClass* FlowFixedEnd::metadata;
 
 
 int Flow::initialize()
@@ -64,7 +64,7 @@ int Flow::initialize()
 }
 
 
-DECLARE_EXPORT Flow::~Flow()
+Flow::~Flow()
 {
   // Set a flag to make sure the level computation is triggered again
   HasLevel::triggerLazyRecomputation();
@@ -98,13 +98,15 @@ PyObject* Flow::create(PyTypeObject* pytype, PyObject* args, PyObject* kwds)
       throw DataException("missing operation on Flow");
     if (!PyObject_TypeCheck(oper, Operation::metadata->pythonClass))
       throw DataException("flow operation must be of type operation");
+    else if (!static_cast<Operation*>(oper)->getLocation())
+      throw DataException("operation location is unspecified");
 
-    // Pick up the buffer
-    PyObject* buf = PyDict_GetItemString(kwds, "buffer");
-    if (!buf)
-      throw DataException("missing buffer on Flow");
-    if (!PyObject_TypeCheck(buf, Buffer::metadata->pythonClass))
-      throw DataException("flow buffer must be of type buffer");
+    // Pick up the item
+    PyObject* item = PyDict_GetItemString(kwds, "item");
+    if (!item)
+      throw DataException("missing item on Flow");
+    if (!PyObject_TypeCheck(item, Item::metadata->pythonClass))
+      throw DataException("flow item must be of type item");
 
     // Pick up the quantity
     PyObject* q1 = PyDict_GetItemString(kwds, "quantity");
@@ -124,6 +126,12 @@ PyObject* Flow::create(PyTypeObject* pytype, PyObject* args, PyObject* kwds)
       PythonData d(eff_end);
       eff.setEnd(d.getDate());
     }
+
+    // Find or create a buffer for the item at the operation location
+    Buffer* buf = Buffer::findOrCreate(
+      static_cast<Item*>(item), 
+      static_cast<Operation*>(oper)->getLocation()
+      );
 
     // Pick up the type and create the flow
     Flow *l;
@@ -199,23 +207,23 @@ PyObject* Flow::create(PyTypeObject* pytype, PyObject* args, PyObject* kwds)
   catch (...)
   {
     PythonType::evalException();
-    return NULL;
+    return nullptr;
   }
 }
 
 
-DECLARE_EXPORT Object* Flow::finder(const DataValueDict& d)
+Object* Flow::finder(const DataValueDict& d)
 {
   // Check operation
   const DataValue* tmp = d.get(Tags::operation);
   if (!tmp)
-    return NULL;
+    return nullptr;
   Operation* oper = static_cast<Operation*>(tmp->getObject());
 
   // Check buffer field
   tmp = d.get(Tags::buffer);
   if (!tmp)
-    return NULL;
+    return nullptr;
   Buffer* buf = static_cast<Buffer*>(tmp->getObject());
 
   // Walk over all flows of the operation, and return
@@ -251,7 +259,7 @@ DECLARE_EXPORT Object* Flow::finder(const DataValueDict& d)
       continue;
     return const_cast<Flow*>(&*fl);
   }
-  return NULL;
+  return nullptr;
 }
 
 } // end namespace

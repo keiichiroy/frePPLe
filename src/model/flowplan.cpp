@@ -23,7 +23,7 @@
 namespace frepple
 {
 
-DECLARE_EXPORT const MetaCategory* FlowPlan::metadata;
+const MetaCategory* FlowPlan::metadata;
 
 
 int FlowPlan::initialize()
@@ -37,22 +37,21 @@ int FlowPlan::initialize()
   x.setName("flowplan");
   x.setDoc("frePPLe flowplan");
   x.supportgetattro();
+  x.supportsetattro();
   const_cast<MetaCategory*>(metadata)->pythonClass = x.type_object();
   return x.typeReady();
 }
 
 
-DECLARE_EXPORT FlowPlan::FlowPlan (OperationPlan *opplan, const Flow *f)
+FlowPlan::FlowPlan (OperationPlan *opplan, const Flow *f) 
+  : fl(const_cast<Flow*>(f)), oper(opplan)
 {
   assert(opplan && f);
-  fl = const_cast<Flow*>(f);
 
   // Initialize the Python type
   initType(metadata);
 
   // Link the flowplan to the operationplan
-  oper = opplan;
-  nextFlowPlan = NULL;
   if (opplan->firstflowplan)
   {
     // Append to the end
@@ -78,7 +77,7 @@ DECLARE_EXPORT FlowPlan::FlowPlan (OperationPlan *opplan, const Flow *f)
 }
 
 
-DECLARE_EXPORT void FlowPlan::update()
+void FlowPlan::update()
 {
   // Update the timeline data structure
   fl->getBuffer()->flowplans.update(
@@ -94,13 +93,13 @@ DECLARE_EXPORT void FlowPlan::update()
 }
 
 
-DECLARE_EXPORT void FlowPlan::setFlow(Flow* newfl)
+void FlowPlan::setFlow(Flow* newfl)
 {
   // No change
   if (newfl == fl) return;
 
   // Verify the data
-  if (!newfl) throw LogicException("Can't switch to NULL flow");
+  if (!newfl) throw LogicException("Can't switch to nullptr flow");
 
   // Remove from the old buffer, if there is one
   if (fl)
@@ -142,7 +141,7 @@ PyObject* FlowPlanIterator::iternext()
     // Skip uninteresting entries
     while (*bufiter != buf->getFlowPlans().end() && (*bufiter)->getQuantity()==0.0)
       ++(*bufiter);
-    if (*bufiter == buf->getFlowPlans().end()) return NULL;
+    if (*bufiter == buf->getFlowPlans().end()) return nullptr;
     fl = const_cast<FlowPlan*>(static_cast<const FlowPlan*>(&*((*bufiter)++)));
   }
   else
@@ -150,7 +149,7 @@ PyObject* FlowPlanIterator::iternext()
     // Skip uninteresting entries
     while (*opplaniter != opplan->endFlowPlans() && (*opplaniter)->getQuantity()==0.0)
       ++(*opplaniter);
-    if (*opplaniter == opplan->endFlowPlans()) return NULL;
+    if (*opplaniter == opplan->endFlowPlans()) return nullptr;
     fl = static_cast<FlowPlan*>(&*((*opplaniter)++));
   }
   Py_INCREF(fl);

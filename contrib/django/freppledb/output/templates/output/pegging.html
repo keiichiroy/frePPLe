@@ -1,0 +1,103 @@
+{% extends "admin/base_site_grid.html" %}
+{% load i18n %}
+
+{% block extrahead %}{{block.super}}
+<style type="text/css">
+#grid_location__name, #grid_operationplans, .ui-jqgrid .ui-jqgrid-resize, .ui-jqgrid .ui-jqgrid-htable th div {
+  height: 34px;
+}
+</style>
+<script type="text/javascript">
+
+function ganttcell(cellvalue, options, rowdata)
+{
+  var layer = [];
+  var result = [];
+  for (o in rowdata["operationplans"])
+  {
+     var data = rowdata["operationplans"][o];
+     var row = 0;
+     for (; row < layer.length; ++row)
+     {
+        if (data["startdate"] >= layer[row])
+        {
+           layer[row] = data["enddate"];
+           break;
+        }
+     };
+     if (row >= layer.length) layer.push(data["enddate"]);
+     if (data['status'] == 'confirmed')
+       result.push( '<rect x="' + data["x"] + '" y="' + (-row*gantt.rowsize) + '" width="' + Math.max(data["w"],1) + '" height="' + (gantt.rowsize-3) + '" class="opplan_locked"><title>Operation: ' + data["operation"] + (data["description"] ? ('<br/>Description: ' + data["description"]) : '') + '<br/>Id: ' + data["id"] + '<br>Quantity: ' + data["quantity"] + '<br/>Start Date: ' + data["startdate"] + '<br/>End Date: ' + data["enddate"] + '</title></rect>');
+     else
+       result.push( '<rect x="' + data["x"] + '" y="' + (-row*gantt.rowsize) + '" width="' + Math.max(data["w"],1) + '" height="' + (gantt.rowsize-3) + '" class="opplan"><title>Operation: ' + data["operation"] + (data["description"] ? ('<br/>Description: ' + data["description"]) : '') + '<br/>Id: ' + data["id"] + '<br>Quantity: ' + data["quantity"] + '<br/>Start Date: ' + data["startdate"] + '<br/>End Date: ' + data["enddate"] + '</title></rect>');
+  }
+  result.push( '<line x1="' + rowdata["due"] + '" y1="' + gantt.rowsize + '" x2="' + rowdata["due"] + '" y2="-' + (layer.length*gantt.rowsize) + '" vector-effect="non-scaling-stroke" stroke="red" stroke-width="1" />');
+  result.push( '<line x1="' + rowdata["current"] + '" y1="' + gantt.rowsize + '" x2="' + rowdata["current"] + '" y2="-' + (layer.length*gantt.rowsize) + '" vector-effect="non-scaling-stroke" stroke="black" stroke-width="1" />');
+  var scale = $("#jqgh_grid_operationplans").width() / 10000;
+  return '<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="100%" height="' + (gantt.rowsize*layer.length+3) + 'px">'
+    + '<title>' + escape(rowdata["name"]) + '</title>'
+    + '<g class="transformer" transform="scale(' + scale + ',1) translate(0,' + ((layer.length-1)*gantt.rowsize+3) +')" title="' + layer.length +'">'
+    + result.join('\n')
+    + '</g></svg>';
+}
+
+var horizonstart = new Date({{request.report_startdate|date:"Y"}},{{request.report_startdate|date:"n"}}-1,{{request.report_startdate|date:"j"}});
+var horizonend = new Date({{request.report_enddate|date:"Y"}},{{request.report_enddate|date:"n"}}-1,{{request.report_enddate|date:"j"}});
+var viewstart = new Date({{request.report_startdate|date:"Y"}},{{request.report_startdate|date:"n"}}-1,{{request.report_startdate|date:"j"}});
+var viewend = new Date({{request.report_enddate|date:"Y"}},{{request.report_enddate|date:"n"}}-1,{{request.report_enddate|date:"j"}});
+var delta = (viewend.getTime() - viewstart.getTime()) / 86400000.0;
+
+
+$(function() {
+  gantt.header();
+});
+
+
+function reslistfmt(cellvalue, options, row)
+{
+  if (cellvalue === undefined || cellvalue ==='') return '';
+  result = '';
+  for (var i in cellvalue)
+    result += "<span>" + cellvalue[i]
+      + "<a href='/detail/input/resource/key/' onclick='opendetail(event)'>"
+      + "<span class='leftpadding fa fa-caret-right' role='input/resource'></span>"
+      + "</a></span><br/>";
+  return result;
+}
+
+</script>
+{% endblock %}
+{% block extra_grid %}treeGrid: true,
+treeGridModel: 'adjacency',
+ExpandColumn: 'depth',
+treeIcons: {
+  plus:'fa-caret-right',
+  minus:'fa-caret-left',
+  leaf:'fa-genderless'
+  },
+tree_root_level: 0,
+treeReader: {
+  level_field: 'depth',
+  parent_id_field: 'parent',
+  leaf_field: 'leaf',
+  expanded_field: 'expanded'
+  },
+ExpandColClick: true,
+resizeStop: gantt.redraw,
+loadComplete: function(data) {
+  if(data.rows.length == 0) {
+    var msg = $("<h2>").text(gettext("This demand has not been planned")).css('padding','30px');
+    $("#content-main").replaceWith(msg);
+  }
+},
+{% endblock %}
+
+{% block actions %}
+<button class="btn btn-xs btn-primary" id="zoom_in" onclick="gantt.zoom(0.5,0)" data-toggle="tooltip" data-placement="top" data-original-title="{% trans 'zoom in'|capfirst|force_escape %}" ><span class="fa fa-search-plus"></span></button>
+<button class="btn btn-xs btn-primary" id="zoom_out" onclick="gantt.zoom(1.5,0)" data-toggle="tooltip" data-placement="top" data-original-title="{% trans 'zoom out'|capfirst|force_escape %}" ><span class="fa fa-search-minus"></span></button>
+<button class="btn btn-xs btn-primary" id="move_in" onclick="gantt.zoom(1,-86400000)" data-toggle="tooltip" data-placement="top" data-original-title="{% filter capfirst|force_escape %}{% trans 'earlier' context 'Gantt' %}{% endfilter %}" ><span class="fa fa-backward"></span></button>
+<button class="btn btn-xs btn-primary" id="move_out" onclick="gantt.zoom(1,86400000)" data-toggle="tooltip" data-placement="top" data-original-title="{% filter capfirst|force_escape %}{% trans 'later' context 'Gantt' %}{% endfilter %}" ><span class="fa fa-forward"></span></button>
+<button class="btn btn-xs btn-primary" id="reset" onclick="gantt.reset()" data-toggle="tooltip" data-placement="top" data-original-title="{% filter capfirst|force_escape %}{% trans 'reset' context 'Gantt' %}{% endfilter %}" ><span class="fa fa-undo"></span></button>
+{% endblock %}
+
+{% block tools %}{% tabs "input.demand" %}{% endblock %}

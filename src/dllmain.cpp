@@ -81,7 +81,7 @@ DECLARE_EXPORT(void) FreppleReadXMLData (const char* x, bool validate, bool vali
 {
   if (!x) return;
   if (validateonly)
-    XMLInputString(x).parse(NULL, true);
+    XMLInputString(x).parse(nullptr, true);
   else
     XMLInputString(x).parse(&Plan::instance(), validate);
 }
@@ -95,13 +95,13 @@ DECLARE_EXPORT(void) FreppleReadXMLFile (const char* filename, bool validate, bo
     xercesc::StdInInputSource in;
     if (validateonly)
       // When no root object is passed, only the input validation happens
-      XMLInput().parse(in, NULL, true);
+      XMLInput().parse(in, nullptr, true);
     else
       XMLInput().parse(in, &Plan::instance(), validate);
   }
   else if (validateonly)
     // Read and validate a file
-    XMLInputFile(filename).parse(NULL, true);
+    XMLInputFile(filename).parse(nullptr, true);
   else
     // Read, execute and optionally validate a file
     XMLInputFile(filename).parse(&Plan::instance(), validate);
@@ -194,25 +194,3 @@ extern "C" DECLARE_EXPORT(int) FreppleWrapperExit()
   return EXIT_SUCCESS;
 }
 
-
-/** Used to initialize frePPLe as a Python extension module. */
-PyMODINIT_FUNC PyInit_frepple(void)
-{
-  try
-  {
-    // Initialize frePPLe, without reading the configuration
-    // files init.xml or init.py
-    FreppleInitialize(false);
-    return PythonInterpreter::getModule();
-  }
-  catch(const exception& e)
-  {
-    PyErr_SetString(PyExc_SystemError, e.what());
-    return NULL;
-  }
-  catch (...)
-  {
-    PyErr_SetString(PyExc_SystemError, "Initialization failed");
-    return NULL;
-  }
-}

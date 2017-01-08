@@ -31,7 +31,7 @@ It provides the following functionality:
 import codecs
 import collections
 import csv
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 import functools
 import math
@@ -40,6 +40,7 @@ import json
 from io import StringIO, BytesIO
 from openpyxl import load_workbook, Workbook
 
+from django.db.models import Model
 from django.apps import apps
 from django.contrib.auth.models import Group
 from django.contrib.auth import get_permission_codename
@@ -51,7 +52,8 @@ from django.contrib.admin.utils import unquote, quote
 from django.core.exceptions import ValidationError
 from django.core.management.color import no_style
 from django.db import connections, transaction, models
-from django.db.models.fields import Field, CharField, IntegerField, AutoField
+from django.db.models.fields import Field, CharField, IntegerField, AutoField, DurationField
+from django.db.models.fields import DateField, DateTimeField, NOT_PROVIDED
 from django.db.models.fields.related import RelatedField
 from django.forms.models import modelform_factory
 from django.http import Http404, HttpResponse, StreamingHttpResponse
@@ -71,7 +73,8 @@ from django.contrib.contenttypes.models import ContentType
 from django.views.generic.base import View
 
 from freppledb.boot import getAttributes
-from freppledb.common.models import User, Comment, Parameter, BucketDetail, Bucket, HierarchyModel
+from freppledb.common.models import User, Comment, Wizard, Parameter, BucketDetail, Bucket, HierarchyModel
+from freppledb.admin import data_site
 
 
 import logging
@@ -80,7 +83,64 @@ logger = logging.getLogger(__name__)
 
 # A list of models with some special, administrative purpose.
 # They should be excluded from bulk import, export and erasing actions.
-EXCLUDE_FROM_BULK_OPERATIONS = (Group, User, Comment)
+EXCLUDE_FROM_BULK_OPERATIONS = (Group, User, Comment, Wizard)
+
+
+def getHorizon(request, future_only=False):
+  # Pick up the current date
+  try:
+    current = datetime.strptime(
+      Parameter.objects.using(request.database).get(name="currentdate").value,
+      "%Y-%m-%d %H:%M:%S"
+      )
+  except:
+    current = datetime.now()
+    current = current.replace(microsecond=0)
+
+  if request.user.horizontype:
+    # First type: Horizon relative to the current date
+    start = current.replace(hour=0, minute=0, second=0, microsecond=0)
+    if request.user.horizonunit == 'day':
+      end = start + timedelta(days=request.user.horizonlength or 60)
+      end = end.replace(hour=0, minute=0, second=0)
+    elif request.user.horizonunit == 'week':
+      end = start.replace(hour=0, minute=0, second=0) + timedelta(weeks=request.user.horizonlength or 8, days=7 - start.weekday())
+    else:
+      y = start.year
+      m = start.month + (request.user.horizonlength or 2) + (start.day > 1 and 1 or 0)
+      while m > 12:
+        y += 1
+        m -= 12
+      end = datetime(y, m, 1)
+  else:
+    # Second type: Absolute start and end dates given
+    start = request.user.horizonstart
+    if not start or (future_only and start < current):
+      start = current.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = request.user.horizonend
+    if end:
+      if end < start:
+        if future_only and end < current:
+          # Special case to assure a minimum number of future buckets
+          if request.user.horizonunit == 'day':
+            end = start + timedelta(days=request.user.horizonlength or 60)
+          elif request.user.horizonunit == 'week':
+            end = start + timedelta(weeks=request.user.horizonlength or 8)
+          else:
+            end = start + timedelta(weeks=request.user.horizonlength or 8)
+        else:
+          # Swap start and end to assure the start is before the end
+          tmp = start
+          start = end
+          end = tmp
+    else:
+      if request.user.horizonunit == 'day':
+        end = start + timedelta(days=request.user.horizonlength or 60)
+      elif request.user.horizonunit == 'week':
+        end = start + timedelta(weeks=request.user.horizonlength or 8)
+      else:
+        end = start + timedelta(weeks=request.user.horizonlength or 8)
+  return (current, start, end)
 
 
 class GridField(object):
@@ -103,24 +163,24 @@ class GridField(object):
       self.field_name = self.name
 
   def __str__(self):
-    o = [ "name:'%s',index:'%s',editable:%s,label:'%s',align:'%s',title:false" %
+    o = [ '"name":"%s","index":"%s","editable":%s,"label":"%s","align":"%s","title":false' %
           (self.name or '', self.name or '', self.editable and "true" or "false",
            force_text(self.title).title().replace("'", "\\'"), self.align
            ), ]
     if self.key:
-      o.append( ",key:true" )
+      o.append( ',"key":true' )
     if not self.sortable:
-      o.append(",sortable:false")
+      o.append(',"sortable":false')
     if not self.search:
-      o.append(",search:false")
+      o.append(',"search":false')
     if self.formatter:
-      o.append(",formatter:'%s'" % self.formatter)
+      o.append(',"formatter":"%s"' % self.formatter)
     if self.unformat:
-      o.append(",unformat:'%s'" % self.unformat)
+      o.append(',"unformat":"%s"' % self.unformat)
     if self.searchrules:
-      o.append(",searchrules:{%s}" % self.searchrules)
+      o.append(',"searchrules":{%s}' % self.searchrules)
     if self.hidden:
-      o.append(",hidden:true")
+      o.append(',"hidden":true')
     if self.extra:
       o.append(",%s" % force_text(self.extra))
     return ''.join(o)
@@ -143,42 +203,44 @@ class GridField(object):
 
 class GridFieldDateTime(GridField):
   formatter = 'date'
-  extra = "formatoptions:{srcformat:'Y-m-d H:i:s',newformat:'Y-m-d H:i:s'}"
+  extra = '"formatoptions":{"srcformat":"Y-m-d H:i:s","newformat":"Y-m-d H:i:s"}'
   width = 140
 
 
 class GridFieldTime(GridField):
   formatter = 'time'
-  extra = "formatoptions:{srcformat:'H:i:s',newformat:'H:i:s'}"
+  extra = '"formatoptions":{"srcformat":"H:i:s","newformat":"H:i:s"}'
   width = 80
 
 
 class GridFieldDate(GridField):
   formatter = 'date'
-  extra = "formatoptions:{srcformat:'Y-m-d',newformat:'Y-m-d'}"
+  extra = '"formatoptions":{"srcformat":"Y-m-d","newformat":"Y-m-d"}'
   width = 140
 
 
 class GridFieldInteger(GridField):
   formatter = 'integer'
+  extra = '"formatoptions":{"defaultValue": ""}'
   width = 70
-  searchrules = 'integer:true'
+  searchrules = '"integer":true'
 
 
 class GridFieldNumber(GridField):
   formatter = 'number'
+  extra = '"formatoptions":{"defaultValue": ""}'
   width = 70
-  searchrules = 'number:true'
+  searchrules = '"number":true'
 
 
 class GridFieldBool(GridField):
-  extra = "formatoptions:{disabled:false}, edittype:'checkbox', editoptions:{value:'True:False'}"
+  extra = '"formatoptions":{"disabled":false}, "edittype":"checkbox", "editoptions":{"value":"True:False"}'
   width = 60
 
 
 class GridFieldLastModified(GridField):
   formatter = 'date'
-  extra = "formatoptions:{srcformat:'Y-m-d H:i:s',newformat:'Y-m-d H:i:s'}"
+  extra = '"formatoptions":{"srcformat":"Y-m-d H:i:s","newformat":"Y-m-d H:i:s"}'
   title = _('last modified')
   editable = False
   width = 140
@@ -195,7 +257,7 @@ class GridFieldChoice(GridField):
 
   def __init__(self, name, **kwargs):
     super(GridFieldChoice, self).__init__(name, **kwargs)
-    e = ["formatter:'select', edittype:'select', editoptions:{value:'"]
+    e = ['"formatter":"select", "edittype":"select", "editoptions":{"value":"']
     first = True
     for i in kwargs["choices"]:
       if first:
@@ -204,13 +266,13 @@ class GridFieldChoice(GridField):
       else:
         e.append(";%s:" % i[0])
       e.append(i[1])
-    e.append("'}")
+    e.append('"}')
     self.extra = string_concat(*e)
 
 
 class GridFieldCurrency(GridField):
   formatter = 'currency'
-  extra = "formatoptions:{prefix:'%s', suffix:'%s'}" % settings.CURRENCY
+  extra = '"formatoptions":{"prefix":"%s", "suffix":"%s", "defaultValue":""}' % settings.CURRENCY
   width = 80
 
 
@@ -288,6 +350,9 @@ class GridReport(View):
 
   # The title of the report. Used for the window title
   title = ''
+
+  # Link to the documentation
+  help_url = None
 
   # The resultset that returns a list of entities that are to be
   # included in the report.
@@ -383,7 +448,14 @@ class GridReport(View):
 
     # Select the bucket size
     try:
-      if reportclass.maxBucketLevel:
+      if not pref.horizonbuckets:
+        if reportclass.maxBucketLevel:
+          bucket = Bucket.objects.using(request.database).filter(level__lte=reportclass.maxBucketLevel).order_by('-level')[0].name
+        else:
+          bucket = Bucket.objects.using(request.database).order_by('-level')[2].name
+        pref.horizonbuckets = bucket
+        pref.save()
+      elif reportclass.maxBucketLevel:
         bucket = Bucket.objects.using(request.database).get(name=pref.horizonbuckets, level__lte=reportclass.maxBucketLevel)
       else:
         bucket = Bucket.objects.using(request.database).get(name=pref.horizonbuckets)
@@ -391,63 +463,15 @@ class GridReport(View):
       try:
         if reportclass.maxBucketLevel:
           bucket = Bucket.objects.using(request.database).filter(level__lte=reportclass.maxBucketLevel).order_by('-level')[0].name
+
         else:
-          bucket = Bucket.objects.using(request.database).order_by('-level')[0].name
+          bucket = Bucket.objects.using(request.database).order_by('-level')[2].name
+
       except:
         bucket = None
 
-    # Pick up the current date
-    try:
-      current = datetime.strptime(
-        Parameter.objects.using(request.database).get(name="currentdate").value,
-        "%Y-%m-%d %H:%M:%S"
-        )
-    except:
-      current = datetime.now()
-      current = current.replace(microsecond=0)
-
-    if pref.horizontype:
-      start = current.replace(hour=0, minute=0, second=0, microsecond=0)
-      if pref.horizonunit == 'day':
-        end = start + timedelta(days=pref.horizonlength or 60)
-        end = end.replace(hour=0, minute=0, second=0)
-      elif pref.horizonunit == 'week':
-        end = start.replace(hour=0, minute=0, second=0) + timedelta(weeks=pref.horizonlength or 8, days=7 - start.weekday())
-      else:
-        y = start.year
-        m = start.month + (pref.horizonlength or 2) + (start.day > 1 and 1 or 0)
-        while m > 12:
-          y += 1
-          m -= 12
-        end = datetime(y, m, 1)
-    else:
-      # Second type: Absolute start and end dates given
-      start = pref.horizonstart
-      if not start or (reportclass.showOnlyFutureTimeBuckets and start < current):
-        start = current
-      end = pref.horizonend
-      if end:
-        if end < start:
-          if reportclass.showOnlyFutureTimeBuckets and end < current:
-            # Special case to assure a minimum number of future buckets
-            if pref.horizonunit == 'day':
-              end = start + timedelta(days=pref.horizonlength or 60)
-            elif pref.horizonunit == 'week':
-              end = start + timedelta(weeks=pref.horizonlength or 8)
-            else:
-              end = start + timedelta(weeks=pref.horizonlength or 8)
-          else:
-            # Swap start and end to assure the start is before the end
-            tmp = start
-            start = end
-            end = tmp
-      else:
-        if pref.horizonunit == 'day':
-          end = start + timedelta(days=pref.horizonlength or 60)
-        elif pref.horizonunit == 'week':
-          end = start + timedelta(weeks=pref.horizonlength or 8)
-        else:
-          end = start + timedelta(weeks=pref.horizonlength or 8)
+    # Get the report horizon
+    current, start, end = getHorizon(request, future_only=reportclass.showOnlyFutureTimeBuckets)
 
     # Filter based on the start and end date
     request.current_date = str(current)
@@ -480,7 +504,7 @@ class GridReport(View):
     # Add attributes if not done already
     if not self._attributes_added and self.model:
       self.__class__._attributes_added = True
-      for field_name, label, fieldtype in getAttributes("%s.%s" % (self.model.__module__, self.model.__name__)):
+      for field_name, label, fieldtype in getAttributes(self.model):
         if fieldtype == 'string':
           self.__class__.rows += (GridFieldText(field_name, title=label),)
         elif fieldtype == 'boolean':
@@ -513,14 +537,14 @@ class GridReport(View):
   def _render_colmodel(cls, is_popup=False, mode="graph"):
     result = []
     if is_popup:
-      result.append("{name:'select',label:gettext('Select'),width:75,align:'center',sortable:false,search:false}")
+      result.append('{"name":"select","label":gettext("Select"),"width":75,"align":"center","sortable":false,"search":false}')
     count = -1
     for i in cls.rows:
       count += 1
-      result.append("{%s,width:%s,counter:%d%s%s,searchoptions:{searchhidden: true}}" % (
+      result.append('{%s,"width":%s,"counter":%d%s%s,"searchoptions":{"searchhidden": true}}' % (
          i, i.width, count,
-         count < cls.frozenColumns and ',frozen:true' or '',
-         is_popup and ',popup:true' or ''
+         count < cls.frozenColumns and ',"frozen":true' or '',
+         is_popup and ',"popup":true' or ''
          ))
     return ',\n'.join(result)
 
@@ -528,7 +552,7 @@ class GridReport(View):
   @classmethod
   def _generate_spreadsheet_data(reportclass, request, *args, **kwargs):
     # Create a workbook
-    wb = Workbook(optimized_write=True)
+    wb = Workbook(write_only=True)
     title = force_text(reportclass.model and reportclass.model._meta.verbose_name or reportclass.title)
     ws = wb.create_sheet(title=title)
 
@@ -536,12 +560,14 @@ class GridReport(View):
     ws.append([ force_text(f.title).title() for f in reportclass.rows if f.title and not f.hidden ])
 
     # Loop over all records
-    fields = [ i.field_name for i in reportclass.rows if i.field_name and not i.hidden ]
+    fields = [ i.field_name for i in reportclass.rows if i.field_name and not i.hidden]
+
     if isinstance(reportclass.basequeryset, collections.Callable):
       query = reportclass._apply_sort(request, reportclass.filter_items(request, reportclass.basequeryset(request, args, kwargs), False).using(request.database))
     else:
       query = reportclass._apply_sort(request, reportclass.filter_items(request, reportclass.basequeryset).using(request.database))
     for row in hasattr(reportclass, 'query') and reportclass.query(request, query) or query.values(*fields):
+
       if hasattr(row, "__getitem__"):
         ws.append([ _getCellValue(row[f]) for f in fields ])
       else:
@@ -632,6 +658,12 @@ class GridReport(View):
       return query  # No sorting
     else:
       return query.order_by(asc and sort or ('-%s' % sort))
+      if reportclass.model.__base__ and reportclass.model.__base__ != models.Model:
+        for name in reportclass.model.__base__._meta.get_all_field_names():
+          if name == sortfield:
+            return query.order_by(asc and sort or ('-%s' % sort))
+    # Sorting by a non-existent field name: ignore the filter
+    return query
 
 
   @classmethod
@@ -699,6 +731,8 @@ class GridReport(View):
           continue
         if isinstance(i[f.field_name], str) or isinstance(i[f.field_name], (list, tuple)):
           s = json.dumps(i[f.field_name])
+        elif isinstance(i[f.field_name], timedelta):
+          s = i[f.field_name].total_seconds()
         else:
           s = '"%s"' % i[f.field_name]
         if first2:
@@ -925,15 +959,47 @@ class GridReport(View):
     resp.status_code = ok and 200 or 500
     return resp
 
-
   @staticmethod
   def dependent_models(m, found):
     ''' An auxilary method that constructs a set of all dependent models'''
     for f in m._meta.get_fields():
       if f.is_relation and f.auto_created and f.related_model != m and f.related_model not in found:
+        for sub in f.related_model.__subclasses__():
+#        if sub not in found:
+          found.update([sub])
         found.update([f.related_model])
         GridReport.dependent_models(f.related_model, found)
 
+  @staticmethod
+  def sort_models(models):
+    # Sort the list of models, based on dependencies between models
+    cnt = len(models)
+    ok = False
+    while not ok:
+      ok = True
+      #---------------------------------------------------- print ("sort again")
+      for i in range(cnt):
+        j = i + 1
+        while j < cnt and ok:
+          if models[i][1] != models[j][1] and models[i][1] in models[j][3]:
+            i_base=models[i][1].__base__
+            if i_base == Model or i_base._meta.abstract:
+              i_base=None
+            j_base=models[j][1].__base__
+            if j_base == Model or j_base._meta.abstract:
+              j_base=None
+            if i_base == j_base and i_base and j_base:
+              j += 1
+              continue
+            if i_base == models[j][1] or j_base == models[i][1]:
+              j += 1
+              continue
+            #---------------------- print("switch ", models[i][1], models[j][1])
+            models.append(models.pop(i))
+            j = i
+            ok = False
+          j += 1
+    return models
 
   @classmethod
   def erase(reportclass, request):
@@ -1018,11 +1084,18 @@ class GridReport(View):
           ### Case 1: The first line is read as a header line
           if rownumber == 1:
 
+            # Collect required fields
+            required_fields = set()         
+            for i in reportclass.model._meta.fields:
+              if not i.blank and i.default == NOT_PROVIDED:
+                required_fields.add(i.name)
+                
+            # Validate all columns
             for col in row:
               col = col.strip().strip('#').lower()
               if col == "":
                 headers.append(False)
-                continue
+                continue              
               ok = False
               for i in reportclass.model._meta.fields:
                 if col == i.name.lower() or col == i.verbose_name.lower():
@@ -1030,6 +1103,7 @@ class GridReport(View):
                     headers.append(i)
                   else:
                     headers.append(False)
+                  required_fields.discard(i.name)
                   ok = True
                   break
               if not ok:
@@ -1038,11 +1112,11 @@ class GridReport(View):
               if col == reportclass.model._meta.pk.name.lower() or \
                  col == reportclass.model._meta.pk.verbose_name.lower():
                 has_pk_field = True
-            if not has_pk_field and not isinstance(reportclass.model._meta.pk, AutoField):
-              # The primary key is not an auto-generated id and it is not mapped in the input...
+            if required_fields:
+              # We are missing some required fields
               errors = True
-              # Translators: Translation included with Django
-              yield force_text(_('Some keys were missing: %(keys)s') % {'keys': reportclass.model._meta.pk.name}) + '\n '
+              #. Translators: Translation included with Django
+              yield force_text(_('Some keys were missing: %(keys)s') % {'keys': ', '.join(required_fields)}) + '\n '
             # Abort when there are errors
             if errors:
               break
@@ -1181,18 +1255,25 @@ class GridReport(View):
 
         ### Case 1: The first line is read as a header line
         if rownumber == 1:
+          # Collect required fields
+          required_fields = set()         
+          for i in reportclass.model._meta.fields:
+            if not i.blank and i.default == NOT_PROVIDED:
+              required_fields.add(i.name)
+          # Validate all columns
           for col in row:
             col = str(col.value).strip().strip('#').lower()
             if col == "":
               headers.append(False)
-              continue
-            ok = False
+              continue            
+            ok = False                                    
             for i in reportclass.model._meta.fields:
               if col.replace(' ', '') == i.name.lower() or col == i.verbose_name.lower():
                 if i.editable is True:
                   headers.append(i)
                 else:
                   headers.append(False)
+                required_fields.discard(i.name)
                 ok = True
                 break
             if not ok:
@@ -1201,11 +1282,11 @@ class GridReport(View):
             if col == reportclass.model._meta.pk.name.lower() or \
                col == reportclass.model._meta.pk.verbose_name.lower():
               has_pk_field = True
-          if not has_pk_field and not isinstance(reportclass.model._meta.pk, AutoField):
-            # The primary key is not an auto-generated id and it is not mapped in the input...
+          if required_fields:
+            # We are missing some required fields
             errors = True
             #. Translators: Translation included with Django
-            yield force_text(_('Some keys were missing: %(keys)s') % {'keys': reportclass.model._meta.pk.name}) + '\n '
+            yield force_text(_('Some keys were missing: %(keys)s') % {'keys': ', '.join(required_fields)}) + '\n '
           # Abort when there are errors
           if errors > 0:
             break
@@ -1236,6 +1317,15 @@ class GridReport(View):
                 if isinstance(headers[colnum], (IntegerField, AutoField)):
                   if isinstance(data, numericTypes):
                     data = int(data)
+                elif isinstance(headers[colnum], DurationField):
+                  data = str(data) if data is not None else None
+                elif isinstance(headers[colnum], (DateField, DateTimeField)):
+                  if isinstance(data, datetime):
+                    # Rounding to second
+                    if data.microsecond < 500000:
+                      data = data.replace(microsecond=0)
+                    else:
+                      data = data.replace(microsecond=0) + timedelta(seconds=1)
                 d[headers[colnum].name] = data
               colnum += 1
 
@@ -1481,23 +1571,23 @@ class GridPivot(GridReport):
   def _render_colmodel(cls, is_popup=False, mode="graph"):
     result = []
     if is_popup:
-      result.append("{name:'select',label:gettext('Select'),width:75,align:'center',sortable:false,search:false,fixed:true}")
+      result.append('{"name":"select","label":gettext("Select"),"width":75,"align":"center","sortable":false,"search":false,"fixed":true}')
     count = -1
     for i in cls.rows:
       count += 1
-      result.append("{%s,width:%s,counter:%d,frozen:true%s,searchoptions:{searchhidden: true},fixed:true}" % (
+      result.append('{%s,"width":%s,"counter":%d,"frozen":true%s,"searchoptions":{"searchhidden": true},"fixed":true}' % (
          i, i.width, count,
-         is_popup and ',popup:true' or ''
+         is_popup and ',"popup":true' or ''
          ))
     if mode == "graph":
       result.append(
-        "{name:'graph',index:'graph',editable:false,label:' ',title:false,"
-        "sortable:false,formatter:'graph',searchoptions:{searchhidden: true},fixed:false}"
+        '{"name":"graph","index":"graph","editable":false,"label":" ","title":false,'
+        '"sortable":false,"formatter":"graph","searchoptions":{"searchhidden": true},"fixed":false}'
         )
     else:
       result.append(
-        "{name:'columns',label:' ',sortable:false,width:150,align:'left',"
-        "formatter:grid.pivotcolumns,search:false,frozen:true,title:false }"
+        '{"name":"columns","label":" ","sortable":false,"width":150,"align":"left",'
+        '"formatter":grid.pivotcolumns,"search":false,"frozen":true,"title":false }'
         )
     return ',\n'.join(result)
 
@@ -1758,7 +1848,7 @@ class GridPivot(GridReport):
   @classmethod
   def _generate_spreadsheet_data(reportclass, request, *args, **kwargs):
     # Create a workbook
-    wb = Workbook(optimized_write=True)
+    wb = Workbook(write_only=True)
     ws = wb.create_sheet(title=force_text(reportclass.model._meta.verbose_name))
 
     # Prepare the query
@@ -1870,6 +1960,8 @@ def _localize(value, decimal_separator):
     value = value()
   if isinstance(value, numericTypes):
     return decimal_separator == "," and six.text_type(value).replace(".", ",") or six.text_type(value)
+  elif isinstance(value, timedelta):
+    return value.total_seconds()
   elif isinstance(value, (list, tuple) ):
     return "|".join([ str(_localize(i, decimal_separator)) for i in value ])
   else:
@@ -1879,14 +1971,17 @@ def _localize(value, decimal_separator):
 def _getCellValue(data):
   if data is None:
     return ''
-  if isinstance(data, numericTypes):
+  elif isinstance(data, numericTypes) or isinstance(data, (date, datetime)):
     return data
-  return str(data)
+  elif isinstance(data, timedelta):
+    return data.total_seconds()
+  else:
+    return str(data)
 
 
 def exportWorkbook(request):
   # Create a workbook
-  wb = Workbook(optimized_write=True)
+  wb = Workbook(write_only=True)
 
   # Loop over all selected entity types
   ok = False
@@ -1908,6 +2003,11 @@ def exportWorkbook(request):
       header = []
       source = False
       lastmodified = False
+      try:
+        # The admin model of the class can define some fields to exclude from the export
+        exclude = data_site._registry[model].exclude
+      except:
+        exclude = None
       for i in model._meta.fields:
         if i.name in ['lft', 'rght', 'lvl']:
           continue  # Skip some fields of HierarchyModel
@@ -1915,8 +2015,8 @@ def exportWorkbook(request):
           source = True  # Put the source field at the end
         elif i.name == 'lastmodified':
           lastmodified = True  # Put the last-modified field at the very end
-        else:
-          fields.append(connections[request.database].ops.quote_name(i.column))
+        elif not (exclude and i.name in exclude and not i.name == model._meta.pk.name.lower()):
+          fields.append(i.column)
           header.append(force_text(i.verbose_name))
       if source:
         fields.append("source")
@@ -1932,18 +2032,13 @@ def exportWorkbook(request):
       # Loop over all records
       if issubclass(model, HierarchyModel):
         model.rebuildHierarchy(database=request.database)
-        cursor.execute(
-          "SELECT %s FROM %s ORDER BY lvl, 1" %
-          (",".join(fields), connections[request.database].ops.quote_name(model._meta.db_table))
-          )
+        query = model.objects.all().using(request.database).order_by('lvl', 'pk')
       else:
-        cursor.execute(
-          "SELECT %s FROM %s ORDER BY 1" %
-          (",".join(fields), connections[request.database].ops.quote_name(model._meta.db_table))
-          )
-      for rec in cursor.fetchall():
+        query = model.objects.all().using(request.database).order_by('pk')
+      for rec in query.values_list(*fields):
         ws.append([ _getCellValue(f) for f in rec ])
-    except:
+    except Exception as e:
+      print(e)
       pass  # Silently ignore the error and move on to the next entity.
 
   # Not a single entity to export
@@ -1973,7 +2068,7 @@ def importWorkbook(request):
   all_models = [ (ct.model_class(), ct.pk) for ct in ContentType.objects.all() if ct.model_class() ]
   with transaction.atomic(using=request.database):
     # Find all models in the workbook
-    wb = load_workbook(filename=request.FILES['spreadsheet'], use_iterators=True, data_only=True)
+    wb = load_workbook(filename=request.FILES['spreadsheet'], read_only=True, data_only=True)
     models = []
     for ws_name in wb.get_sheet_names():
       # Find the model
@@ -1995,17 +2090,7 @@ def importWorkbook(request):
         models.append( (ws_name, model, contenttype_id, deps) )
 
     # Sort the list of models, based on dependencies between models
-    cnt = len(models)
-    ok = False
-    while not ok:
-      ok = True
-      for i in range(cnt):
-        for j in range(i + 1, cnt):
-          if models[i][1] in models[j][3]:
-            # A subsequent model i depends on model i. The list ordering is
-            # thus not ok yet. We move this element to the end of the list.
-            models.append(models.pop(i))
-            ok = False
+    models = GridReport.sort_models(models)
 
     # Process all rows in each worksheet
     for ws_name, model, contenttype_id, dependencies in models:
@@ -2018,11 +2103,26 @@ def importWorkbook(request):
       changed = 0
       added = 0
       numerrors = 0
+
+      try:
+        # The admin model of the class can define some fields to exclude from the import
+        exclude = data_site._registry[model].exclude
+      except:
+        exclude = None
+
       for row in ws.iter_rows():
         with transaction.atomic(using=request.database):
           rownum += 1
           if rownum == 1:
             # Process the header row with the field names
+            
+            # Collect required fields
+            required_fields = set()
+            for i in model._meta.fields:
+              if not i.blank and i.default == NOT_PROVIDED:
+                required_fields.add(i.name)
+                
+            # Validate all columns
             header_ok = True
             for cell in row:
               ok = False
@@ -2031,13 +2131,14 @@ def importWorkbook(request):
                 headers.append(False)
                 continue
               else:
-                value = value.lower()
+                value = value.lower()              
               for i in model._meta.fields:
                 if value == i.name.lower() or value == i.verbose_name.lower():
-                  if i.editable is True:
-                    headers.append(i)
+                  if i.editable and not (value != 'source' and exclude and value in exclude and not value == model._meta.pk.name.lower()):
+                    headers.append(i)                    
                   else:
                     headers.append(False)
+                  required_fields.discard(i.name)
                   ok = True
                   break
               if not ok:
@@ -2048,12 +2149,12 @@ def importWorkbook(request):
               if value == model._meta.pk.name.lower() \
                 or value == model._meta.pk.verbose_name.lower():
                   has_pk_field = True
-            if not has_pk_field and not isinstance(model._meta.pk, AutoField):
-              # The primary key is not an auto-generated id and it is not mapped in the input...
-              header_ok = False
+            if required_fields:
+              # We are missing some required fields
+              header_ok = True
               yield force_text(string_concat(
                 # Translators: Translation included with django
-                model._meta.verbose_name, ': ', _('Some keys were missing: %(keys)s') % {'keys': model._meta.pk.name}
+                model._meta.verbose_name, ': ', _('Some keys were missing: %(keys)s') % {'keys': ', '.join(required_fields)}
                 )) + '\n'
               numerrors += 1
             if not header_ok:
@@ -2078,6 +2179,15 @@ def importWorkbook(request):
                 if isinstance(headers[colnum], (IntegerField, AutoField)):
                   if isinstance(data, numericTypes):
                     data = int(data)
+                elif isinstance(headers[colnum], DurationField):
+                  data = str(data) if data is not None else None
+                elif isinstance(headers[colnum], (DateField, DateTimeField)):
+                  if isinstance(data, datetime):
+                    # Rounding to second
+                    if data.microsecond < 500000:
+                      data = data.replace(microsecond=0)
+                    else:
+                      data = data.replace(microsecond=0) + timedelta(seconds=1)
                 d[headers[colnum].name] = data
               colnum += 1
             # Step 2: Fill the form with data, either updating an existing

@@ -15,10 +15,12 @@
 # License along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 
+import jwt
 import re
 import threading
 
 from django.contrib import auth
+from django.contrib.auth import login
 from django.contrib.auth.models import AnonymousUser
 from django.middleware.locale import LocaleMiddleware as DjangoLocaleMiddleware
 from django.utils import translation
@@ -26,7 +28,7 @@ from django.db import DEFAULT_DB_ALIAS
 from django.http import Http404
 from django.conf import settings
 
-from freppledb.common.models import Scenario
+from freppledb.common.models import Scenario, User
 
 
 # A local thread variable to make the current request visible everywhere
@@ -41,8 +43,30 @@ class LocaleMiddleware(DjangoLocaleMiddleware):
     - user interface theme to be used
   """
   def process_request(self, request):
+    # Make request information available throughout the application
     setattr(_thread_locals, 'request', request)
-    if isinstance(request.user, AnonymousUser):
+
+    # Authentication through a web token, specified as an URL parameter
+    webtoken = request.GET.get('webtoken', None)
+    if webtoken:
+      # Decode the web token
+      try:
+        decoded = jwt.decode(
+          webtoken,
+          settings.DATABASES[request.database].get('SECRET_WEBTOKEN_KEY', settings.SECRET_KEY),
+          algorithms=['HS256']
+          )
+        user = User.objects.get(username=decoded['user'])
+        user.backend = settings.AUTHENTICATION_BACKENDS[0]
+        login(request, user)
+        request.session['navbar'] = decoded.get('navbar', True)
+        request.session['xframe_options_exempt'] = True
+      except:
+        raise Exception('Invalid web token or user')
+      language = request.user.language
+      request.theme = request.user.theme or settings.DEFAULT_THEME
+      request.pagesize = request.user.pagesize or settings.DEFAULT_PAGESIZE
+    elif isinstance(request.user, AnonymousUser):
       # Anonymous users don't have preferences
       language = 'auto'
       request.theme = settings.DEFAULT_THEME
@@ -63,8 +87,30 @@ class LocaleMiddleware(DjangoLocaleMiddleware):
     return None
 
   def process_response(self, request, response):
-    setattr(_thread_locals, 'request', None)
+    # Set a clickjacking protection x-frame-option header in the
+    # response UNLESS one the following conditions applies:
+    #  - a x-trame-options header is already populated
+    #  - the view was marked xframe_options_exempt
+    #  - a web token was used to authenticate the request
+    # See https://docs.djangoproject.com/en/1.10/ref/clickjacking/#module-django.middleware.clickjacking
+    # See https://en.wikipedia.org/wiki/Clickjacking
+    if not response.get('X-Frame-Options', None) \
+      and not getattr(response, 'xframe_options_exempt', False) \
+      and not request.session.get('xframe_options_exempt', False):
+        response['X-Frame-Options'] = getattr(settings, 'X_FRAME_OPTIONS', 'SAMEORIGIN').upper()
+
+    if not response.streaming:
+      setattr(_thread_locals, 'request', None)
+    # Note: Streaming response get the request field cleared in the
+    # request_finished signal handler
     return response
+
+
+def resetRequest(**kwargs):
+  """
+  Used as a request_finished signal handler.
+  """
+  setattr(_thread_locals, 'request', None)
 
 
 # Initialize the URL parsing middleware
@@ -89,33 +135,27 @@ class MultiDBMiddleware(object):
   """
   def process_request(self, request):
     request.user = auth.get_user(request)
-    for i in Scenario.objects.all().only('name', 'status'):
+    if not request.user or request.user.is_anonymous():
+      return
+    default_scenario = None
+    for i in request.user.scenarios:
+      if i.name == DEFAULT_DB_ALIAS:
+        default_scenario = i
       try:
-        if settings.DATABASES[i.name]['regexp'].match(request.path) and i.name != DEFAULT_DB_ALIAS:
-          if i.status != 'In use':
-            raise Http404('Scenario not in use')
+        if settings.DATABASES[i.name]['regexp'].match(request.path):
           request.prefix = '/%s' % i.name
           request.path_info = request.path_info[len(request.prefix):]
           request.path = request.path[len(request.prefix):]
           request.database = i.name
-          if request.user and not request.user.is_anonymous():
-            superuser = request.user.scenarios.get(i.name)
-            if superuser != None:
-              request.user._state.db = i.name
-              request.user.is_superuser = superuser
-            else:
-              raise Http404('Access to this scenario is not allowed')
+          request.scenario = i
+          request.user._state.db = i.name
+          request.user.is_superuser = i.is_superuser
           return
-      except Http404:
-        raise
       except:
         pass
     request.prefix = ''
     request.database = DEFAULT_DB_ALIAS
-    if request.user and not request.user.is_anonymous():
-      superuser = request.user.scenarios.get(DEFAULT_DB_ALIAS)
-      if superuser != None:
-        request.user._state.db = DEFAULT_DB_ALIAS
-        request.user.is_superuser = superuser
-      else:
-        raise Http404('Access to this scenario is not allowed')
+    if default_scenario:
+      request.scenario = default_scenario
+    else:      
+      request.scenario = Scenario(name=DEFAULT_DB_ALIAS)

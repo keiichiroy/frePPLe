@@ -24,9 +24,9 @@
 namespace frepple
 {
 
-template<class Location> DECLARE_EXPORT Tree utils::HasName<Location>::st;
-DECLARE_EXPORT const MetaCategory* Location::metadata;
-DECLARE_EXPORT const MetaClass* LocationDefault::metadata;
+template<class Location> Tree utils::HasName<Location>::st;
+const MetaCategory* Location::metadata;
+const MetaClass* LocationDefault::metadata;
 
 
 int Location::initialize()
@@ -51,31 +51,31 @@ int LocationDefault::initialize()
 }
 
 
-DECLARE_EXPORT Location::~Location()
+Location::~Location()
 {
   // Remove all references from buffers to this location
   for (Buffer::iterator buf = Buffer::begin();
       buf != Buffer::end(); ++buf)
     if (buf->getLocation() == this)
-      buf->setLocation(NULL);
+      buf->setLocation(nullptr);
 
   // Remove all references from resources to this location
   for (Resource::iterator res = Resource::begin();
       res != Resource::end(); ++res)
     if (res->getLocation() == this)
-      res->setLocation(NULL);
+      res->setLocation(nullptr);
 
   // Remove all references from operations to this location
   for (Operation::iterator oper = Operation::begin();
       oper != Operation::end(); ++oper)
     if (oper->getLocation() == this)
-      oper->setLocation(NULL);
+      oper->setLocation(nullptr);
 
   // Remove all references from demands to this location
   for (Demand::iterator dmd = Demand::begin();
       dmd != Demand::end(); ++dmd)
     if (dmd->getLocation() == this)
-      dmd->setLocation(NULL);
+      dmd->setLocation(nullptr);
 
   // Remove all item suppliers referencing this location
   for (Supplier::iterator sup = Supplier::begin();

@@ -126,7 +126,7 @@ def runTestSuite():
         # These test verify other aspects of the application or broken, unsupported features.
         excluded = [
           "xml_remote", "scalability_1", "scalability_2", "scalability_3",
-          "jobshop", "multithreading", "setup_1", "setup_2", "setup_3"
+          "jobshop", "multithreading", "setup_1", "setup_2", "setup_3", "sample_module"
           ]
         break
     for o, a in opts:
@@ -209,11 +209,11 @@ def runTestSuite():
 
     # Finally, run the test suite now
     if 'FREPPLE_HOME' in os.environ:
-      print("Running", AllTests.countTestCases(), 
-         "tests from directory", testdir, 
+      print("Running", AllTests.countTestCases(),
+         "tests from directory", testdir,
          "with FREPPLE_HOME", os.environ['FREPPLE_HOME'])
     else:
-      print("Running", AllTests.countTestCases(), 
+      print("Running", AllTests.countTestCases(),
          "tests from directory", testdir)
     result = unittest.TextTestRunner(verbosity=2,descriptions=False).run(AllTests)
     if not result.wasSuccessful(): sys.exit(1)

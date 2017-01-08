@@ -20,10 +20,8 @@ from django.utils.encoding import force_text
 from django.utils.translation import ugettext_lazy as _
 from django.utils.text import capfirst
 
-from freppledb.input.models import Resource
-from freppledb.output.models import LoadPlan
+from freppledb.input.models import Resource, OperationPlanResource
 from freppledb.common.models import Parameter
-from freppledb.common.db import python_date, sql_max, string_agg
 from freppledb.common.report import GridReport, GridPivot
 from freppledb.common.report import GridFieldText, GridFieldNumber, GridFieldDateTime, GridFieldBool, GridFieldInteger
 
@@ -38,9 +36,11 @@ class OverviewReport(GridPivot):
   model = Resource
   permissions = (("view_resource_report", "Can view resource report"),)
   editable = False
+  help_url = 'user-guide/user-interface/plan-analysis/resource-report.html'
+
   rows = (
-    GridFieldText('resource', title=_('resource'), key=True, editable=False, field_name='name', formatter='detail', extra="role:'input/resource'"),
-    GridFieldText('location', title=_('location'), editable=False, field_name='location__name', formatter='detail', extra="role:'input/location'"),
+    GridFieldText('resource', title=_('resource'), key=True, editable=False, field_name='name', formatter='detail', extra='"role":"input/resource"'),
+    GridFieldText('location', title=_('location'), editable=False, field_name='location__name', formatter='detail', extra='"role":"input/location"'),
     GridFieldText('avgutil', title=_('utilization %'), field_name='util', formatter='percentage', editable=False, width=100, align='center', search=False),
     )
   crosses = (
@@ -110,7 +110,7 @@ class OverviewReport(GridPivot):
       on res2.lft between res.lft and res.rght
       -- Utilization info
       left join out_resourceplan
-      on res2.name = out_resourceplan.theresource
+      on res2.name = out_resourceplan.resource
       and d.startdate <= out_resourceplan.startdate
       and d.enddate > out_resourceplan.startdate
       and out_resourceplan.startdate >= '%s'
@@ -118,15 +118,15 @@ class OverviewReport(GridPivot):
       -- Average utilization info
       left join (
                 select
-                  theresource,
+                  resource,
                   ( coalesce(sum(out_resourceplan.load),0) + coalesce(sum(out_resourceplan.setup),0) )
-                   * 100.0 / coalesce(%s,1) as avg_util
+                   * 100.0 / coalesce(greatest(sum(out_resourceplan.available), 0.0001),1) as avg_util
                 from out_resourceplan
                 where out_resourceplan.startdate >= '%s'
                 and out_resourceplan.startdate < '%s'
-                group by theresource
+                group by resource
                 ) plan_summary
-      on res2.name = plan_summary.theresource
+      on res2.name = plan_summary.resource
       -- Grouping and sorting
       group by res.name, res.location_id, res.type, d.bucket, d.startdate
       order by %s, d.startdate
@@ -136,7 +136,6 @@ class OverviewReport(GridPivot):
         request.report_enddate,
         connections[basequery.db].ops.quote_name('resource'),
         request.report_startdate, request.report_enddate,
-        sql_max('sum(out_resourceplan.available)', '0.0001'),
         request.report_startdate, request.report_enddate, sortsql
       )
     cursor.execute(query, baseparams)
@@ -152,7 +151,7 @@ class OverviewReport(GridPivot):
         'location': row[1],
         'avgutil': round(row[2], 2),
         'bucket': row[3],
-        'startdate': python_date(row[4]),
+        'startdate': row[4].date(),
         'available': round(row[5], 1),
         'unavailable': round(row[6], 1),
         'load': round(row[7], 1),
@@ -163,32 +162,26 @@ class OverviewReport(GridPivot):
 
 class DetailReport(GridReport):
   '''
-  A list report to show loadplans.
+  A list report to show OperationPlanResources.
   '''
   template = 'output/loadplan.html'
   title = _("Resource detail report")
-  model = LoadPlan
+  model = OperationPlanResource
   permissions = (("view_resource_report", "Can view resource report"),)
   frozenColumns = 0
   editable = False
   multiselect = False
+  help_url = 'user-guide/user-interface/plan-analysis/resource-detail-report.html'
 
   @ classmethod
   def basequeryset(reportclass, request, args, kwargs):
     if args and args[0]:
-      base = LoadPlan.objects.filter(theresource__exact=args[0])
+      base = OperationPlanResource.objects.filter(resource__exact=args[0])
     else:
-      base = LoadPlan.objects
-    return base.select_related() \
-      .extra(select={
-        'operation_in': "select name from operation where out_operationplan.operation = operation.name",
-        'demand': ("select %s(q || ' : ' || d, ', ') from ("
-                   "select round(sum(quantity)) as q, demand as d "
-                   "from out_demandpegging "
-                   "where out_demandpegging.operationplan = out_loadplan.operationplan_id "
-                   "group by demand order by 1 desc, 2) peg"
-                   % string_agg())
-        })
+      base = OperationPlanResource.objects
+    return base.select_related().extra(select={
+      'pegging': "(select string_agg(value || ' : ' || key, ', ') from (select key, value from json_each_text(plan) order by key desc) peg)"
+      })
 
   @classmethod
   def extra_context(reportclass, request, *args, **kwargs):
@@ -197,16 +190,18 @@ class DetailReport(GridReport):
     return {'active_tab': 'plandetail'}
 
   rows = (
-    GridFieldText('theresource', title=_('resource'), key=True, editable=False, formatter='detail', extra="role:'input/resource'"),
-    GridFieldText('operationplan__operation', title=_('operation'), editable=False, formatter='detail', extra="role:'input/operation'"),
-    GridFieldDateTime('startdate', title=_('start date'), editable=False),
-    GridFieldDateTime('enddate', title=_('end date'), editable=False),
+    GridFieldInteger('id', title='internal id', key=True, editable=False, hidden=True),
+    GridFieldText('resource', title=_('resource'), editable=False, formatter='detail', extra='"role":"input/resource"'),
+    GridFieldInteger('operationplan__id', title=_('id'), editable=False),    
+    GridFieldText('operationplan__reference', title=_('reference'), editable=False),
+    GridFieldText('operationplan__type', title=_('type'), field_name='operationplan__type', editable=False),
+    GridFieldText('operationplan__operation', title=_('operation'), editable=False, formatter='detail', extra='"role":"input/operation"'),
+    GridFieldDateTime('operationplan__startdate', title=_('start date'), editable=False),
+    GridFieldDateTime('operationplan__enddate', title=_('end date'), editable=False),
     GridFieldNumber('operationplan__quantity', title=_('operationplan quantity'), editable=False),
-    GridFieldText('demand', title=_('demand quantity'), formatter='demanddetail', width=300, editable=False),
+    GridFieldText('pegging', title=_('demand quantity'), formatter='demanddetail', extra='"role":"input/demand"', width=300, editable=False, sortable=False),
     GridFieldNumber('quantity', title=_('load quantity'), editable=False),
     GridFieldNumber('operationplan__criticality', title=_('criticality'), editable=False),
-    GridFieldBool('operationplan__locked', title=_('locked'), editable=False),
-    GridFieldNumber('operationplan__unavailable', title=_('unavailable'), editable=False),
-    GridFieldInteger('operationplan', title=_('operationplan'), editable=False),
+    GridFieldBool('operationplan__status', title=_('status'), editable=False),
     GridFieldText('setup', title=_('setup'), editable=False),
     )

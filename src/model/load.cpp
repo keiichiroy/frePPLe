@@ -23,8 +23,8 @@
 namespace frepple
 {
 
-DECLARE_EXPORT const MetaCategory* Load::metadata;
-DECLARE_EXPORT const MetaClass* LoadDefault::metadata;
+const MetaCategory* Load::metadata;
+const MetaClass* LoadDefault::metadata;
 
 
 int Load::initialize()
@@ -52,7 +52,7 @@ int Load::initialize()
 }
 
 
-DECLARE_EXPORT Load::~Load()
+Load::~Load()
 {
   // Set a flag to make sure the level computation is triggered again
   HasLevel::triggerLazyRecomputation();
@@ -76,7 +76,7 @@ DECLARE_EXPORT Load::~Load()
 }
 
 
-DECLARE_EXPORT void Load::setOperation(Operation* o)
+void Load::setOperation(Operation* o)
 {
   // Validate the input
   if (!setup.empty() && o)
@@ -95,7 +95,7 @@ DECLARE_EXPORT void Load::setOperation(Operation* o)
 }
 
 
-DECLARE_EXPORT void Load::setSetup(const string& n)
+void Load::setSetup(const string& n)
 {
   // Validate the input
   if (!n.empty() && getOperation())
@@ -192,23 +192,23 @@ PyObject* Load::create(PyTypeObject* pytype, PyObject* args, PyObject* kwds)
   catch (...)
   {
     PythonType::evalException();
-    return NULL;
+    return nullptr;
   }
 }
 
 
-DECLARE_EXPORT Object* Load::finder(const DataValueDict& d)
+Object* Load::finder(const DataValueDict& d)
 {
   // Check operation
   const DataValue* tmp = d.get(Tags::operation);
   if (!tmp)
-    return NULL;
+    return nullptr;
   Operation* oper = static_cast<Operation*>(tmp->getObject());
 
   // Check resource field
   tmp = d.get(Tags::resource);
   if (!tmp)
-    return NULL;
+    return nullptr;
   Resource* res = static_cast<Resource*>(tmp->getObject());
 
   // Walk over all loads of the operation, and return
@@ -244,7 +244,7 @@ DECLARE_EXPORT Object* Load::finder(const DataValueDict& d)
       continue;
     return const_cast<Load*>(&*fl);
   }
-  return NULL;
+  return nullptr;
 }
 
 } // end namespace

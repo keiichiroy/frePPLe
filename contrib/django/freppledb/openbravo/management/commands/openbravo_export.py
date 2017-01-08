@@ -29,7 +29,7 @@ from django.conf import settings
 
 from freppledb.common.models import Parameter
 from freppledb.execute.models import Task
-from freppledb.openbravo.utils import get_data, post_data, delete_data
+from freppledb.openbravo.utils import get_data
 
 
 class Command(BaseCommand):
@@ -47,6 +47,10 @@ class Command(BaseCommand):
     make_option(
       '--task', dest='task', type='int',
       help='Task identifier (generated automatically if not provided)'
+      ),
+    make_option(
+      '--filter', action="store_true", dest='filter', default = False,
+      help='Use filter set for automated exports'
       ),
     )
 
@@ -69,11 +73,12 @@ class Command(BaseCommand):
       self.database = DEFAULT_DB_ALIAS
     if self.database not in settings.DATABASES.keys():
       raise CommandError("No database settings known for '%s'" % self.database )
+    self.filteredexport = 'filter' in options
 
     # Pick up configuration parameters
     self.openbravo_user = Parameter.getValue("openbravo.user", self.database)
     # Passwords in djangosettings file are preferably used
-    self.openbravo_password = settings.OPENBRAVO_PASSWORDS.get(self.database)
+    self.openbravo_password = settings.OPENBRAVO_PASSWORDS.get(self.database, None)
     if not self.openbravo_password:
       self.openbravo_password = Parameter.getValue("openbravo.password", self.database)
     self.openbravo_host = Parameter.getValue("openbravo.host", self.database)
@@ -116,9 +121,9 @@ class Command(BaseCommand):
 
       # Look up the id of the Openbravo user
       query = urllib.parse.quote("name='%s'" % self.openbravo_user)
-      print ("/openbravo/ws/dal/ADUser?where=%s&includeChildren=false" % query)
+      print ("/ws/dal/ADUser?where=%s&includeChildren=false" % query)
       data = get_data(
-        "/openbravo/ws/dal/ADUser?where=%s&includeChildren=false" % query,
+        "/ws/dal/ADUser?where=%s&includeChildren=false" % query,
         self.openbravo_host,
         self.openbravo_user,
         self.openbravo_password
@@ -134,7 +139,7 @@ class Command(BaseCommand):
       # Look up the id of the Openbravo organization id
       query = urllib.parse.quote("name='%s'" % self.openbravo_organization)
       data = get_data(
-        "/openbravo/ws/dal/Organization?where=%s&includeChildren=false" % query,
+        "/ws/dal/Organization?where=%s&includeChildren=false" % query,
         self.openbravo_host,
         self.openbravo_user,
         self.openbravo_password
@@ -148,18 +153,7 @@ class Command(BaseCommand):
         raise CommandError("Can't find organization id in Openbravo")
 
       # Upload all data
-      # We have two modes of bringing the results to openbravo:
-      #  - generate purchase requisitions and manufacturing work orders
-      #  - generate purchasing plans (which is the object where
-      #    openbravo's MRP stores its results as well)
-      # The first one is the recommended approach
-      exportPurchasingPlan = Parameter.getValue("openbravo.exportPurchasingPlan", self.database, default="false")
-      if exportPurchasingPlan == "true":
-        self.export_purchasingplan(cursor)
-      else:
-        self.export_procurement_order(cursor)
-        self.export_work_order(cursor)
-        self.export_sales_order(cursor)
+      self.exportData(task, cursor)
 
       # Log success
       task.status = 'Done'
@@ -178,6 +172,21 @@ class Command(BaseCommand):
       settings.DEBUG = tmp_debug
 
 
+  # We have two modes of bringing the results to openbravo:
+  #  - generate purchase requisitions and manufacturing work orders
+  #  - generate purchasing plans (which is the object where
+  #    openbravo's MRP stores its results as well)
+  # The first one is the recommended approach
+  def exportData(self, task, cursor):
+    exportPurchasingPlan = Parameter.getValue("openbravo.exportPurchasingPlan", self.database, default="false")
+    if exportPurchasingPlan.lower() == "true":
+      self.export_purchasingplan(cursor)
+    else:
+      self.export_procurement_order(cursor)
+      self.export_work_order(cursor)
+      self.export_sales_order(cursor)
+
+
   # Update the committed date of sales orders
   #   - uploading for each frePPLe demand whose subcategory = 'openbravo'
   #   - mapped fields frePPLe -> Openbravo OrderLine
@@ -187,14 +196,24 @@ class Command(BaseCommand):
       starttime = time()
       if self.verbosity > 0:
         print("Exporting expected delivery date of sales orders...")
-      cursor.execute('''select demand.source, max(plandate)
+
+      fltr = Parameter.getValue('openbravo.filter_export_sales_order', self.database, "")
+      if self.filteredexport and fltr:
+        filter_expression = 'and (%s) ' % fltr
+      else:
+        filter_expression = ""
+
+      cursor.execute('''select demand.source, max(operationplan.enddate)
           from demand
-          left outer join out_demand
-            on demand.name = out_demand.demand
+          inner join operationplan 
+            on operationplan.demand_id = demand.name
+          inner join item on demand.item_id = item.name
+          inner join location on demand.location_id = location.name
+          inner join customer on demand.customer_id = customer.name
           where demand.subcategory = 'openbravo'
-            and status = 'open'
-          group by source
-         ''')
+            and demand.status = 'open' %s
+          group by demand.source
+         ''' % filter_expression)
       count = 0
       body = [
         '<?xml version="1.0" encoding="UTF-8"?>',
@@ -208,10 +227,10 @@ class Command(BaseCommand):
       if self.verbosity > 0:
         print ('')
       body.append('</ob:Openbravo>')
-      post_data(
-        '\n'.join(body),
-        '/openbravo/ws/dal/OrderLine',
-        self.openbravo_host, self.openbravo_user, self.openbravo_password
+      get_data(        
+        '/ws/dal/OrderLine',
+        self.openbravo_host, self.openbravo_user, self.openbravo_password,
+        method='POST', xmldoc='\n'.join(body)
         )
       if self.verbosity > 0:
         print("Updated %d sales orders in %.2f seconds" % (count, (time() - starttime)))
@@ -233,6 +252,21 @@ class Command(BaseCommand):
   #        - operationplan.startdate -> needByDate
   #        - 100 (id for 'unit') -> product_uom
   def export_procurement_order(self, cursor):
+
+    def parse(conn):
+      # Stores the processplan documents
+      records = 0
+      root = None
+      for event, elem in conn:
+        if not root:
+          root = elem
+          continue
+        if event != 'end' or elem.tag != 'ManufacturingProcessPlan':
+          continue
+        records += 1
+        processplans[elem.get('id')] = elem
+      return records
+    
     requisition = '''<?xml version="1.0" encoding="UTF-8"?>
         <ob:Openbravo xmlns:ob="http://www.openbravo.com">
         <ProcurementRequisition id="%s">
@@ -264,7 +298,10 @@ class Command(BaseCommand):
         '<ob:Openbravo xmlns:ob="http://www.openbravo.com">'
         ]
       query = urllib.parse.quote("documentStatus='DR' and documentNo like 'frePPLe %'")
-      conn = self.get_data("/openbravo/ws/dal/ProcurementRequisition?where=%s&includeChildren=false" % query)[0]
+      data = get_data("/ws/dal/ProcurementRequisition?where=%s&includeChildren=false" % query,
+        self.openbravo_host, self.openbravo_user, self.openbravo_password
+        )
+      conn = iterparse(StringIO(data), events=('end',))
       for event, elem in conn:
         if event != 'end' or elem.tag != 'ProcurementRequisition':
           continue
@@ -272,10 +309,10 @@ class Command(BaseCommand):
         body.append('<documentStatus>CL</documentStatus>')
         body.append('</ProcurementRequisition>')
       body.append('</ob:Openbravo>')
-      post_data(
-        '\n'.join(body),
-        '/openbravo/ws/dal/ProcurementRequisition',
-        self.openbravo_host, self.openbravo_user, self.openbravo_password
+      get_data(
+        '/ws/dal/ProcurementRequisition',
+        self.openbravo_host, self.openbravo_user, self.openbravo_password,
+        method='POST', xmldoc='\n'.join(body)
         )
 
       # Create new requisition
@@ -285,37 +322,63 @@ class Command(BaseCommand):
       count = 0
       now = datetime.now().strftime('%Y/%m/%d %H:%M:%S')
       identifier = uuid4().hex
+
+      filter_expression_po = Parameter.getValue('openbravo.filter_export_purchase_order', self.database, "")
+      if self.filteredexport and filter_expression_po:
+        filter_expression_po = ' and (%s) ' % filter_expression_po
+      else:
+        filter_expression_po = ""
+
+      filter_expression_do = Parameter.getValue('openbravo.filter_export_distribution_order', self.database, "")
+      if self.filteredexport and filter_expression_do:
+        filter_expression_do = ' and (%s) ' %filter_expression_do
+      else:      
+        filter_expression_do = ""
+
       body = [requisition % (identifier, self.organization_id, now, now, self.openbravo_user_id, self.openbravo_user)]
-      cursor.execute('''select item.source, location.source, enddate, sum(out_operationplan.quantity)
-         FROM out_operationplan
-         inner join out_flowplan
-           ON operationplan_id = out_operationplan.id
-           AND out_flowplan.quantity > 0
+      cursor.execute('''
+         select item.source, location.source, enddate, quantity
+         FROM operationplan
          inner JOIN buffer
-           ON buffer.name = out_flowplan.thebuffer
+           ON buffer.item_id = operationplan.item_id
+           AND buffer.location_id = operationplan.location_id
            AND buffer.subcategory = 'openbravo'
          inner join item
-           ON buffer.item_id = item.name
+           ON item.name = operationplan.item_id
            and item.source is not null
            and item.subcategory = 'openbravo'
          inner join location
-           ON buffer.location_id = location.name
+           ON operationplan.location_id = location.name
            and location.source is not null
            and location.subcategory = 'openbravo'
-         where out_operationplan.operation like 'Purchase %'
-           and out_operationplan.locked = 'f'
-         group by location.source, item.source, enddate
-         ''')
+         where operationplan.status = 'proposed' and operationplan.type = 'PO' %s
+       union all
+       select item.source, location.source, enddate, quantity
+         FROM operationplan
+         inner JOIN buffer
+           ON buffer.item_id = operationplan.item_id
+           AND buffer.location_id = operationplan.destination_id
+           AND buffer.subcategory = 'openbravo'
+         inner join item
+           ON item.name = operationplan.item_id
+           and item.source is not null
+           and item.subcategory = 'openbravo'
+         inner join location
+           ON operationplan.destination_id = location.name
+           and location.source is not null
+           and location.subcategory = 'openbravo'
+         where operationplan.status = 'proposed' and operationplan.type = 'DO' %s
+         ''' % (filter_expression_po,filter_expression_do))
       for i in cursor.fetchall():
         body.append(requisitionline % (identifier, i[0], i[3], i[2].strftime("%Y-%m-%dT%H:%M:%S"), count))
         count += 1
       body.append('</procurementRequisitionLineList>')
       body.append('</ProcurementRequisition>')
       body.append('</ob:Openbravo>')
-      post_data(
-        '\n'.join(body),
-        '/openbravo/ws/dal/ProcurementRequisition',
-        self.openbravo_host, self.openbravo_user, self.openbravo_password
+      get_data(
+        '/ws/dal/ProcurementRequisition',
+        self.openbravo_host, self.openbravo_user, self.openbravo_password,
+        method='POST', xmldoc='\n'.join(body)
         )
       if self.verbosity > 0:
         print("Created requisition with %d lines in %.2f seconds" % (count, (time() - starttime)))
@@ -329,10 +392,10 @@ class Command(BaseCommand):
       #  '</ProcurementRequisition>',
       #  '</ob:Openbravo>'
       #  ]
-      #post_data(
-      #  '\n'.join(body),
-      #  '/openbravo/ws/dal/ProcurementRequisition/',
-      #  self.openbravo_host, self.openbravo_user, self.openbravo_password
+      #get_data(
+      #  '/ws/dal/ProcurementRequisition/',
+      #  self.openbravo_host, self.openbravo_user, self.openbravo_password,
+      #  method='POST', xmldoc='\n'.join(body)
       #  )
 
     except Exception as e:
@@ -344,99 +407,119 @@ class Command(BaseCommand):
   #   - mapped fields frePPLe -> Openbravo ManufacturingWorkRequirement
   #        -
   def export_work_order(self, cursor):
-    try:
+
+    fltr = Parameter.getValue('openbravo.filter_export_manufacturing_order', self.database, "")
+    if self.filteredexport and fltr:
+      filter_expression = 'and (%s) ' % fltr
+    else:
+      filter_expression = ""
+
+    if True: #try:
       starttime = time()
       if self.verbosity > 0:
         print("Exporting work orders...")
       cursor.execute('''
-        select operation.source, out_operationplan.quantity, startdate, enddate
-        from out_operationplan
+        select operation.source, operationplan.quantity, startdate, enddate
+        from operationplan
         inner join operation
-          on out_operationplan.operation = operation.name
+          on operationplan.operation_id = operation.name
           and operation.type = 'routing'
-        where operation like 'Process%'
-        ''')
+          and operation.name like 'Process%%'
+        where operationplan.type = 'MO' %s ''' % filter_expression)
       count = 0
       body = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<ob:Openbravo xmlns:ob="http://www.openbravo.com">'
         ]
       for i in cursor.fetchall():
-        # TODO generate documentno? <documentNo>10000000</documentNo>
         body.append('''<ManufacturingWorkRequirement>
-           <organization id="%s" entity-name="Organization"/>
-           <active>true</active>
-           <processPlan id="%s" entity-name="ManufacturingProcessPlan"/>
-           <quantity>%s</quantity>
-           <startingDate>%s.0Z</startingDate>
-           <endingDate>%s.0Z</endingDate>
-           <closed>false</closed>
-           <insertProductsAndorPhases>true</insertProductsAndorPhases>
-           <includePhasesWhenInserting>true</includePhasesWhenInserting>
-           <processed>false</processed>
-           </ManufacturingWorkRequirement>
-           ''' % (self.organization_id, i[0], i[1],
-                  i[2].strftime("%Y-%m-%dT%H:%M:%S"), i[3].strftime("%Y-%m-%dT%H:%M:%S")
-                  ))
+          <organization id="%s" entity-name="Organization" identifier="%s"/>
+          <active>true</active>
+          <processPlan id="%s" entity-name="ManufacturingProcessPlan"/>
+          <quantity>%s</quantity>
+          <startingDate>%s</startingDate>
+          <endingDate>%s</endingDate>
+          <closed>false</closed>
+          <insertProductsAndorPhases>false</insertProductsAndorPhases>
+          <processed>false</processed>
+          <includePhasesWhenInserting>true</includePhasesWhenInserting>
+          <processQuantity>0</processQuantity>
+          <createworkrequirement>false</createworkrequirement>
+          <closedStat>false</closedStat>
+          </ManufacturingWorkRequirement>
+           ''' % (
+             self.organization_id, self.openbravo_organization,
+             i[0], i[1], i[2].strftime("%Y-%m-%d %H:%M:%S"), 
+             i[3].strftime("%Y-%m-%d %H:%M:%S")
+             ))
         count += 1
         if self.verbosity > 0 and count % 500 == 1:
           print('.', end="")
       if self.verbosity > 0:
         print('')
       body.append('</ob:Openbravo>')
-      post_data(
-        '\n'.join(body),
-        '/openbravo/ws/dal/ManufacturingWorkRequirement',
-        self.openbravo_host, self.openbravo_user, self.openbravo_password
+      get_data(
+        '/ws/org.openbravo.warehouse.advancedwarehouseoperations.manufacturing.AddWorkRequirementsWS',
+        self.openbravo_host, self.openbravo_user, self.openbravo_password,
+        method="PUT",
+        xmldoc='\n'.join(body),
+        headers={'DoProcess': 'true'}
         )
       if self.verbosity > 0:
         print("Updated %d work orders in %.2f seconds" % (count, (time() - starttime)))
-    except Exception as e:
-      raise CommandError("Error updating work orders: %s" % e)
+    #except Exception as e:
+    #  raise CommandError("Error updating work orders: %s" % e)
 
 
   def export_purchasingplan(self, cursor):
     purchaseplan = '''<MRPPurchasingRun id="%s">
-      <organization id="%s" entity-name="Organization"/>
+      <organization id="%s" entity-name="Organization" identifier="%s"/>
       <active>true</active>
       <name>FREPPLE %s</name>
       <description>Bulk export</description>
       <timeHorizon>365</timeHorizon>
-      <timeHorizon>365</timeHorizon>
       <safetyLeadTime>0</safetyLeadTime>
       <mRPPurchasingRunLineList>'''
-    purchasingplanline = '''<ProcurementRequisitionLine>
+    purchasingplanline = '''<MRPPurchasingRunLine id="%s">
       <active>true</active>
-      <requisition id="%s" entity-name="ProcurementRequisition"/>
+      <purchasingPlan id="%s" entity-name="MRPPurchasingRun"/>
       <product id="%s" entity-name="Product"/>
       <quantity>%s</quantity>
-      <uOM id="100" entity-name="UOM" identifier="Unit"/>
-      <requisitionLineStatus>O</requisitionLineStatus>
-      <needByDate>%s.0Z</needByDate>
-      <lineNo>%s</lineNo>
-      </ProcurementRequisitionLine>'''
+      <requiredQuantity>%s</requiredQuantity>
+      <plannedDate>%s.0Z</plannedDate>
+      <plannedOrderDate>%s.0Z</plannedOrderDate>
+      <transactionType>%s</transactionType>
+      <businessPartner id="%s"/>
+      <fixed>true</fixed>
+      <completed>false</completed>      
+      </MRPPurchasingRunLine>'''
     try:
       # Close the old purchasing plan generated by frePPLe
       if self.verbosity > 0:
-        print("Closing previous purchasing plan generated from frePPLe")
-      body = [
-        '<?xml version="1.0" encoding="UTF-8"?>',
-        '<ob:Openbravo xmlns:ob="http://www.openbravo.com">'
-        ]
-      query = urllib.parse.quote("createdBy='%s' and purchasingPlan.description='Bulk export'" % self.openbravo_user_id)
-      data = delete_data(
-        "/openbravo/ws/dal/MRPPurchasingRunLine?where=%s" % query,
+        print("Closing previous purchasing plan generated from frePPLe")  # 
+      query = urllib.parse.quote("createdBy='%s' "
+          # TODO the filter in the next line generates an incorrect query in Openbravo
+          "and purchasingPlan.description='Bulk export' "
+          "and salesOrderLine is null and workRequirement is null "
+          "and requisitionLine is null" % self.openbravo_user_id)
+      data = get_data(
+        "/ws/dal/MRPPurchasingRunLine?where=%s" % query,
         self.openbravo_host,
         self.openbravo_user,
-        self.openbravo_password
+        self.openbravo_password,
+        method="DELETE"
         )
-      query = urllib.parse.quote("createdBy='%s' and description='Bulk export'" % self.openbravo_user_id)
-      data = delete_data(
-        "/openbravo/ws/dal/MRPPurchasingRun?where=%s" % query,
-        self.openbravo_host,
-        self.openbravo_user,
-        self.openbravo_password
-        )
+
+      if self.filteredexport:        
+        filter_expression_po = Parameter.getValue('openbravo.filter_export_purchase_order', self.database, "")
+        if filter_expression_po:
+          filter_expression_po = ' and (%s) ' %filter_expression_po
+        filter_expression_do = Parameter.getValue('openbravo.filter_export_distribution_order', self.database, "")
+        if filter_expression_do:
+          filter_expression_do = ' and (%s) ' %filter_expression_do
+      else:
+        filter_expression_po = ""
+        filter_expression_do = ""
 
       # Create new purchase plan
       starttime = time()
@@ -445,38 +528,69 @@ class Command(BaseCommand):
       count = 0
       now = datetime.now().strftime('%Y/%m/%d %H:%M:%S')
       identifier = uuid4().hex
-      body = [purchaseplan % (identifier, self.organization_id, now),]
-      cursor.execute('''select item.source, location.source, enddate, sum(out_operationplan.quantity)
-         FROM out_operationplan
-         inner join out_flowplan
-           ON operationplan_id = out_operationplan.id
-           AND out_flowplan.quantity > 0
+      body = [
+        #'<?xml version="1.0" encoding="UTF-8"?>',
+        '<ob:Openbravo xmlns:ob="http://www.openbravo.com">',
+        purchaseplan % (identifier, self.organization_id, self.openbravo_organization, now)
+        ]
+      cursor.execute('''
+	       SELECT item.source, location.source, quantity, startdate, enddate, 'PO', supplier.source
+         FROM purchase_order
          inner JOIN buffer
-           ON buffer.name = out_flowplan.thebuffer
+           ON buffer.item_id = purchase_order.item_id
+           AND buffer.location_id = purchase_order.location_id
            AND buffer.subcategory = 'openbravo'
          inner join item
-           ON buffer.item_id = item.name
+           ON item.name = purchase_order.item_id
            and item.source is not null
            and item.subcategory = 'openbravo'
          inner join location
-           ON buffer.location_id = location.name
+           ON purchase_order.location_id = location.name
            and location.source is not null
            and location.subcategory = 'openbravo'
-         where out_operationplan.operation like 'Purchase %'
-           and out_operationplan.locked = 'f'
-         group by location.source, item.source, enddate
-         ''')
+         inner join supplier
+           on purchase_order.supplier_id = supplier.name
+           and supplier.source is not null
+           and supplier.subcategory = 'openbravo'
+         where status = 'proposed' %s
+         ''' % (filter_expression_po))
+# 	   union all
+# 	   select item.source, location.source, quantity, startdate, enddate, 'DO'
+#          FROM distribution_order
+#          inner JOIN buffer
+#            ON buffer.item_id = distribution_order.item_id
+#            AND buffer.location_id = distribution_order.destination_id
+#            AND buffer.subcategory = 'openbravo'
+#          inner join item
+#            ON item.name = distribution_order.item_id
+#            and item.source is not null
+#            and item.subcategory = 'openbravo'
+#          inner join location
+#            ON distribution_order.destination_id = location.name
+#            and location.source is not null
+#            and location.subcategory = 'openbravo'
+#          where status = 'proposed' %s
+#         ''' % (filter_expression_po,filter_expression_do))
+         
       for i in cursor.fetchall():
-        body.append(purchasingplanline % (identifier, i[0], i[3], i[2].strftime("%Y-%m-%dT%H:%M:%S"), count))
+        body.append(purchasingplanline % (
+          uuid4().hex, identifier, i[0], i[2], i[2],
+          i[3].strftime("%Y-%m-%d %H:%M:%S"), 
+          i[4].strftime("%Y-%m-%d %H:%M:%S"),
+          i[5], i[6]
+          ))
         count += 1
+        break
+        
       body.append('</mRPPurchasingRunLineList>')
       body.append('</MRPPurchasingRun>')
       body.append('</ob:Openbravo>')
-      post_data(
-        '\n'.join(body),
-        '/openbravo/ws/dal/MRPPurchasingRun',
-        self.openbravo_host, self.openbravo_user, self.openbravo_password
-        )
+      if count > 0:
+        get_data(
+          '/ws/dal/MRPPurchasingRun',
+          self.openbravo_host, self.openbravo_user, self.openbravo_password,
+          method="POST", xmldoc='\n'.join(body)
+          )
       if self.verbosity > 0:
         print("Created purchasing plan with %d lines in %.2f seconds" % (count, (time() - starttime)))
     except Exception as e:

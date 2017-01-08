@@ -55,6 +55,7 @@ void LibraryModel::initialize()
   nok += LoadPlan::initialize();
   nok += FlowPlan::initialize();
   nok += PeggingIterator::initialize();
+  nok += PeggingDemandIterator::initialize();
   nok += OperationPlan::initialize();
   nok += Load::initialize();
   nok += LoadPlanIterator::initialize();
@@ -69,6 +70,8 @@ void LibraryModel::initialize()
   nok += OperationRouting::initialize();
   nok += OperationItemSupplier::initialize();
   nok += OperationItemDistribution::initialize();
+  nok += OperationInventory::initialize();
+  nok += OperationDelivery::initialize();
   nok += OperationSetup::initialize();
   nok += ItemDistribution::initialize();
   nok += Location::initialize();
@@ -77,10 +80,10 @@ void LibraryModel::initialize()
   nok += BufferDefault::initialize();
   nok += BufferInfinite::initialize();
   nok += BufferProcure::initialize();
-  nok += Item::initialize();
-  nok += ItemDefault::initialize();
   nok += Demand::initialize();
   nok += DemandDefault::initialize();
+  nok += Item::initialize();
+  nok += ItemDefault::initialize();
   nok += SetupMatrixRule::initialize();
   nok += SetupMatrix::initialize();
   nok += SetupMatrixDefault::initialize();

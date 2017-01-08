@@ -24,16 +24,16 @@
 namespace frepple
 {
 
-template<class Operation> DECLARE_EXPORT Tree utils::HasName<Operation>::st;
-DECLARE_EXPORT const MetaCategory* Operation::metadata;
-DECLARE_EXPORT const MetaClass* OperationFixedTime::metadata,
+template<class Operation> Tree utils::HasName<Operation>::st;
+const MetaCategory* Operation::metadata;
+const MetaClass* OperationFixedTime::metadata,
                *OperationTimePer::metadata,
                *OperationRouting::metadata,
                *OperationSplit::metadata,
                *OperationAlternate::metadata,
                *OperationSetup::metadata;
-DECLARE_EXPORT Operation::Operationlist Operation::nosubOperations;
-DECLARE_EXPORT Operation* OperationSetup::setupoperation;
+Operation::Operationlist Operation::nosubOperations;
+Operation* OperationSetup::setupoperation;
 
 
 int Operation::initialize()
@@ -137,7 +137,7 @@ int OperationSetup::initialize()
 }
 
 
-DECLARE_EXPORT void Operation::removeSuperOperation(Operation *o)
+void Operation::removeSuperOperation(Operation *o)
 {
   if (!o) return;
   superoplist.remove(o);
@@ -157,7 +157,7 @@ DECLARE_EXPORT void Operation::removeSuperOperation(Operation *o)
 }
 
 
-DECLARE_EXPORT Operation::~Operation()
+Operation::~Operation()
 {
   // Delete all existing operationplans (even locked ones)
   deleteOperationPlans(true);
@@ -165,20 +165,34 @@ DECLARE_EXPORT Operation::~Operation()
   // The Flow and Load objects are automatically deleted by the destructor
   // of the Association list class.
 
-  // Remove the reference to this operation from all items
-  for (Item::iterator k = Item::begin(); k != Item::end(); ++k)
-    if (k->getOperation() == this)
-      k->setOperation(NULL);
+  // Unlink from item
+  if (item)
+  {
+    if (item->firstOperation == this)
+      // Remove from head
+      item->firstOperation = next;
+    else
+    {
+      // Remove from middle
+      Operation *j = item->firstOperation;
+      while (j->next && j->next != this)
+        j = j->next;
+      if (j)
+        j->next = next;
+      else
+        logger << "Error: Corrupted Operation list on Item" << endl;
+    }
+  }
 
   // Remove the reference to this operation from all demands
   for (Demand::iterator l = Demand::begin(); l != Demand::end(); ++l)
     if (l->getOperation() == this)
-      l->setOperation(NULL);
+      l->setOperation(nullptr);
 
   // Remove the reference to this operation from all buffers
   for (Buffer::iterator m = Buffer::begin(); m != Buffer::end(); ++m)
     if (m->getProducingOperation() == this)
-      m->setProducingOperation(NULL);
+      m->setProducingOperation(nullptr);
 
   // Remove the operation from its super-operations and sub-operations
   // Note that we are not using a for-loop since our function is actually
@@ -189,7 +203,7 @@ DECLARE_EXPORT Operation::~Operation()
 }
 
 
-DECLARE_EXPORT OperationRouting::~OperationRouting()
+OperationRouting::~OperationRouting()
 {
   // Note that we are not using a for-loop since our function is actually
   // updating the list of super-operations at the same time as we move
@@ -199,7 +213,7 @@ DECLARE_EXPORT OperationRouting::~OperationRouting()
 }
 
 
-DECLARE_EXPORT OperationSplit::~OperationSplit()
+OperationSplit::~OperationSplit()
 {
   // Note that we are not using a for-loop since our function is actually
   // updating the list of super-operations at the same time as we move
@@ -209,7 +223,7 @@ DECLARE_EXPORT OperationSplit::~OperationSplit()
 }
 
 
-DECLARE_EXPORT OperationAlternate::~OperationAlternate()
+OperationAlternate::~OperationAlternate()
 {
   // Note that we are not using a for-loop since our function is actually
   // updating the list of super-operations at the same time as we move
@@ -219,13 +233,13 @@ DECLARE_EXPORT OperationAlternate::~OperationAlternate()
 }
 
 
-DECLARE_EXPORT OperationPlan::iterator Operation::getOperationPlans() const
+OperationPlan::iterator Operation::getOperationPlans() const
 {
   return OperationPlan::iterator(this);
 }
 
 
-DECLARE_EXPORT OperationPlan* Operation::createOperationPlan (double q, Date s, Date e,
+OperationPlan* Operation::createOperationPlan (double q, Date s, Date e,
     Demand* l, OperationPlan* ow, unsigned long i,
     bool makeflowsloads) const
 {
@@ -235,7 +249,7 @@ DECLARE_EXPORT OperationPlan* Operation::createOperationPlan (double q, Date s, 
 }
 
 
-DECLARE_EXPORT DateRange Operation::calculateOperationTime
+DateRange Operation::calculateOperationTime
 (Date thedate, Duration duration, bool forward,
  Duration *actualduration) const
 {
@@ -389,7 +403,7 @@ DECLARE_EXPORT DateRange Operation::calculateOperationTime
 }
 
 
-DECLARE_EXPORT DateRange Operation::calculateOperationTime
+DateRange Operation::calculateOperationTime
 (Date start, Date end, Duration *actualduration) const
 {
   // Switch start and end if required
@@ -519,7 +533,7 @@ DECLARE_EXPORT DateRange Operation::calculateOperationTime
 }
 
 
-DECLARE_EXPORT void Operation::initOperationPlan (OperationPlan* opplan,
+void Operation::initOperationPlan (OperationPlan* opplan,
     double q, const Date& s, const Date& e, Demand* l, OperationPlan* ow,
     unsigned long i, bool makeflowsloads) const
 {
@@ -542,13 +556,29 @@ DECLARE_EXPORT void Operation::initOperationPlan (OperationPlan* opplan,
 }
 
 
-DECLARE_EXPORT void Operation::deleteOperationPlans(bool deleteLockedOpplans)
+Flow* Operation::findFlow(const Buffer* b, Date d) const
+{
+  for (flowlist::const_iterator fl = flowdata.begin();
+    fl != flowdata.end(); ++fl)
+  {
+    if (!fl->effectivity.within(d))
+      continue;
+    if (fl->getBuffer() == b)
+        return const_cast<Flow*>(&*fl);
+    else if (!fl->getBuffer() && fl->getItem() == b->getItem() && getLocation() == b->getLocation())
+      return const_cast<Flow*>(&*fl);
+  }
+  return nullptr;
+}
+
+
+void Operation::deleteOperationPlans(bool deleteLockedOpplans)
 {
   OperationPlan::deleteOperationPlans(this, deleteLockedOpplans);
 }
 
 
-DECLARE_EXPORT OperationPlanState OperationFixedTime::setOperationPlanParameters
+OperationPlanState OperationFixedTime::setOperationPlanParameters
 (OperationPlan* opplan, double q, Date s, Date e, bool preferEnd, bool execute) const
 {
   // Invalid call to the function, or locked operationplan.
@@ -607,7 +637,7 @@ DECLARE_EXPORT OperationPlanState OperationFixedTime::setOperationPlanParameters
 }
 
 
-DECLARE_EXPORT bool OperationFixedTime::extraInstantiate(OperationPlan* o)
+bool OperationFixedTime::extraInstantiate(OperationPlan* o)
 {
   // See if we can consolidate this operationplan with an existing one.
   // Merging is possible only when all the following conditions are met:
@@ -617,11 +647,12 @@ DECLARE_EXPORT bool OperationFixedTime::extraInstantiate(OperationPlan* o)
   //   - it doesn't load any resources of type default
   //   - both operationplans aren't locked
   //   - both operationplans have no owner
+  //     or both have an owner of the same operation and is of type operation_alternate
   //   - start and end date of both operationplans are the same
   //   - demand of both operationplans are the same
   //   - maximum operation size is not exceeded
   //   - alternate flowplans need to be on the same alternate
-  if (!o->getRawIdentifier() && !o->getLocked() && !o->getOwner())
+  if (!o->getRawIdentifier() && !o->getLocked())
   {
     // Verify we load no resources of type "default".
     // It's ok to merge operationplans which load "infinite" or "buckets" resources.
@@ -631,13 +662,26 @@ DECLARE_EXPORT bool OperationFixedTime::extraInstantiate(OperationPlan* o)
 
     // Loop through candidates
     OperationPlan::iterator x(this);
-    OperationPlan *y = NULL;
+    OperationPlan *y = nullptr;
     for (; x != OperationPlan::end() && *x < *o; ++x)
       y = &*x;
-    if (y && y->getDates() == o->getDates() && !y->getOwner()
+    if (y && y->getDates() == o->getDates()
         && y->getDemand() == o->getDemand() && !y->getLocked() && y->getRawIdentifier()
         && y->getQuantity() + o->getQuantity() < getSizeMaximum())
     {
+      if (o->getOwner())
+      {
+        // Both must have the same owner operation of type alternate
+        if (!y->getOwner())
+          return true;
+        else if (o->getOwner()->getOperation() != y->getOwner()->getOperation())
+          return true;
+        else if (o->getOwner()->getOperation()->getType() != *OperationAlternate::metadata)
+          return true;
+        else if (o->getOwner()->getDemand() != y->getOwner()->getDemand())
+          return true;
+     }
+
       // Check that the flowplans are on identical alternates and not of type fixed
       OperationPlan::FlowPlanIterator fp1 = o->beginFlowPlans();
       OperationPlan::FlowPlanIterator fp2 = y->beginFlowPlans();
@@ -658,12 +702,25 @@ DECLARE_EXPORT bool OperationFixedTime::extraInstantiate(OperationPlan* o)
       }
       // Merging with the 'next' operationplan
       y->setQuantity(y->getQuantity() + o->getQuantity());
+      if (o->getOwner())
+        o->setOwner(nullptr);
       return false;
     }
-    if (x!= OperationPlan::end() && x->getDates() == o->getDates() && !x->getOwner()
+    if (x!= OperationPlan::end() && x->getDates() == o->getDates()
         && x->getDemand() == o->getDemand() && !x->getLocked() && x->getRawIdentifier()
         && x->getQuantity() + o->getQuantity() < getSizeMaximum())
     {
+      if (o->getOwner())
+      {
+        // Both must have the same owner operation of type alternate
+        if (!x->getOwner())
+          return true;
+        else if (o->getOwner()->getOperation() != x->getOwner()->getOperation())
+          return true;
+        else if (o->getOwner()->getOperation()->getType() != *OperationAlternate::metadata)
+          return true;
+      }
+
       // Check that the flowplans are on identical alternates
       OperationPlan::FlowPlanIterator fp1 = o->beginFlowPlans();
       OperationPlan::FlowPlanIterator fp2 = x->beginFlowPlans();
@@ -680,6 +737,8 @@ DECLARE_EXPORT bool OperationFixedTime::extraInstantiate(OperationPlan* o)
       }
       // Merging with the 'previous' operationplan
       x->setQuantity(x->getQuantity() + o->getQuantity());
+      if (o->getOwner())
+        o->setOwner(nullptr);
       return false;
     }
   }
@@ -687,7 +746,7 @@ DECLARE_EXPORT bool OperationFixedTime::extraInstantiate(OperationPlan* o)
 }
 
 
-DECLARE_EXPORT OperationPlanState
+OperationPlanState
 OperationTimePer::setOperationPlanParameters
 (OperationPlan* opplan, double q, Date s, Date e, bool preferEnd, bool execute) const
 {
@@ -864,7 +923,7 @@ OperationTimePer::setOperationPlanParameters
 }
 
 
-DECLARE_EXPORT OperationPlanState OperationRouting::setOperationPlanParameters
+OperationPlanState OperationRouting::setOperationPlanParameters
 (OperationPlan* opplan, double q, Date s, Date e, bool preferEnd, bool execute) const
 {
   // Invalid call to the function
@@ -937,13 +996,13 @@ DECLARE_EXPORT OperationPlanState OperationRouting::setOperationPlanParameters
 }
 
 
-DECLARE_EXPORT bool OperationRouting::extraInstantiate(OperationPlan* o)
+bool OperationRouting::extraInstantiate(OperationPlan* o)
 {
   // Create step suboperationplans if they don't exist yet.
   if (!o->lastsubopplan || o->lastsubopplan->getOperation() == OperationSetup::setupoperation)
   {
     Date d = o->getDates().getEnd();
-    OperationPlan *p = NULL;
+    OperationPlan *p = nullptr;
     // @todo not possible to initialize a routing oplan based on a start date
     if (d != Date::infiniteFuture)
     {
@@ -952,7 +1011,7 @@ DECLARE_EXPORT bool OperationRouting::extraInstantiate(OperationPlan* o)
           getSubOperations().rbegin(); e != getSubOperations().rend(); ++e)
       {
         p = (*e)->getOperation()->createOperationPlan(
-          o->getQuantity(), Date::infinitePast, d, NULL, o, 0, true
+          o->getQuantity(), Date::infinitePast, d, nullptr, o, 0, true
           );
         d = p->getDates().getStart();
       }
@@ -967,7 +1026,7 @@ DECLARE_EXPORT bool OperationRouting::extraInstantiate(OperationPlan* o)
           getSubOperations().begin(); e != getSubOperations().end(); ++e)
       {
         p = (*e)->getOperation()->createOperationPlan(
-          o->getQuantity(), d, Date::infinitePast, NULL, o, 0, true
+          o->getQuantity(), d, Date::infinitePast, nullptr, o, 0, true
           );
         d = p->getDates().getEnd();
       }
@@ -977,7 +1036,7 @@ DECLARE_EXPORT bool OperationRouting::extraInstantiate(OperationPlan* o)
 }
 
 
-DECLARE_EXPORT SearchMode decodeSearchMode(const string& c)
+SearchMode decodeSearchMode(const string& c)
 {
   if (c == "PRIORITY")
     return PRIORITY;
@@ -991,7 +1050,7 @@ DECLARE_EXPORT SearchMode decodeSearchMode(const string& c)
 }
 
 
-DECLARE_EXPORT OperationPlanState
+OperationPlanState
 OperationAlternate::setOperationPlanParameters
 (OperationPlan* opplan, double q, Date s, Date e, bool preferEnd,
  bool execute) const
@@ -1027,7 +1086,7 @@ OperationAlternate::setOperationPlanParameters
 }
 
 
-DECLARE_EXPORT bool OperationAlternate::extraInstantiate(OperationPlan* o)
+bool OperationAlternate::extraInstantiate(OperationPlan* o)
 {
   // Create a suboperationplan if one doesn't exist yet.
   // We use the first effective alternate by default.
@@ -1045,13 +1104,13 @@ DECLARE_EXPORT bool OperationAlternate::extraInstantiate(OperationPlan* o)
       // Create an operationplan instance
       (*altIter)->getOperation()->createOperationPlan(
         o->getQuantity(), o->getDates().getStart(),
-        o->getDates().getEnd(), NULL, o, 0, true);
+        o->getDates().getEnd(), nullptr, o, 0, true);
   }
   return true;
 }
 
 
-DECLARE_EXPORT OperationPlanState
+OperationPlanState
 OperationSplit::setOperationPlanParameters
 (OperationPlan* opplan, double q, Date s, Date e, bool preferEnd,
  bool execute) const
@@ -1075,7 +1134,7 @@ OperationSplit::setOperationPlanParameters
 }
 
 
-DECLARE_EXPORT bool OperationSplit::extraInstantiate(OperationPlan* o)
+bool OperationSplit::extraInstantiate(OperationPlan* o)
 {
   if (o->lastsubopplan && o->lastsubopplan->getOperation() != OperationSetup::setupoperation)
     // Suboperationplans already exist. Nothing to do here.
@@ -1108,7 +1167,7 @@ DECLARE_EXPORT bool OperationSplit::extraInstantiate(OperationPlan* o)
     // Find the first producing flow.
     // In case the split suboperation produces multiple materials this code
     // is not foolproof...
-    const Flow* f = NULL;
+    const Flow* f = nullptr;
     for (Operation::flowlist::const_iterator fiter = (*altIter)->getOperation()->getFlows().begin();
       fiter != (*altIter)->getOperation()->getFlows().end() && !f; ++fiter)
     {
@@ -1119,19 +1178,19 @@ DECLARE_EXPORT bool OperationSplit::extraInstantiate(OperationPlan* o)
     // Create an operationplan instance
     (*altIter)->getOperation()->createOperationPlan(
       o->getQuantity() * (*altIter)->getPriority() / sum_percent / (f ? f->getQuantity() : 1.0),
-      o->getDates().getStart(), enddate, NULL, o, 0, true
+      o->getDates().getStart(), enddate, nullptr, o, 0, true
       );
   }
   return true;
 }
 
 
-DECLARE_EXPORT OperationPlanState OperationSetup::setOperationPlanParameters
+OperationPlanState OperationSetup::setOperationPlanParameters
 (OperationPlan* opplan, double q, Date s, Date e, bool preferEnd, bool execute) const
 {
   // Find or create a loadplan
   OperationPlan::LoadPlanIterator i = opplan->beginLoadPlans();
-  LoadPlan *ldplan = NULL;
+  LoadPlan *ldplan = nullptr;
   if (i != opplan->endLoadPlans())
     // Already exists
     ldplan = &*i;
@@ -1153,7 +1212,7 @@ DECLARE_EXPORT OperationPlanState OperationSetup::setOperationPlanParameters
   }
 
   // Find the setup of the resource at the start of the conversion
-  const Load* lastld = NULL;
+  const Load* lastld = nullptr;
   Date boundary = s ? s : e;
   if (ldplan->getDate() < boundary)
   {
@@ -1224,7 +1283,7 @@ DECLARE_EXPORT OperationPlanState OperationSetup::setOperationPlanParameters
 }
 
 
-DECLARE_EXPORT void Operation::addSubOperationPlan(
+void Operation::addSubOperationPlan(
   OperationPlan* parent, OperationPlan* child, bool fast
   )
 {
@@ -1254,7 +1313,7 @@ DECLARE_EXPORT void Operation::addSubOperationPlan(
 }
 
 
-DECLARE_EXPORT void OperationSplit::addSubOperationPlan(
+void OperationSplit::addSubOperationPlan(
   OperationPlan* parent, OperationPlan* child, bool fast
   )
 {
@@ -1314,7 +1373,7 @@ DECLARE_EXPORT void OperationSplit::addSubOperationPlan(
 }
 
 
-DECLARE_EXPORT void OperationAlternate::addSubOperationPlan(
+void OperationAlternate::addSubOperationPlan(
   OperationPlan* parent, OperationPlan* child, bool fast
   )
 {
@@ -1351,8 +1410,8 @@ DECLARE_EXPORT void OperationAlternate::addSubOperationPlan(
   else if (parent->firstsubopplan->getOperation() != OperationSetup::setupoperation)
   {
     // Remove previous head alternate suboperationplan
-    if (parent->firstsubopplan->getLocked())
-      throw DataException("Can't replace locked alternate suboperationplan");
+    //if (parent->firstsubopplan->getLocked())
+    //  throw DataException("Can't replace locked alternate suboperationplan");
     OperationPlan *tmp = parent->firstsubopplan;
     parent->eraseSubOperationPlan(tmp);
     delete tmp;
@@ -1368,8 +1427,8 @@ DECLARE_EXPORT void OperationAlternate::addSubOperationPlan(
     // Remove previous alternate suboperationplan
     if (s)
     {
-      if (s->getLocked())
-        throw LogicException("Can't replace locked alternate suboperationplan");
+      //if (s->getLocked())
+      //  throw DataException("Can't replace locked alternate suboperationplan");
       parent->eraseSubOperationPlan(s);
       delete s;
     }
@@ -1389,7 +1448,7 @@ DECLARE_EXPORT void OperationAlternate::addSubOperationPlan(
 }
 
 
-DECLARE_EXPORT void OperationRouting::addSubOperationPlan
+void OperationRouting::addSubOperationPlan
   (OperationPlan* parent, OperationPlan* child, bool fast)
 {
   // Check
@@ -1439,7 +1498,7 @@ DECLARE_EXPORT void OperationRouting::addSubOperationPlan
     // We verify that the new operationplan is a valid step in the routing.
     // The child element is inserted at the right place in the list, which
     // considers its status locked/unlocked and its order in the routing.
-    OperationPlan* matchingUnlocked = NULL;
+    OperationPlan* matchingUnlocked = nullptr;
     OperationPlan* prevsub = parent->firstsubopplan;
     if (prevsub && prevsub->getOperation() == OperationSetup::setupoperation)
       prevsub = prevsub->nextsubopplan;
@@ -1520,7 +1579,7 @@ DECLARE_EXPORT void OperationRouting::addSubOperationPlan
 }
 
 
-DECLARE_EXPORT double Operation::setOperationPlanQuantity
+double Operation::setOperationPlanQuantity
   (OperationPlan* oplan, double f, bool roundDown, bool upd, bool execute, Date end) const
 {
   assert(oplan);
@@ -1568,8 +1627,8 @@ DECLARE_EXPORT double Operation::setOperationPlanQuantity
       curmin = getSizeMinimumCalendar()->getValue(end ? end : oplan->getDates().getEnd());
     else
       // Minimum is constant
-      curmin = getSizeMinimum();
-    if (f != 0.0 && curmin > 0.0 && f < curmin)
+      curmin = getSizeMinimum();    
+    if (f != 0.0 && curmin > 0.0 && f <= curmin - ROUNDING_ERROR)
     {
       if (roundDown)
       {
@@ -1603,9 +1662,30 @@ DECLARE_EXPORT double Operation::setOperationPlanQuantity
       double q = mult * getSizeMultiple();
       if (q < curmin)
       {
-        q += getSizeMultiple();
-        if (q > getSizeMaximum())
-          throw DataException("Invalid sizing parameters for operation " + getName());
+        if (roundDown)
+        {
+          // Smaller than the minimum quantity, rounding down means... nothing
+          if (!execute)
+            return 0.0;
+          oplan->quantity = 0.0;
+          // Update the flow and loadplans, and mark for problem detection
+          if (upd)
+            oplan->update();
+          // Update the parent of an alternate operationplan
+          if (oplan->owner && oplan->owner->getOperation()->getType() == *OperationAlternate::metadata)
+          {
+            oplan->owner->quantity = 0.0;
+            if (upd)
+              oplan->owner->resizeFlowLoadPlans();
+          }
+          return 0.0;
+        }
+        else
+        {
+          q += getSizeMultiple();
+          if (q > getSizeMaximum())
+            throw DataException("Invalid sizing parameters for operation " + getName());
+        }
       }
       else if (q > getSizeMaximum())
       {
@@ -1651,7 +1731,7 @@ DECLARE_EXPORT double Operation::setOperationPlanQuantity
 }
 
 
-DECLARE_EXPORT double OperationRouting::setOperationPlanQuantity
+double OperationRouting::setOperationPlanQuantity
   (OperationPlan* oplan, double f, bool roundDown, bool upd, bool execute, Date end) const
 {
   assert(oplan);
@@ -1691,5 +1771,41 @@ DECLARE_EXPORT double OperationRouting::setOperationPlanQuantity
   return newqty;
 }
 
+
+void Operation::setItem(Item* i)
+{
+  // Unlink from previous item
+  if (item)
+  {
+    if (item->firstOperation == this)
+      // Remove from head
+      item->firstOperation = next;
+    else
+    {
+      // Remove from middle
+      Operation *j = item->firstOperation;
+      while (j->next && j->next != this)
+        j = j->next;
+      if (j)
+        j->next = next;
+      else
+        throw LogicException("Corrupted Operation list on Item");
+    }
+  }
+
+  // Update item
+  item = i;
+
+  // Link at the new owner.
+  // We insert ourself at the head of the list.
+  if (item)
+  {
+    next = item->firstOperation;
+    item->firstOperation = this;
+  }
+
+  // Trigger level and cluster recomputation
+  HasLevel::triggerLazyRecomputation();
+}
 
 } // end namespace
